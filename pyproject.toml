@@ -14,8 +14,9 @@ dependencies = [
     "pandas",
     "pyyaml",
     "datasets",
-    "pygraphviz"
+    "pygraphviz",
+    "gsppy"
 ]
 
 [tool.setuptools]
-packages = ["graph_construction", "graph_analysis"]
+packages = ["graph_construction", "graph_analysis", "languatory"]

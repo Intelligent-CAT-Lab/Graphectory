@@ -21,8 +21,8 @@ class ToolDefinition:
             return None
 
         parsed = {
-            "tool": self.tool_name,
-            "subcommand": subcommand,
+            "tool": self.tool_name.strip(),
+            "subcommand": subcommand.strip() if subcommand else None,
             "args": {}
         }
 
@@ -364,7 +364,7 @@ class CommandParser:
             i += 1
 
         return {
-            "command": command,
+            "command": command.strip(),
             "args": args,
             "flags": flags
         }

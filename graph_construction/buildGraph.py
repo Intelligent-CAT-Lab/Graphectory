@@ -14,12 +14,8 @@ import getpass
 import tempfile
 import multiprocessing
 from mapPhase import get_phase
-
-try:
-    import pygraphviz as pgv
-    _HAS_PYGRAPHVIZ = True
-except Exception:
-    _HAS_PYGRAPHVIZ = False
+import pygraphviz as pgv
+_HAS_PYGRAPHVIZ = True
 
 FONT_FAMILY = os.environ.get("GRAPH_FONT", "DejaVu Sans")
 
