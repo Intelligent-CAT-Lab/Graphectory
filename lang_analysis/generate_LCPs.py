@@ -22,10 +22,10 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Literal
 from collections import defaultdict
 
-from languatory.extractSeq import extract_node_sequence
-from languatory.buildPhases import build_phase_sequence_rle
-from languatory.buildLang import build_lang_sequence_rle
-from languatory.computeLCP import PatternMiner
+from lang_construction.extractSeq import extract_node_sequence
+from lang_construction.buildPhases import build_phase_sequence_rle
+from lang_construction.buildLang import build_lang_sequence_rle
+from lang_analysis.computeLCP import PatternMiner
 
 
 # ----------------------- Configuration -----------------------

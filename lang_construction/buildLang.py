@@ -1,13 +1,6 @@
 from __future__ import annotations
 from typing import List, Tuple, Optional
-
-ROLE_ABBR = {
-    'L_reproduce': 'L_reproduce',
-    'L_navigate': 'L_navigate',
-    'patch': 'P',
-    'V_newly_generated_test': 'V_newly_generated_test', 
-    'V_regression_test': 'V_regression_test',
-}
+from lang_construction.mapLang import get_action_role
 
 def build_lang_sequence_rle(step_nodes: List[Tuple[int, dict]]) -> Tuple[List[str], List[int]]:
     """
@@ -23,26 +16,27 @@ def build_lang_sequence_rle(step_nodes: List[Tuple[int, dict]]) -> Tuple[List[st
     roles: List[str] = []
     lens: List[int] = []
     prev: Optional[str] = None
+    created_tests = set()
 
     for _, node in step_nodes:
-        # role = node.get('phase') # to be replaced with get_role function
+        tool = node.get('tool')
+        command = node.get('command')
+        subcommand = node.get('subcommand')
+        args = node.get('args')
+        role = get_action_role(tool, subcommand, command, args,
+                               prev_roles=roles, created_tests=created_tests)
 
         # Skip general or empty
         if not role or role == 'general':
             continue
 
-        # Get abbreviation
-        abbr = ROLE_ABBR.get(str(role).lower())
-        if not abbr:
-            continue
-
         # Run-length encoding
-        if abbr == prev:
+        if role == prev:
             lens[-1] += 1
         else:
-            roles.append(abbr)
+            roles.append(role)
             lens.append(1)
-            prev = abbr
+            prev = role
 
     return roles, lens
 
@@ -58,17 +52,19 @@ def build_lang_sequence(step_nodes: List[Tuple[int, dict]]) -> List[str]:
         List of role for each step
     """
     roles: List[str] = []
+    created_tests = set()
 
     for _, node in step_nodes:
-        # role = node.get('phase') # to be replaced with get_role function
-
+        tool = node.get('tool')
+        command = node.get('command')
+        subcommand = node.get('subcommand')
+        args = node.get('args')
+        role = get_action_role(tool, subcommand, command, args,
+                               prev_roles=roles, created_tests=created_tests)
         # Skip general role or empty
         if not role or role == 'general':
             continue
 
-        # Get abbreviation
-        abbr = ROLE_ABBR.get(str(role).lower())
-        if abbr:
-            roles.append(abbr)
+        roles.append(role)
 
     return roles

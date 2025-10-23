@@ -3,10 +3,10 @@
 """
 Action-role classifier for agent steps (robust to dict/sequence `command`, heredocs, and shell None tool).
 
-Roles:
+Phases:
   - "L_reproduce"            : generating/viewing/executing tests *before* any patch
   - "L_navigate"             : other localization *before* any patch (read/search/browse)
-  - "patch"                  : creating/editing/deleting *non-test* assets (or generic edits)
+  - "P"                  : creating/editing/deleting *non-test* assets (or generic edits)
   - "V_newly_generated_test" : test-related actions *after* a patch that target tests created in this run
   - "V_regression_test"      : test-related actions *after* a patch that target existing tests (or suite w/o paths)
   - "general"                : everything else
@@ -59,7 +59,7 @@ def _extract_paths(args: Any) -> List[str]:
 
 def _has_prior_patch(prev_roles: Optional[Iterable[str]]) -> bool:
     """Whether a 'patch' role has occurred earlier."""
-    return any(r == "patch" for r in (prev_roles or []))
+    return any(r == "P" for r in (prev_roles or []))
 
 def _contains_redirection(tokens: List[str]) -> bool:
     """
@@ -104,7 +104,7 @@ def _sre_role(subcommand: Optional[str]) -> str:
     """Map str_replace_editor subcommand to a role family (will be refined later)."""
     sub = (subcommand or "").lower()
     if sub in SRE_EDIT_SUBCMDS:
-        return "patch"
+        return "P"
     if sub in SRE_READONLY_SUBCMDS:
         return "L_navigate"  # read-only by default; refined by context
     return "general"
@@ -167,7 +167,7 @@ def get_action_role(
 ) -> str:
     """
     Classify an action into a refined role:
-        "L_reproduce" | "L_navigate" | "patch" |
+        "L_reproduce" | "L_navigate" | "P" |
         "V_newly_generated_test" | "V_regression_test" | "general"
 
     Side-effect: updates `created_tests` when detecting creation of test files.
@@ -181,7 +181,7 @@ def get_action_role(
         role = _sre_role(subcommand)
 
         # SRE edit-like subcommands
-        if role == "patch":
+        if role == "P":
             targets = [p for p in paths if _is_test_path(p)]
             if (subcommand or "").lower() == "create":
                 _record_created_tests(targets, created_tests)
@@ -191,7 +191,7 @@ def get_action_role(
                     return _postpatch_validation_kind(targets, created_tests)
                 else:
                     return "L_reproduce"
-            return "patch"
+            return "P"
 
         # SRE 'view' (read-only)
         if role == "L_navigate":
@@ -213,7 +213,7 @@ def get_action_role(
             _record_created_tests(redir_targets, created_tests)
             if any(_is_test_path(t) for t in redir_targets):
                 return _postpatch_validation_kind(redir_targets, created_tests) if has_patch else "L_reproduce"
-            return "patch"
+            return "P"
         # No redirection: treat as execution; classify by pre/post-patch + whether tests are implicated
         if has_patch:
             explicit_test_targets = [p for p in paths if _is_test_path(p)]
@@ -228,7 +228,7 @@ def get_action_role(
             _record_created_tests(redir_targets, created_tests)
             if any(_is_test_path(t) for t in redir_targets):
                 return _postpatch_validation_kind(redir_targets, created_tests) if has_patch else "L_reproduce"
-            return "patch"
+            return "P"
 
         if test_related:
             return _postpatch_validation_kind([p for p in paths if _is_test_path(p)], created_tests) if has_patch else "L_reproduce"
@@ -240,7 +240,7 @@ def get_action_role(
         if targets:
             # In-place edits on tests don't mark as "created"
             return _postpatch_validation_kind(targets, created_tests) if has_patch else "L_reproduce"
-        return "patch"
+        return "P"
 
     # 5) Generic shell with redirection/heredoc/tee → write-like
     if _contains_redirection(tokens):
@@ -248,7 +248,7 @@ def get_action_role(
         _record_created_tests(redir_targets, created_tests)
         if any(_is_test_path(t) for t in redir_targets):
             return _postpatch_validation_kind(redir_targets, created_tests) if has_patch else "L_reproduce"
-        return "patch"
+        return "P"
 
     # 6) Fallbacks
     if test_related:
@@ -268,20 +268,20 @@ if __name__ == "__main__":
 
     # Post-patch: viewing created test -> V_newly_generated_test
     assert get_action_role("str_replace_editor", "view", {"path": "tests/test_file.py"},
-                           None, ["patch"], created_tests=created) == "V_newly_generated_test"
+                           None, ["P"], created_tests=created) == "V_newly_generated_test"
 
     # Post-patch: pytest with no explicit paths -> V_regression_test
-    assert get_action_role(None, None, "pytest", [], ["patch"], created_tests=created) == "V_regression_test"
+    assert get_action_role(None, None, "pytest", [], ["P"], created_tests=created) == "V_regression_test"
 
     # Post-patch: python -c ... > tests/new_test.py -> V_newly_generated_test
     assert get_action_role(None, None, "python",
                            ["-c", "'print()'", ">", "tests/new_test.py"],
-                           ["patch"], created_tests=created) == "V_newly_generated_test"
+                           ["P"], created_tests=created) == "V_newly_generated_test"
     assert "tests/new_test.py" in created
 
     # Non-test edit remains patch
     assert get_action_role(None, None, "sed", ["-i", "s/x/y/g", "src/file.py"],
-                           None, created_tests=created) == "patch"
+                           None, created_tests=created) == "P"
 
     # Pre-patch read-only non-test -> L_navigate
     assert get_action_role(None, None, "grep", ["pattern", "src/file.py"],

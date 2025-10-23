@@ -163,3 +163,31 @@ python -m graph_analysis.batch_runner --data-dir ./my_data --output-dir ./my_out
 Results are saved to `trajectory_metrics.csv`.
 
 ---
+
+## Language Construction
+
+The `lang_construction` module converts trajectory graphs into symbolic sequences ("languatories") representing agent behavior patterns. Users can customize the action alphabet in [lang_construction/mapLang.py](lang_construction/mapLang.py) to investigate whether agents follow intended plans and how strategies evolve during execution. Different alphabet granularities enable analysis at various abstraction levels (e.g., fine-grained tool calls vs. coarse action phases).
+
+---
+
+## Language Analysis
+
+The `lang_analysis` module provides pattern mining and sequence analysis tools, including Longest Common Pattern (LCP) mining to identify recurring behavioral patterns. Additional analysis methods will be added in future releases.
+
+### Generate LCP Matrices
+
+```bash
+# Analyze all agents/models (unified matrix)
+python lang_analysis/generate_LCPs.py --sequence-type lang
+
+# Analyze specific agent/model
+python lang_analysis/generate_LCPs.py \
+  --data-dir ./custom/graphs \
+  --agent OpenHands \
+  --model deepseek-v3 \
+  --sequence-type phases
+```
+
+**Output**: `data/LCP/{sequence_type}_lcp_matrix.txt`
+
+---

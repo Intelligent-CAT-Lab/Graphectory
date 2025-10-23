@@ -19,4 +19,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["graph_construction", "graph_analysis", "languatory"]
+packages = ["graph_construction", "graph_analysis", "lang_construction", "lang_analysis"]
