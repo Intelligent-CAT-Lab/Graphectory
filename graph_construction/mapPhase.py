@@ -14,7 +14,8 @@ Key rule (test generation & execution):
   • If it happens AFTER a "patch" → "validation".
 
 Other bash commands:
-  • grep/find/cat WITHOUT redirection (>, >>) → "localization".
+  • grep/find/cat/nl WITHOUT redirection (>, >>) → "localization" or ("validation" if test-related after patch).
+  • Piped read-only operations (e.g., nl file.py | sed -n '10,20p') → "localization" (or "validation" if test-related after patch).
   • If those commands CREATE/EDIT files (via redirection/heredoc/tee/in-place), treat as edits:
       - if target is **non-test** → "patch"
       - if target is **test** → apply key rule (loc before first patch; validation after)
@@ -35,7 +36,7 @@ TEST_HINTS: Tuple[str, ...] = (
 )
 
 # Commands that typically *read/search* only; with redirection they can become edits.
-READONLY_CMDS: Tuple[str, ...] = ("grep", "find", "cat", "echo", "ls", "head", "tail", "awk")
+READONLY_CMDS: Tuple[str, ...] = ("grep", "find", "cat", "echo", "ls", "head", "tail", "awk", "nl")
 
 # Commands that are clearly *editing* or *creating* content.
 EDIT_CMDS: Tuple[str, ...] = ("sed", "touch")
@@ -94,9 +95,23 @@ def _contains_redirection(tokens: List[str]) -> bool:
     # 'tee' writes to files via pipe
     return any("tee" == t or " tee " in t for t in tokens)
 
+def _is_piped_readonly_operation(cmd: str, tokens: List[str]) -> bool:
+    """
+    Detect if this is a piped read-only operation (e.g., nl file.py | sed -n '10,20p').
+    Returns True if:
+      - The command is a read-only command (nl, cat, grep, etc.)
+      - There's a pipe (|) in the tokens
+      - There's no output redirection (>, >>, tee)
+    This indicates the command is for viewing/filtering only, not editing.
+    """
+    if cmd not in READONLY_CMDS:
+        return False
+    has_pipe = "|" in tokens or any("|" in t for t in tokens)
+    has_output_redir = _contains_redirection(tokens)
+    return has_pipe and not has_output_redir
+
 def _is_test_related(tokens: List[str], paths: List[str]) -> bool:
     """Test-related if any path contains a hint from TEST_HINTS."""
-    haystack = tokens + paths
     return any(any(h in s for h in TEST_HINTS) for s in paths)
 
 def _sre_phase(subcommand: Optional[str]) -> str:
@@ -170,8 +185,15 @@ def get_phase(
         # Default: test/code execution → key rule
         return "validation" if has_patch else "localization"
 
-    # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo)
+    # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl)
     if cmd in READONLY_CMDS:
+        # Piped operations without output redirection (e.g., nl file.py | sed -n '10,20p') are read-only
+        if _is_piped_readonly_operation(cmd, tokens):
+            # Viewing content: test-related AFTER patch → validation; otherwise → localization
+            if _is_test_related(tokens, paths) and has_patch:
+                return "validation"
+            return "localization"
+
         if _contains_redirection(tokens):
             # These become edits when redirecting to files or using tee/heredoc
             return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
@@ -222,6 +244,24 @@ if __name__ == "__main__":
         # Target is test-related and no prior patch → localization (test generation).
         (None, None, "complex_command",
          ["cat << 'EOF' > /workspace/test_hstack_fix.py\nprint('hi')\nEOF"], None, "localization"),
+
+        # nl piped commands (read-only viewing operations)
+        # nl file.py | sed -n '10,20p' - viewing regular file before patch
+        (None, None, "nl", ["filename.py", "|", "sed"], None, "localization"),
+        # nl test_file.py | sed -n '10,20p' - viewing test file before patch
+        (None, None, "nl", ["test_file.py", "|", "sed"], None, "localization"),
+        # nl test_file.py | sed -n '10,20p' - viewing test file AFTER patch
+        (None, None, "nl", ["test_file.py", "|", "sed"], ["patch"], "validation"),
+        # nl file.py | sed -n '10,20p' - viewing regular file AFTER patch
+        (None, None, "nl", ["filename.py", "|", "sed"], ["patch"], "localization"),
+
+        # nl with output redirection (becomes an edit operation)
+        # nl file.py > output.txt - creating/editing non-test file
+        (None, None, "nl", ["file.py", ">", "output.txt"], None, "patch"),
+        # nl file.py > test_output.py - creating/editing test file before patch
+        (None, None, "nl", ["file.py", ">", "test_output.py"], None, "localization"),
+        # nl file.py > test_output.py - creating/editing test file AFTER patch
+        (None, None, "nl", ["file.py", ">", "test_output.py"], ["patch"], "validation"),
     ]
 
     for i, (tool, subcmd, cmd, args, prev, expected) in enumerate(test_cases, 1):
