@@ -11,6 +11,11 @@ Phases:
   - "V_regression_test"      : test-related actions *after* a patch that target existing tests (or suite w/o paths)
   - "general"                : everything else
 
+Piped read-only operations (e.g., nl file.py | sed -n '10,20p'):
+  - If test-related before patch → "L_reproduce"
+  - If test-related after patch → "V_newly_generated_test" or "V_regression_test" (based on created_tests)
+  - If non-test-related → "L_navigate"
+
 State:
   - `created_tests` (set[str]) is updated in-place when a command creates a test file.
 """
@@ -25,7 +30,7 @@ TEST_HINTS: Tuple[str, ...] = (
     "test_", "reproduc", "debug", "_test", "/tests/", "/test/",
 )
 
-READONLY_CMDS: Tuple[str, ...] = ("grep", "find", "cat", "echo", "ls", "head", "tail", "awk")
+READONLY_CMDS: Tuple[str, ...] = ("grep", "find", "cat", "echo", "ls", "head", "tail", "awk", "nl")
 EDIT_CMDS: Tuple[str, ...] = ("sed", "touch")
 SRE_EDIT_SUBCMDS: Tuple[str, ...] = ("create", "str_replace", "insert", "undo_edit")
 SRE_READONLY_SUBCMDS: Tuple[str, ...] = ("view",)
@@ -75,6 +80,21 @@ def _contains_redirection(tokens: List[str]) -> bool:
     if any(any(op in t for op in embedded_ops) for t in tokens):
         return True
     return any("tee" == t or " tee " in t for t in tokens)
+
+def _is_piped_readonly_operation(cmd: str, tokens: List[str]) -> bool:
+    """
+    Detect if this is a piped read-only operation (e.g., nl file.py | sed -n '10,20p').
+    Returns True if:
+      - The command is a read-only command (nl, cat, grep, etc.)
+      - There's a pipe (|) in the tokens
+      - There's no output redirection (>, >>, tee)
+    This indicates the command is for viewing/filtering only, not editing.
+    """
+    if cmd not in READONLY_CMDS:
+        return False
+    has_pipe = "|" in tokens or any("|" in t for t in tokens)
+    has_output_redir = _contains_redirection(tokens)
+    return has_pipe and not has_output_redir
 
 def _is_test_path(s: str) -> bool:
     return any(h in s for h in TEST_HINTS)
@@ -211,9 +231,7 @@ def get_action_role(
             # Generates files via redirection (e.g., python -c ... > tests/test_x.py)
             redir_targets = _paths_after_redirection(tokens)
             _record_created_tests(redir_targets, created_tests)
-            if any(_is_test_path(t) for t in redir_targets):
-                return _postpatch_validation_kind(redir_targets, created_tests) if has_patch else "L_reproduce"
-            return "P"
+            return _postpatch_validation_kind(redir_targets, created_tests) if has_patch else "L_reproduce"
         # No redirection: treat as execution; classify by pre/post-patch + whether tests are implicated
         if has_patch:
             explicit_test_targets = [p for p in paths if _is_test_path(p)]
@@ -221,8 +239,16 @@ def get_action_role(
         else:
             return "L_reproduce" if test_related or cmd == "pytest" else "L_navigate"
 
-    # 3) Read-only commands
+    # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl)
     if cmd in READONLY_CMDS:
+        # Piped operations without output redirection (e.g., nl file.py | sed -n '10,20p') are read-only
+        if _is_piped_readonly_operation(cmd, tokens):
+            # Viewing content: apply role logic based on test-related and pre/post-patch
+            if test_related:
+                test_targets = [p for p in paths if _is_test_path(p)]
+                return _postpatch_validation_kind(test_targets, created_tests) if has_patch else "L_reproduce"
+            return "L_navigate"
+
         if _contains_redirection(tokens):
             redir_targets = _paths_after_redirection(tokens)
             _record_created_tests(redir_targets, created_tests)
@@ -286,5 +312,27 @@ if __name__ == "__main__":
     # Pre-patch read-only non-test -> L_navigate
     assert get_action_role(None, None, "grep", ["pattern", "src/file.py"],
                            None, created_tests=created) == "L_navigate"
+
+    # nl piped commands (read-only viewing operations)
+    # nl file.py | sed -n '10,20p' - viewing regular file before patch
+    assert get_action_role(None, None, "nl", ["filename.py", "|", "sed"],
+                           None, created_tests=created) == "L_navigate"
+
+    # nl test_file.py | sed -n '10,20p' - viewing test file before patch
+    assert get_action_role(None, None, "nl", ["test_file.py", "|", "sed"],
+                           None, created_tests=created) == "L_reproduce"
+
+    # nl test_file.py | sed -n '10,20p' - viewing test file AFTER patch (newly generated)
+    created2 = {"test_file.py"}
+    assert get_action_role(None, None, "nl", ["test_file.py", "|", "sed"],
+                           ["P"], created_tests=created2) == "V_newly_generated_test"
+
+    # nl test_other.py | sed -n '10,20p' - viewing different test file AFTER patch (regression)
+    assert get_action_role(None, None, "nl", ["test_other.py", "|", "sed"],
+                           ["P"], created_tests=created2) == "V_regression_test"
+
+    # nl file.py | sed -n '10,20p' - viewing regular file AFTER patch
+    assert get_action_role(None, None, "nl", ["filename.py", "|", "sed"],
+                           ["P"], created_tests=created) == "L_navigate"
 
     print("All action-role tests passed.")
