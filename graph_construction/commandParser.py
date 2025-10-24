@@ -368,3 +368,41 @@ class CommandParser:
             "args": args,
             "flags": flags
         }
+
+if __name__ == "__main__":
+    parser = CommandParser()
+
+    commands = [
+        "cd /home/user",
+        "grep --color=auto 'pattern' file.txt",
+        "rm -rf /tmp/*",
+        "echo 'Hello, World!' > /testbed/reproduce_error.py",
+        "python3 script.py --input=data.txt --verbose",
+        "cd /project && python3 run.py",
+        "PYTHONPATH=/testbed",
+        "PYTHONPATH=/project python3 script.py --input file.txt && echo \"done\" ; rm temp.log",
+        "nl -ba filename.py | sed -n '10,20p'",
+        "cd /workspace/astropy__astropy__1.3 && python -c \"import astropy; print('Astropy imported successfully')\"",
+        "mkdir -p /testbed/build && echo \"import sys\nimport os\n\nsys.path.insert(0, os.path.abspath('.'))\n\nextensions = [\n        'my-extension'\n]\" > /testbed/conf.py && echo \"This is a test\n==============\n\n.. include:: something-to-include.rst\n\n&REPLACE_ME;\" > /testbed/index.rst && echo \"Testing\n=======\n\n&REPLACE_ME;\" > /testbed/something-to-include.rst && echo \"#!/usr/bin/env python3\n\nfrom sphinx.application import Sphinx\n\n\n__version__ = '1.0'\n\n\ndef subst_vars_replace(app: Sphinx, docname, source):\n    result = source[0]\n    result = result.replace(\"&REPLACE_ME;\", \"REPLACED\")\n    source[0] = result\n\n\ndef setup(app: Sphinx):\n\n    app.connect('source-read', subst_vars_replace)\n\n    return dict(\n        version=__version__,\n        parallel_read_safe=True,\n        parallel_write_safe=True\n    )\" > /testbed/my-extension.py && sphinx-build /testbed /testbed/build && grep -R \"REPLACE_ME\" /testbed/build/*.html",
+        'cat << \'EOF\' > /workspace/test_hstack_fix.py\nimport sympy as sy\n\n# Test case 1: Zero-height matrices\nM1 = sy.Matrix.zeros(0, 0)\nM2 = sy.Matrix.zeros(0, 1)\nM3 = sy.Matrix.zeros(0, 2)\nM4 = sy.Matrix.zeros(0, 3)\nresult = sy.Matrix.hstack(M1, M2, M3, M4).shape\nprint(f"Zero-height hstack result: {result} (should be (0, 6))")\n\n# Test case 2: Non-zero height matrices\nM1 = sy.Matrix.zeros(1, 0)\nM2 = sy.Matrix.zeros(1, 1)\nM3 = sy.Matrix.zeros(1, 2)\nM4 = sy.Matrix.zeros(1, 3)\nresult = sy.Matrix.hstack(M1, M2, M3, M4).shape\nprint(f"Non-zero height hstack result: {result} (should be (1, 6))")\nEOF'
+    ]
+
+    for cmd in commands:
+        result = parser.parse(cmd)
+        print(f"\n>>> {cmd}")
+        for r in result:
+            print(r)
+
+    complex_bash = """
+for file in $(git status --porcelain | grep -E "^(M| M|\\?\\?|A| A)" | cut -c4-); do
+    if [ -f "$file" ] && (file "$file" | grep -q "executable" || git check-attr binary "$file" | grep -q "binary: set"); then
+        git rm -f "$file" 2>/dev/null || rm -f "$file"
+        echo "Removed: $file"
+    fi
+done
+    """
+
+    result = parser.parse(complex_bash)
+    print(f"\n>>> Complex Bash:\n{complex_bash}")
+    for r in result:
+        print(r)
