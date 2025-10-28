@@ -2,7 +2,6 @@
 """
 Mine Longest Common Pattern (LCP) of sequences from trajectory graphs.
 
-Refactored modular architecture:
 - Uses extractSeq to flatten graphs
 - Uses buildPhases or buildLang to generate sequences with RLE
 - Uses PatternMiner to compute LCPs

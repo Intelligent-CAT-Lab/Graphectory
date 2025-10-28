@@ -25,6 +25,8 @@ Output Structure:
     [
         {
             "instance_id": "django__django-10914",
+            "resolution_status": "resolved",
+            "debug_difficulty": "<15 min fix",
             "languatory": ["L_navigate_5", "L_reproduce_3", "P_2", "V_regression_test_4"]
         },
         ...
@@ -68,6 +70,8 @@ AGENT_NAMES_REV = {v: k for k, v in AGENT_NAMES.items()}
 class Languatory:
     """Languatory data for a single instance."""
     instance_id: str
+    resolution_status: str
+    debug_difficulty: str
     languatory: List[str]  # Each element is "Role_runlength", e.g., "P_2", "L_navigate_3"
 
 
@@ -137,9 +141,17 @@ def find_graphectories(path: Path, instance_id: Optional[str] = None) -> List[Pa
 def extract_languatory(graph_json: Dict[str, Any]) -> Optional[Languatory]:
     """Extract languatory from a graphectory JSON."""
     try:
-        # Extract instance_id from graph metadata
+        # Extract from graph metadata
         instance_id = graph_json.get("graph", {}).get("instance_name")
         if not instance_id:
+            return None
+        
+        resolution_status = graph_json.get("graph", {}).get("resolution_status")
+        if not resolution_status:
+            return None
+
+        debug_difficulty = graph_json.get("graph", {}).get("debug_difficulty")
+        if not debug_difficulty:
             return None
 
         # Extract node sequence
@@ -157,6 +169,8 @@ def extract_languatory(graph_json: Dict[str, Any]) -> Optional[Languatory]:
 
         return Languatory(
             instance_id=instance_id,
+            resolution_status=resolution_status,
+            debug_difficulty=debug_difficulty,
             languatory=languatory
         )
 
