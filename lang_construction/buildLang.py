@@ -23,7 +23,8 @@ def build_lang_sequence_rle(step_nodes: List[Tuple[int, dict]]) -> Tuple[List[st
         command = node.get('command')
         subcommand = node.get('subcommand')
         args = node.get('args')
-        role = get_action_role(tool, subcommand, command, args,
+        flags = node.get('flags')
+        role = get_action_role(tool, subcommand, command, args, flags, 
                                prev_roles=roles, created_tests=created_tests)
 
         # Skip general or empty
@@ -59,7 +60,8 @@ def build_lang_sequence(step_nodes: List[Tuple[int, dict]]) -> List[str]:
         command = node.get('command')
         subcommand = node.get('subcommand')
         args = node.get('args')
-        role = get_action_role(tool, subcommand, command, args,
+        flags = node.get('flags')
+        role = get_action_role(tool, subcommand, command, args, flags,
                                prev_roles=roles, created_tests=created_tests)
         # Skip general role or empty
         if not role or role == 'general':

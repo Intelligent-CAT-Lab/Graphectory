@@ -1,28 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Action-role classifier for agent steps (robust to dict/sequence `command`, heredocs, and shell None tool).
+Action-role classifier for agent steps.
 
-Phases:
-  - "L_reproduce"            : generating/viewing/executing tests *before* any patch
-  - "L_navigate"             : other localization *before* any patch (read/search/browse)
-  - "P"                  : creating/editing/deleting *non-test* assets (or generic edits)
-  - "V_newly_generated_test" : test-related actions *after* a patch that target tests created in this run
-  - "V_regression_test"      : test-related actions *after* a patch that target existing tests (or suite w/o paths)
-  - "general"                : everything else
+Phases before first patch ("localization / reproduction"):
+  - L_reproduce : generating / viewing / executing tests (reproducing / understanding bug)
+  - L_navigate  : non-test browsing/searching/reading
+  - P           : creating/editing/deleting non-test assets (or generic edits)
 
-Piped read-only operations (e.g., nl file.py | sed -n '10,20p'):
-  - If test-related before patch → "L_reproduce"
-  - If test-related after patch → "V_newly_generated_test" or "V_regression_test" (based on created_tests)
-  - If non-test-related → "L_navigate"
+Phases after first patch ("validation"):
+  - V_newly_generated_test :
+        Any interaction (create / view / edit / run) with tests that did NOT
+        originally exist in the repo, including:
+          - new concrete test files created in this run (tracked in created_tests)
+          - inline/ephemeral validation code like `python -c "assert ..."`
+            or `python -m adhoc_runner` that is not from disk and not pytest,
+            tracked in created_dynamic_suites
+        Repeats of those same new tests are still newly_generated.
+  - V_regression_test :
+        Any interaction (create / view / edit / run) with tests that DID
+        originally exist in the repo, including re-running pytest or editing
+        existing tests.
+  - general :
+        Post-patch actions that aren't test-related and aren't clearly navigation.
 
-State:
-  - `created_tests` (set[str]) is updated in-place when a command creates a test file.
+We persist across steps:
+  - created_tests: set[str]
+        Paths for test files first created this run.
+        After patch, any interaction with those paths is V_newly_generated_test.
+  - created_dynamic_suites: set[str]
+        Stable keys for inline / ephemeral validation (python -c/-m with no paths).
+        After patch, reusing those is still V_newly_generated_test.
 """
 
 from __future__ import annotations
 import re
-from typing import Iterable, List, Tuple, Any, Optional, Set
+from typing import Iterable, List, Tuple, Any, Optional, Set, Dict, Union
 
 # --------------------------- Configurable Heuristics ---------------------------
 
@@ -30,81 +43,156 @@ TEST_HINTS: Tuple[str, ...] = (
     "test_", "reproduc", "debug", "_test", "/tests/", "/test/",
 )
 
-READONLY_CMDS: Tuple[str, ...] = ("grep", "find", "cat", "echo", "ls", "head", "tail", "awk", "nl")
+READONLY_CMDS: Tuple[str, ...] = (
+    "grep", "find", "cat", "echo", "ls", "head", "tail", "awk", "nl"
+)
 EDIT_CMDS: Tuple[str, ...] = ("sed", "touch")
 SRE_EDIT_SUBCMDS: Tuple[str, ...] = ("create", "str_replace", "insert", "undo_edit")
 SRE_READONLY_SUBCMDS: Tuple[str, ...] = ("view",)
 PY_CMDS: Tuple[str, ...] = ("python", "python3", "python2", "pytest", "pylint")
 
-# --------------------------- Utilities ---------------------------
+_PATHISH = re.compile(r"(^[/~.]|/|\.py$)")
 
-def _flatten_args(args: Any) -> List[str]:
-    """Normalize args into a flat list of lowercase string tokens."""
-    tokens: List[str] = []
-    if isinstance(args, dict):
-        for v in args.values():
+# --------------------------- Flatten / token helpers ---------------------------
+
+def _flatten_any(val: Any) -> List[str]:
+    """
+    Lowercased tokens from arbitrary val:
+      - str -> [val]
+      - list/tuple -> [each]
+      - dict -> include BOTH keys and values
+        (important for python flags like {"c": "assert ..."} which encode -c)
+    """
+    toks: List[str] = []
+    if isinstance(val, dict):
+        for k, v in val.items():
+            if k is not None:
+                toks.append(str(k))
             if v is None:
                 continue
             if isinstance(v, (list, tuple)):
-                tokens.extend(str(x) for x in v)
+                toks.extend(str(x) for x in v)
             else:
-                tokens.append(str(v))
-    elif isinstance(args, (list, tuple)):
-        tokens = [str(x) for x in args]
-    elif isinstance(args, str):
-        tokens = [args]
-    return [t.lower() for t in tokens]
+                toks.append(str(v))
+    elif isinstance(val, (list, tuple)):
+        toks = [str(x) for x in val]
+    elif isinstance(val, str):
+        toks = [val]
+    return [t.lower() for t in toks]
 
-_PATHISH = re.compile(r"(^[/~.]|/|\.py$)")
+def _extract_paths_generic(*vals: Any) -> List[str]:
+    """
+    Heuristic path extraction for non-SRE commands:
+      - starts with '/', '~', or '.'
+      - OR contains '/'
+      - OR endswith '.py'
+    We apply this to command/args/flags in general shell/python use.
+    """
+    all_toks: List[str] = []
+    for v in vals:
+        all_toks.extend(_flatten_any(v))
+    return [t for t in all_toks if _PATHISH.search(t)]
 
-def _extract_paths(args: Any) -> List[str]:
-    """Extract path-like strings from args."""
-    tokens = _flatten_args(args)
-    return [t for t in tokens if _PATHISH.search(t)]
+def _extract_sre_paths(args: Any) -> List[str]:
+    """
+    STRICT path extraction for str_replace_editor:
+    We *only* trust the declared "path" / "paths" fields from the args dict.
+    We do NOT scan other keys like "old_str", "new_str", etc.
+    This prevents us from accidentally treating arbitrary substrings as file paths.
+    """
+    out: List[str] = []
+    if isinstance(args, dict):
+        p = args.get("path")
+        if isinstance(p, str):
+            out.append(p.lower())
+        ps = args.get("paths")
+        if isinstance(ps, (list, tuple)):
+            for x in ps:
+                if isinstance(x, str):
+                    out.append(x.lower())
+    return out
+
+def _gather_command_context(
+    command: Any,
+    args: Any,
+    flags: Any,
+    *,
+    for_sre: bool,
+) -> Tuple[str, List[str], List[str]]:
+    """
+    Build:
+      cmd_str  : base command (lowercased) if `command` is a plain str, else ""
+      tokens   : merged lowered tokens from args + command(+subfields) + flags
+      paths    : merged list of path-like items
+                 - if for_sre=True: use ONLY _extract_sre_paths(args)
+                 - else           : use heuristic _extract_paths_generic(...)
+    """
+    if isinstance(command, str) or command is None:
+        cmd_str = (command or "").lower().strip()
+        cmd_tokens: List[str] = []
+    else:
+        cmd_str = ""
+        cmd_tokens = _flatten_any(command)
+
+    arg_tokens  = _flatten_any(args)
+    flag_tokens = _flatten_any(flags)
+
+    merged_tokens = arg_tokens + cmd_tokens + flag_tokens
+
+    if for_sre:
+        merged_paths = _extract_sre_paths(args)
+    else:
+        merged_paths = _extract_paths_generic(args, command, flags)
+
+    return cmd_str, merged_tokens, merged_paths
+
+# --------------------------- Context / intent helpers ---------------------------
 
 def _has_prior_patch(prev_roles: Optional[Iterable[str]]) -> bool:
-    """Whether a 'patch' role has occurred earlier."""
+    """True iff we've already seen a 'P' (a code patch) earlier in the run."""
     return any(r == "P" for r in (prev_roles or []))
+
+def _is_test_path(s: str) -> bool:
+    """Heuristic: does this look like a test/repro harness path?"""
+    return any(h in s for h in TEST_HINTS)
+
+def _is_test_related(paths: List[str]) -> bool:
+    """Test-related if ANY collected path-like token looks like a test."""
+    return any(_is_test_path(p) for p in paths)
+
+# --------------------------- Shell helpers ---------------------------
 
 def _contains_redirection(tokens: List[str]) -> bool:
     """
-    Detect shell redirection/heredoc/tee implying writes/edits.
-    Handles both separated tokens (">", ">>", "<<") and embedded heredocs like "cat <<'EOF' > file".
+    Detect shell output redirection / heredocs / tee (== writing).
     """
     if not tokens:
         return False
     redir_ops = {">", ">>", "1>", "2>", ">|", "<<<", "<<", "<>", ">&", "2>&1"}
     if any(t in redir_ops or t.startswith((">", ">>", "1>", "2>")) for t in tokens):
         return True
-    embedded_ops = (" <<", "<<", " >>", ">>", " 1>", " 2>", " >", " >|", "<>", ">&", "2>&1")
+    embedded_ops = (
+        " <<", "<<",
+        " >>", ">>",
+        " 1>", " 2>", " >", " >|",
+        "<>", ">&", "2>&1"
+    )
     if any(any(op in t for op in embedded_ops) for t in tokens):
         return True
     return any("tee" == t or " tee " in t for t in tokens)
 
 def _is_piped_readonly_operation(cmd: str, tokens: List[str]) -> bool:
     """
-    Detect if this is a piped read-only operation (e.g., nl file.py | sed -n '10,20p').
-    Returns True if:
-      - The command is a read-only command (nl, cat, grep, etc.)
-      - There's a pipe (|) in the tokens
-      - There's no output redirection (>, >>, tee)
-    This indicates the command is for viewing/filtering only, not editing.
+    Detect "view-only via pipe", e.g. `nl file.py | sed -n '10,20p'`.
     """
     if cmd not in READONLY_CMDS:
         return False
     has_pipe = "|" in tokens or any("|" in t for t in tokens)
-    has_output_redir = _contains_redirection(tokens)
-    return has_pipe and not has_output_redir
-
-def _is_test_path(s: str) -> bool:
-    return any(h in s for h in TEST_HINTS)
-
-def _is_test_related(tokens: List[str], paths: List[str]) -> bool:
-    return any(_is_test_path(p) for p in paths)
+    return has_pipe and not _contains_redirection(tokens)
 
 def _paths_after_redirection(tokens: List[str]) -> List[str]:
     """
-    Best-effort: collect candidate target paths immediately following redirection tokens.
+    Guess file(s) being written: tokens that follow >, >>, etc.
     """
     targets: List[str] = []
     redir_starts = {">", ">>", "1>", "2>", ">|"}
@@ -112,7 +200,11 @@ def _paths_after_redirection(tokens: List[str]) -> List[str]:
     n = len(tokens)
     while i < n:
         t = tokens[i]
-        if t in redir_starts or t.startswith((">", ">>", "1>", "2>")) or (" >" in t):
+        if (
+            t in redir_starts
+            or t.startswith((">", ">>", "1>", "2>"))
+            or (" >" in t)
+        ):
             if i + 1 < n:
                 nxt = tokens[i + 1]
                 if _PATHISH.search(nxt):
@@ -120,219 +212,316 @@ def _paths_after_redirection(tokens: List[str]) -> List[str]:
         i += 1
     return targets
 
+# --------------------------- str_replace_editor helpers ---------------------------
+
 def _sre_role(subcommand: Optional[str]) -> str:
-    """Map str_replace_editor subcommand to a role family (will be refined later)."""
+    """
+    Rough mapping from str_replace_editor subcommand to a role family.
+    """
     sub = (subcommand or "").lower()
     if sub in SRE_EDIT_SUBCMDS:
         return "P"
     if sub in SRE_READONLY_SUBCMDS:
-        return "L_navigate"  # read-only by default; refined by context
+        return "L_navigate"
     return "general"
 
-def _normalize_command_and_merge_args(command: Any, args: Any) -> Tuple[str, List[str], List[str]]:
-    """
-    Normalize `command` into a lowercase command string (may be empty if not a simple str)
-    and merge any command-embedded arguments into the args token/path sets.
-
-    Returns: (cmd_str, merged_tokens, merged_paths)
-    """
-    if isinstance(command, str) or command is None:
-        cmd_str = (command or "").lower().strip()
-        cmd_tokens = []
-    else:
-        cmd_str = ""
-        cmd_tokens = _flatten_args(command)
-
-    arg_tokens = _flatten_args(args)
-    merged_tokens = arg_tokens + cmd_tokens
-    merged_paths  = _extract_paths(args) + _extract_paths(command)
-    return cmd_str, merged_tokens, merged_paths
-
-def _postpatch_validation_kind(
-    targets: List[str], created_tests: Optional[Set[str]]
-) -> str:
-    """
-    Decide V_newly_generated_test vs V_regression_test given explicit targets.
-    If no explicit targets, default to regression tests.
-    """
-    if not targets:
-        return "V_regression_test"
-    if not created_tests:
-        return "V_regression_test"
-    for p in targets:
-        if p in created_tests:
-            return "V_newly_generated_test"
-    return "V_regression_test"
+# --------------------------- Test provenance tracking ---------------------------
 
 def _record_created_tests(
-    targets: List[str], created_tests: Optional[Set[str]]
+    targets: List[str],
+    created_tests: Optional[Set[str]]
 ) -> None:
-    """Add test targets to `created_tests` if present."""
+    """
+    If we write to something that looks like a test file,
+    remember that path as "newly created this run".
+    """
     if created_tests is None:
         return
     for p in targets:
         if _is_test_path(p):
             created_tests.add(p)
 
+def _dynamic_key_for_inline_test(
+    cmd: str,
+    tokens: List[str],
+    paths: List[str],
+) -> Optional[str]:
+    """
+    Detect inline / ephemeral validation (like python -c/-m assertions) that is NOT
+    executing a file path from disk.
+
+    Dynamic if ALL:
+      - cmd is python / python2 / python3
+      - we see an inline-exec style flag ("-c", "-m", "c", "m", or "-cFOO"/"-mFOO")
+      - there are NO path-like args in `paths`
+      - it's not just delegating to pytest / py.test
+    """
+    if cmd not in ("python", "python2", "python3"):
+        return None
+
+    def _is_inline_flag(tok: str) -> bool:
+        return (
+            tok in ("-c", "-m", "c", "m")
+            or tok.startswith("-c")
+            or tok.startswith("-m")
+        )
+
+    # If it's just invoking pytest, that's regression, not "new".
+    for i, tok in enumerate(tokens):
+        if tok.startswith("pytest") or tok.startswith("py.test"):
+            return None
+        if tok in ("-m", "m") and i + 1 < len(tokens):
+            nxt = tokens[i + 1]
+            if nxt.startswith("pytest") or nxt.startswith("py.test"):
+                return None
+        if tok.startswith("-m") and tok not in ("-m",):
+            maybe_mod = tok[2:]
+            if maybe_mod.startswith("pytest") or maybe_mod.startswith("py.test"):
+                return None
+
+    # must have inline exec flag
+    if not any(_is_inline_flag(t) for t in tokens):
+        return None
+
+    # if we reference on-disk paths, it's not ephemeral inline
+    if paths:
+        return None
+
+    # build stable key for reuse:
+    # module after -m / m / "-mFOO"
+    for i, tok in enumerate(tokens):
+        if tok in ("-m", "m") and i + 1 < len(tokens):
+            mod = tokens[i + 1]
+            return f"module:{mod[:200]}"
+        if tok.startswith("-m") and tok not in ("-m",):
+            mod = tok[2:]
+            if mod:
+                return f"module:{mod[:200]}"
+
+    # inline code after -c / c / "-cCODE"
+    for i, tok in enumerate(tokens):
+        if tok in ("-c", "c") and i + 1 < len(tokens):
+            code_snip = tokens[i + 1]
+            return f"inline:{code_snip[:200]}"
+        if tok.startswith("-c") and tok not in ("-c",):
+            code_snip = tok[2:]
+            if code_snip:
+                return f"inline:{code_snip[:200]}"
+
+    return "inline:<unknown>"
+
+# --------------------------- Post-patch validation decision ---------------------------
+
+def _postpatch_validation_kind(
+    targets: List[str],
+    *,
+    created_tests: Optional[Set[str]],
+    dynamic_key: Optional[str],
+    created_dynamic_suites: Optional[Set[str]],
+) -> str:
+    """
+    After patch: choose V_newly_generated_test vs V_regression_test.
+    """
+    if targets:
+        if created_tests:
+            for p in targets:
+                if p in created_tests:
+                    return "V_newly_generated_test"
+        return "V_regression_test"
+
+    if dynamic_key:
+        if created_dynamic_suites is not None:
+            created_dynamic_suites.add(dynamic_key)
+        return "V_newly_generated_test"
+
+    return "V_regression_test"
+
 # --------------------------- Core classification ---------------------------
 
 def get_action_role(
     tool: Optional[str],
     subcommand: Optional[str],
-    command: Optional[str | dict | list | tuple],
+    command: Optional[Union[str, dict, list, tuple]],
     args: Any,
+    flags: Optional[Dict[str, Any]] = None,
     prev_roles: Optional[Iterable[str]] = None,
     *,
     created_tests: Optional[Set[str]] = None,
+    created_dynamic_suites: Optional[Set[str]] = None,
 ) -> str:
     """
-    Classify an action into a refined role:
-        "L_reproduce" | "L_navigate" | "P" |
-        "V_newly_generated_test" | "V_regression_test" | "general"
+    Classify a step into:
+      "L_reproduce", "L_navigate", "P",
+      "V_newly_generated_test", "V_regression_test",
+      "general"
 
-    Side-effect: updates `created_tests` when detecting creation of test files.
+    flags:
+        e.g. {"c": "assert ..."} for python -c inline code
     """
-    cmd, tokens, paths = _normalize_command_and_merge_args(command, args)
+    flags = flags or {}
+    is_sre = (tool or "").lower() == "str_replace_editor"
+
+    cmd, tokens, paths = _gather_command_context(
+        command,
+        args,
+        flags,
+        for_sre=is_sre,
+    )
+
     has_patch = _has_prior_patch(prev_roles)
-    test_related = _is_test_related(tokens, paths)
+    test_related = _is_test_related(paths)
 
-    # 1) str_replace_editor decisions (tool-specific)
-    if (tool or "").lower() == "str_replace_editor":
-        role = _sre_role(subcommand)
+    # 1) str_replace_editor
+    if is_sre:
+        role_family = _sre_role(subcommand)
 
-        # SRE edit-like subcommands
-        if role == "P":
-            targets = [p for p in paths if _is_test_path(p)]
+        # NOTE: for SRE we already restricted `paths` using ONLY args["path"/"paths"],
+        # so `paths` here is clean and does NOT accidentally pull from old/new text.
+        targets = paths  # already filtered
+
+        if role_family == "P":
             if (subcommand or "").lower() == "create":
                 _record_created_tests(targets, created_tests)
 
             if test_related:
                 if has_patch:
-                    return _postpatch_validation_kind(targets, created_tests)
-                else:
-                    return "L_reproduce"
+                    return _postpatch_validation_kind(
+                        targets,
+                        created_tests=created_tests,
+                        dynamic_key=None,
+                        created_dynamic_suites=created_dynamic_suites,
+                    )
+                return "L_reproduce"
+
             return "P"
 
-        # SRE 'view' (read-only)
-        if role == "L_navigate":
+        if role_family == "L_navigate":
             if test_related:
                 if has_patch:
-                    targets = [p for p in paths if _is_test_path(p)]
-                    return _postpatch_validation_kind(targets, created_tests)
-                else:
-                    return "L_reproduce"
+                    return _postpatch_validation_kind(
+                        targets,
+                        created_tests=created_tests,
+                        dynamic_key=None,
+                        created_dynamic_suites=created_dynamic_suites,
+                    )
+                return "L_reproduce"
             return "L_navigate"
 
-        return role  # general
+        return role_family  # "general"
 
-    # 2) Python / pytest / pylint
+    # 2) Python / pytest / pylint / etc.
     if cmd in PY_CMDS:
         if _contains_redirection(tokens):
-            # Generates files via redirection (e.g., python -c ... > tests/test_x.py)
             redir_targets = _paths_after_redirection(tokens)
             _record_created_tests(redir_targets, created_tests)
-            return _postpatch_validation_kind(redir_targets, created_tests) if has_patch else "L_reproduce"
-        # No redirection: treat as execution; classify by pre/post-patch + whether tests are implicated
+            return (
+                _postpatch_validation_kind(
+                    [p for p in redir_targets if _is_test_path(p)],
+                    created_tests=created_tests,
+                    dynamic_key=None,
+                    created_dynamic_suites=created_dynamic_suites,
+                )
+                if has_patch
+                else "L_reproduce"
+            )
+
         if has_patch:
             explicit_test_targets = [p for p in paths if _is_test_path(p)]
-            return _postpatch_validation_kind(explicit_test_targets, created_tests)
-        else:
-            return "L_reproduce" if test_related or cmd == "pytest" else "L_navigate"
+            dyn_key = _dynamic_key_for_inline_test(cmd, tokens, paths)
 
-    # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl)
+            if dyn_key and created_dynamic_suites is not None and dyn_key in created_dynamic_suites:
+                return "V_newly_generated_test"
+
+            return _postpatch_validation_kind(
+                explicit_test_targets,
+                created_tests=created_tests,
+                dynamic_key=dyn_key,
+                created_dynamic_suites=created_dynamic_suites,
+            )
+        else:
+            dyn_key = _dynamic_key_for_inline_test(cmd, tokens, paths)
+            return "L_reproduce" if (test_related or cmd == "pytest" or dyn_key) else "general"
+
+    # 3) Read-only commands
     if cmd in READONLY_CMDS:
-        # Piped operations without output redirection (e.g., nl file.py | sed -n '10,20p') are read-only
         if _is_piped_readonly_operation(cmd, tokens):
-            # Viewing content: apply role logic based on test-related and pre/post-patch
-            if test_related:
-                test_targets = [p for p in paths if _is_test_path(p)]
-                return _postpatch_validation_kind(test_targets, created_tests) if has_patch else "L_reproduce"
+            test_targets = [p for p in paths if _is_test_path(p)]
+            if test_targets:
+                return (
+                    _postpatch_validation_kind(
+                        test_targets,
+                        created_tests=created_tests,
+                        dynamic_key=None,
+                        created_dynamic_suites=created_dynamic_suites,
+                    )
+                    if has_patch else
+                    "L_reproduce"
+                )
             return "L_navigate"
 
         if _contains_redirection(tokens):
             redir_targets = _paths_after_redirection(tokens)
             _record_created_tests(redir_targets, created_tests)
             if any(_is_test_path(t) for t in redir_targets):
-                return _postpatch_validation_kind(redir_targets, created_tests) if has_patch else "L_reproduce"
+                return (
+                    _postpatch_validation_kind(
+                        [p for p in redir_targets if _is_test_path(p)],
+                        created_tests=created_tests,
+                        dynamic_key=None,
+                        created_dynamic_suites=created_dynamic_suites,
+                    )
+                    if has_patch else
+                    "L_reproduce"
+                )
             return "P"
 
-        if test_related:
-            return _postpatch_validation_kind([p for p in paths if _is_test_path(p)], created_tests) if has_patch else "L_reproduce"
+        test_targets = [p for p in paths if _is_test_path(p)]
+        if test_targets:
+            return (
+                _postpatch_validation_kind(
+                    test_targets,
+                    created_tests=created_tests,
+                    dynamic_key=None,
+                    created_dynamic_suites=created_dynamic_suites,
+                )
+                if has_patch else
+                "L_reproduce"
+            )
         return "L_navigate"
 
-    # 4) Edit/creation commands (sed/touch)
-    if cmd in EDIT_CMDS or (cmd == "sed"):
-        targets = [p for p in paths if _is_test_path(p)]
-        if targets:
-            # In-place edits on tests don't mark as "created"
-            return _postpatch_validation_kind(targets, created_tests) if has_patch else "L_reproduce"
+    # 4) Edit/creation commands like sed/touch
+    if cmd in EDIT_CMDS or cmd == "sed":
+        edit_targets = [p for p in paths if _is_test_path(p)]
+        if edit_targets:
+            return (
+                _postpatch_validation_kind(
+                    edit_targets,
+                    created_tests=created_tests,
+                    dynamic_key=None,
+                    created_dynamic_suites=created_dynamic_suites,
+                )
+                if has_patch else
+                "L_reproduce"
+            )
         return "P"
 
-    # 5) Generic shell with redirection/heredoc/tee → write-like
+    # 5) Generic shell redirection (>, >>, tee, etc.)
     if _contains_redirection(tokens):
         redir_targets = _paths_after_redirection(tokens)
         _record_created_tests(redir_targets, created_tests)
-        if any(_is_test_path(t) for t in redir_targets):
-            return _postpatch_validation_kind(redir_targets, created_tests) if has_patch else "L_reproduce"
+        test_targets = [p for p in redir_targets if _is_test_path(p)]
+        if test_targets:
+            return (
+                _postpatch_validation_kind(
+                    test_targets,
+                    created_tests=created_tests,
+                    dynamic_key=None,
+                    created_dynamic_suites=created_dynamic_suites,
+                )
+                if has_patch else
+                "L_reproduce"
+            )
         return "P"
 
-    # 6) Fallbacks
-    if test_related:
-        return "V_regression_test" if has_patch else "L_reproduce"
-    return "L_navigate" if not has_patch else "general"
-
-
-# --------------------------- Self-checks ---------------------------
-if __name__ == "__main__":
-    created = set()
-
-    # Pre-patch: grep writing a new test -> L_reproduce + record
-    assert get_action_role(None, None, "grep",
-                           ["def test_foo():", "file.py", ">", "tests/test_file.py"],
-                           None, created_tests=created) == "L_reproduce"
-    assert "tests/test_file.py" in created
-
-    # Post-patch: viewing created test -> V_newly_generated_test
-    assert get_action_role("str_replace_editor", "view", {"path": "tests/test_file.py"},
-                           None, ["P"], created_tests=created) == "V_newly_generated_test"
-
-    # Post-patch: pytest with no explicit paths -> V_regression_test
-    assert get_action_role(None, None, "pytest", [], ["P"], created_tests=created) == "V_regression_test"
-
-    # Post-patch: python -c ... > tests/new_test.py -> V_newly_generated_test
-    assert get_action_role(None, None, "python",
-                           ["-c", "'print()'", ">", "tests/new_test.py"],
-                           ["P"], created_tests=created) == "V_newly_generated_test"
-    assert "tests/new_test.py" in created
-
-    # Non-test edit remains patch
-    assert get_action_role(None, None, "sed", ["-i", "s/x/y/g", "src/file.py"],
-                           None, created_tests=created) == "P"
-
-    # Pre-patch read-only non-test -> L_navigate
-    assert get_action_role(None, None, "grep", ["pattern", "src/file.py"],
-                           None, created_tests=created) == "L_navigate"
-
-    # nl piped commands (read-only viewing operations)
-    # nl file.py | sed -n '10,20p' - viewing regular file before patch
-    assert get_action_role(None, None, "nl", ["filename.py", "|", "sed"],
-                           None, created_tests=created) == "L_navigate"
-
-    # nl test_file.py | sed -n '10,20p' - viewing test file before patch
-    assert get_action_role(None, None, "nl", ["test_file.py", "|", "sed"],
-                           None, created_tests=created) == "L_reproduce"
-
-    # nl test_file.py | sed -n '10,20p' - viewing test file AFTER patch (newly generated)
-    created2 = {"test_file.py"}
-    assert get_action_role(None, None, "nl", ["test_file.py", "|", "sed"],
-                           ["P"], created_tests=created2) == "V_newly_generated_test"
-
-    # nl test_other.py | sed -n '10,20p' - viewing different test file AFTER patch (regression)
-    assert get_action_role(None, None, "nl", ["test_other.py", "|", "sed"],
-                           ["P"], created_tests=created2) == "V_regression_test"
-
-    # nl file.py | sed -n '10,20p' - viewing regular file AFTER patch
-    assert get_action_role(None, None, "nl", ["filename.py", "|", "sed"],
-                           ["P"], created_tests=created) == "L_navigate"
-
-    print("All action-role tests passed.")
+    # 6) Fallback
+    return "general"
