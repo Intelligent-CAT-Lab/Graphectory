@@ -21,8 +21,8 @@ Phases after first patch ("validation"):
         Any interaction (create / view / edit / run) with tests that DID
         originally exist in the repo, including re-running pytest or editing
         existing tests.
-  - general :
-        Post-patch actions that aren't test-related and aren't clearly navigation.
+  
+general : Everything else.
 
 We persist across steps:
   - created_tests: set[str]

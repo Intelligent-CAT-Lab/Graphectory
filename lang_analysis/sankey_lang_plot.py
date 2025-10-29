@@ -6,18 +6,15 @@ Matplotlib Sankey (Alluvial) - Language transition visualization
 Visualizes transitions between language alphabets (L_reproduce, L_navigate, P, V_newly_generated_test, V_regression_test)
 across the first 10 transitions per agent-model pair.
 
-Input:
-  - lang_path: Path to languatory.json file (optional)
-  - agent: Agent name (optional, used with model for default path)
-  - model: Model name (optional, used with agent for default path)
-  - Default: data/{agent}/langs/{model}/languatory.json
+Input modes:
+  1. Multi-mode (default): Scans all agents/models
+  2. Agent-specific mode (--agent): Processes all default models for given agent
+  3. Single-mode (--lang-path or --agent + --model): Processes specific file
 
 Output directory structure (defaults to figures/):
-  1. Multi-mode (default): Scans all agents/models, outputs one 2*4 grid of sankey transition plots
-     Output: {output_dir}/lang_sankey/all_sankey.pdf
-
-  2. Single-mode (--lang-path or --agent + --model): Requires specific data
-     Output: {output_dir}/lang_sankey/{agent}_{model}_sankey.pdf
+  - Multi-mode: {output_dir}/lang_sankey/all_sankey.pdf
+  - Agent-specific: {output_dir}/lang_sankey/{agent}_sankey.pdf
+  - Single-mode: {output_dir}/lang_sankey/{agent}_{model}_sankey.pdf
 """
 
 from __future__ import annotations
@@ -103,6 +100,7 @@ TITLE_SIZE = 18             # Panel titles
 # Link visibility controls
 MIN_LINK_SHARE_TO_DRAW = 0.0    # hide links with less than this fraction of column total
 
+MAX_TRANSITIONS = 10  # Maximum number of transitions to visualize
 
 # ----------------------- Data Loading -----------------------
 
@@ -356,8 +354,9 @@ def draw_sankey_on_ax(
     max_t: int,
     col_total: Dict[int, int],
     force_max_t: Optional[int] = None,
+    show_transition_labels: bool = False,
 ):
-    """Draw a single sankey into an existing Axes (no iteration labels here)."""
+    """Draw a single sankey into an existing Axes."""
     use_max_t = force_max_t if force_max_t is not None else max_t
 
     # Consistent x-lims across top/bottom for this column
@@ -373,10 +372,13 @@ def draw_sankey_on_ax(
     node_spans = layout_columns(node_volume, max_t)
     link_slices = flow_slices_from_spans(node_spans, link_counts)
 
-    # Faint column guides (no numbers)
+    # Faint column guides and optional transition labels
     for t in range(use_max_t + 1):
         x = x_positions[t]
         ax.plot([x, x], [0, 1], color=(0, 0, 0, 0.04), linewidth=0.8, zorder=0)
+        if show_transition_labels:
+            ax.text(x, -0.06, f"{t}", ha="center", va="top",
+                    fontsize=LABEL_SIZE + 1, color=(0, 0, 0, 0.75), transform=ax.transData)
 
     # Links
     for (a, ta, b, tb), v in sorted(
@@ -482,103 +484,95 @@ def draw_single_sankey(
 
 def generate_sankey_multi(
     base_data_dir: Path,
-    output_dir: Path
+    output_dir: Path,
+    target_agent: Optional[str] = None
 ) -> None:
     """
-    Generate unified Sankey diagram grid for all agents and models.
+    Generate unified Sankey diagram grid for agents and models.
 
-    Output: {output_dir}/lang_sankey/all_sankey.pdf
+    Args:
+        base_data_dir: Base data directory
+        output_dir: Output directory
+        target_agent: If specified, only process this agent; otherwise process all agents
+
+    Output:
+        - All agents: {output_dir}/lang_sankey/all_sankey.pdf
+        - Single agent: {output_dir}/lang_sankey/{agent}_sankey.pdf
     """
-    fig = plt.figure(figsize=(FIG_W, FIG_H), constrained_layout=False)
+    # Determine which agents to process
+    agents_to_process = [target_agent] if target_agent else AGENTS
+    num_rows = len(agents_to_process)
 
-    # 3 rows: top (SA), middle (arrow/ticks), bottom (OH)
-    gs = GridSpec(
-        3, 4, figure=fig,
-        height_ratios=[1.0, 0.14, 1.0],
-        left=0.02, right=0.98,
-        top=0.94, bottom=0.04,
-        wspace=0.08,
-        hspace=0.20
-    )
+    # Setup figure and grid
+    if num_rows == 1:
+        # Single agent: simpler layout without middle row, smaller height
+        fig = plt.figure(figsize=(FIG_W, FIG_H * 0.5), constrained_layout=False)
+        gs = GridSpec(1, 4, figure=fig, left=0.02, right=0.98, top=0.88, bottom=0.14, wspace=0.08)
+    else:
+        # Two agents: include middle arrow row
+        fig = plt.figure(figsize=(FIG_W, FIG_H), constrained_layout=False)
+        gs = GridSpec(
+            3, 4, figure=fig,
+            height_ratios=[1.0, 0.14, 1.0],
+            left=0.02, right=0.98,
+            top=0.94, bottom=0.04,
+            wspace=0.08,
+            hspace=0.20
+        )
 
     # Precompute data & shared max_t per column (model)
     shared_max_t_by_col = {}
     data_by_cell = {}
 
     for col, model in enumerate(DISPLAY_MODELS):
-        # SWE-agent
-        lang_path_sa = base_data_dir / "SWE-agent" / "langs" / model / "languatory.json"
-        if lang_path_sa.exists():
-            seq_sa = load_languatory(lang_path_sa)
-            nv_sa, lc_sa, mt_sa, ct_sa = build_link_counts(seq_sa, max_transitions=10)
-            data_by_cell[(0, col)] = (nv_sa, lc_sa, mt_sa, ct_sa)
-            print(f"[INFO] Loaded SWE-agent/{model}: {len(seq_sa)} sequences")
-        else:
-            data_by_cell[(0, col)] = ({}, {}, 0, {})
-            print(f"[WARN] Not found: {lang_path_sa}")
+        col_max_t = 0
 
-        # OpenHands
-        lang_path_oh = base_data_dir / "OpenHands" / "langs" / model / "languatory.json"
-        if lang_path_oh.exists():
-            seq_oh = load_languatory(lang_path_oh)
-            nv_oh, lc_oh, mt_oh, ct_oh = build_link_counts(seq_oh, max_transitions=10)
-            data_by_cell[(2, col)] = (nv_oh, lc_oh, mt_oh, ct_oh)
-            print(f"[INFO] Loaded OpenHands/{model}: {len(seq_oh)} sequences")
-        else:
-            data_by_cell[(2, col)] = ({}, {}, 0, {})
-            print(f"[WARN] Not found: {lang_path_oh}")
+        for row_idx, agent in enumerate(agents_to_process):
+            grid_row = row_idx * 2 if num_rows > 1 else 0  # Map to actual grid row
 
-        # Shared max_t
-        mt_sa = data_by_cell[(0, col)][2]
-        mt_oh = data_by_cell[(2, col)][2]
-        shared_max_t_by_col[col] = max(mt_sa, mt_oh)
+            lang_path = base_data_dir / agent / "langs" / model / "languatory.json"
+            if lang_path.exists():
+                sequences = load_languatory(lang_path)
+                nv, lc, mt, ct = build_link_counts(sequences, max_transitions=MAX_TRANSITIONS)
+                data_by_cell[(grid_row, col)] = (nv, lc, mt, ct)
+                col_max_t = max(col_max_t, mt)
+                print(f"[INFO] Loaded {agent}/{model}: {len(sequences)} sequences")
+            else:
+                data_by_cell[(grid_row, col)] = ({}, {}, 0, {})
+                print(f"[WARN] Not found: {lang_path}")
+
+        shared_max_t_by_col[col] = col_max_t
 
     # Draw grid
     for col, model in enumerate(DISPLAY_MODELS):
-        # top (SWE-agent)
-        ax_top = fig.add_subplot(gs[0, col])
-        nv, lc, mt, ct = data_by_cell[(0, col)]
-        agent_name_top = "SWE-agent"
         model_name = MODEL_ABBR[model]
-        if lc:
-            draw_sankey_on_ax(
-                ax=ax_top,
-                title=format_title(agent_name_top, model_name),
-                node_volume=nv,
-                link_counts=lc,
-                max_t=mt,
-                col_total=ct,
-                force_max_t=shared_max_t_by_col[col],
-            )
-        else:
-            ax_top.axis("off")
-            ax_top.text(0.5, 0.5,
-                        f"{format_title(agent_name_top, model_name)}\n(no data)",
+
+        for row_idx, agent in enumerate(agents_to_process):
+            grid_row = row_idx * 2 if num_rows > 1 else 0
+            ax = fig.add_subplot(gs[grid_row, col])
+            nv, lc, mt, ct = data_by_cell[(grid_row, col)]
+
+            if lc:
+                draw_sankey_on_ax(
+                    ax=ax,
+                    title=format_title(agent, model_name),
+                    node_volume=nv,
+                    link_counts=lc,
+                    max_t=mt,
+                    col_total=ct,
+                    force_max_t=shared_max_t_by_col[col],
+                    show_transition_labels=(num_rows == 1),  # Show labels in single-agent mode
+                )
+            else:
+                ax.axis("off")
+                ax.text(0.5, 0.5,
+                        f"{format_title(agent, model_name)}\n(no data)",
                         ha="center", va="center", fontsize=LABEL_SIZE+2)
 
-        # middle arrow/ticks (shared for column)
-        ax_mid = fig.add_subplot(gs[1, col])
-        draw_transition_midaxis(ax_mid, shared_max_t_by_col[col])
-
-        # bottom (OpenHands)
-        ax_bot = fig.add_subplot(gs[2, col])
-        nv, lc, mt, ct = data_by_cell[(2, col)]
-        agent_name_bot = "OpenHands"
-        if lc:
-            draw_sankey_on_ax(
-                ax=ax_bot,
-                title=format_title(agent_name_bot, model_name),
-                node_volume=nv,
-                link_counts=lc,
-                max_t=mt,
-                col_total=ct,
-                force_max_t=shared_max_t_by_col[col],
-            )
-        else:
-            ax_bot.axis("off")
-            ax_bot.text(0.5, 0.5,
-                        f"{format_title(agent_name_bot, model_name)}\n(no data)",
-                        ha="center", va="center", fontsize=LABEL_SIZE+2)
+        # Add middle arrow/ticks axis only for multi-agent mode
+        if num_rows > 1:
+            ax_mid = fig.add_subplot(gs[1, col])
+            draw_transition_midaxis(ax_mid, shared_max_t_by_col[col])
 
     # Shared legend (alphabet colors with full labels)
     handles = [
@@ -586,20 +580,35 @@ def generate_sankey_multi(
                       edgecolor=(0, 0, 0, 0.25), linewidth=0.5)
         for role in ALPHABETS
     ]
+
+    # Adjust legend position based on number of agents
+    legend_y = 0.97 if num_rows == 1 else 0.99
+
     fig.legend(
         handles=handles,
         loc="upper center",
         ncol=len(ALPHABETS),
         frameon=False,
         fontsize=LABEL_SIZE + 1,
-        bbox_to_anchor=(0.5, 0.99),
+        bbox_to_anchor=(0.5, legend_y),
         borderaxespad=0,
         columnspacing=1.0,
         handlelength=1.3,
         handleheight=1.0
     )
 
-    out_path = output_dir / "lang_sankey" / "all_sankey.pdf"
+    # Add "Transition index" label for single-agent mode
+    if num_rows == 1:
+        fig.text(0.5, 0.04, "Transition index", ha="center", va="bottom",
+                fontsize=LABEL_SIZE + 2, color=(0, 0, 0, 0.75), weight="normal")
+
+    # Determine output filename
+    if target_agent:
+        out_filename = f"{target_agent}_sankey.pdf"
+    else:
+        out_filename = "all_sankey.pdf"
+
+    out_path = output_dir / "lang_sankey" / out_filename
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=220, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
@@ -626,7 +635,7 @@ def generate_sankey_single(
 
     print(f"[INFO] Loaded {len(sequences)} sequences")
 
-    node_volume, link_counts, max_t, col_total = build_link_counts(sequences, max_transitions=10)
+    node_volume, link_counts, max_t, col_total = build_link_counts(sequences, max_transitions=MAX_TRANSITIONS)
 
     model_abbr = MODEL_ABBR.get(model, model)
     title = format_title(agent, model_abbr)
@@ -658,79 +667,82 @@ def main(
 
     Args:
         lang_path: Path to languatory.json file (overrides agent/model)
-        agent: Agent name (used with model to build default path)
-        model: Model name (used with agent to build default path)
-        output_dir: Output directory (defaults to data/ or figures/)
+        agent: Agent name (if model given: single mode; else: agent-specific mode)
+        model: Model name (used with agent for single mode)
+        output_dir: Output directory (defaults to figures/)
     """
-    # Determine mode
-    is_single_mode = lang_path is not None or (agent is not None and model is not None)
+    # Resolve paths
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
 
-    # Resolve output directory
-    if output_dir is None:
-        script_dir = Path(__file__).parent
-        project_root = script_dir.parent
-        output_path = project_root / "figures"
-    else:
-        output_path = Path(output_dir)
+    output_path = Path(output_dir) if output_dir else project_root / "figures"
 
-    if is_single_mode:
-        # Single mode
-        if lang_path:
-            lang_file = Path(lang_path)
-        elif agent and model:
-            script_dir = Path(__file__).parent
-            project_root = script_dir.parent
-            lang_file = project_root / "data" / agent / "langs" / model / "languatory.json"
-        else:
-            print("[ERROR] Single mode requires either --lang-path or both --agent and --model")
+    # Determine mode based on parameters
+    if lang_path:
+        # Explicit file mode
+        lang_file = Path(lang_path)
+        if not lang_file.exists():
+            print(f"[ERROR] File not found: {lang_file}")
             return
+
+        # Infer agent/model from path
+        parts = lang_file.parts
+        try:
+            langs_idx = parts.index("langs")
+            agent = agent or (parts[langs_idx - 1] if langs_idx >= 1 else "Unknown")
+            model = model or (parts[langs_idx + 1] if langs_idx + 1 < len(parts) else "Unknown")
+        except (ValueError, IndexError):
+            agent = agent or "Unknown"
+            model = model or "Unknown"
+
+        print(f"[INFO] Mode: Single file ({agent}/{model})")
+        print(f"[INFO] Lang file: {lang_file}")
+        print(f"[INFO] Output directory: {output_path}\n")
+
+        generate_sankey_single(lang_file, output_path, agent, model)
+
+    elif agent and model:
+        # Single agent/model mode
+        base_data_dir = project_root / "data"
+        lang_file = base_data_dir / agent / "langs" / model / "languatory.json"
 
         if not lang_file.exists():
             print(f"[ERROR] File not found: {lang_file}")
             return
 
-        # Infer agent/model from path if not provided
-        if not agent or not model:
-            parts = lang_file.parts
-            try:
-                langs_idx = parts.index("langs")
-                if langs_idx >= 1:
-                    agent = agent or parts[langs_idx - 1]
-                    model = model or parts[langs_idx + 1]
-            except (ValueError, IndexError):
-                agent = agent or "Unknown"
-                model = model or "Unknown"
-
-        print(f"[INFO] Mode: Single ({agent}/{model})")
+        print(f"[INFO] Mode: Single agent/model ({agent}/{model})")
         print(f"[INFO] Lang file: {lang_file}")
-        print(f"[INFO] Output directory: {output_path}")
-        print()
+        print(f"[INFO] Output directory: {output_path}\n")
 
-        generate_sankey_single(
-            lang_path=lang_file,
-            output_dir=output_path,
-            agent=agent,
-            model=model
-        )
+        generate_sankey_single(lang_file, output_path, agent, model)
+
+    elif agent:
+        # Agent-specific multi-model mode
+        base_data_dir = project_root / "data"
+
+        if not (base_data_dir / agent).exists():
+            print(f"[ERROR] Agent directory not found: {base_data_dir / agent}")
+            return
+
+        print(f"[INFO] Mode: Agent-specific multi-model ({agent})")
+        print(f"[INFO] Data directory: {base_data_dir}")
+        print(f"[INFO] Output directory: {output_path}\n")
+
+        generate_sankey_multi(base_data_dir, output_path, target_agent=agent)
+
     else:
-        # Multi mode
-        script_dir = Path(__file__).parent
-        project_root = script_dir.parent
+        # Full multi-agent/model mode
         base_data_dir = project_root / "data"
 
         if not base_data_dir.exists():
             print(f"[ERROR] Data directory not found: {base_data_dir}")
             return
 
-        print(f"[INFO] Mode: Multi-agent/model")
+        print(f"[INFO] Mode: Full multi-agent/model")
         print(f"[INFO] Data directory: {base_data_dir}")
-        print(f"[INFO] Output directory: {output_path}")
-        print()
+        print(f"[INFO] Output directory: {output_path}\n")
 
-        generate_sankey_multi(
-            base_data_dir=base_data_dir,
-            output_dir=output_path
-        )
+        generate_sankey_multi(base_data_dir, output_path)
 
 
 if __name__ == "__main__":
@@ -741,37 +753,38 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Multi-mode: Scan all agents/models (default)
-  # Output: figures/lang_sankey/all_sankey.pdf
+  # 1. Full multi-mode: All agents/models (default)
+  #    Output: figures/lang_sankey/all_sankey.pdf
   python sankey_lang_plot.py
 
-  # Single-mode: Specific languatory.json file
-  # Output: figures/lang_sankey/SWE-agent_deepseek-v3_sankey.pdf
-  python sankey_lang_plot.py --lang-path data/SWE-agent/langs/deepseek-v3/languatory.json
+  # 2. Agent-specific mode: All models for one agent
+  #    Output: figures/lang_sankey/OpenHands_sankey.pdf
+  python sankey_lang_plot.py --agent OpenHands
 
-  # Single-mode: Use agent and model (default path)
-  # Output: results/lang_sankey/OpenHands_deepseek-v3_sankey.pdf
-  python sankey_lang_plot.py --agent OpenHands --model deepseek-v3 --output-dir ./results
+  # 3. Single agent/model mode
+  #    Output: figures/lang_sankey/OpenHands_deepseek-v3_sankey.pdf
+  python sankey_lang_plot.py --agent OpenHands --model deepseek-v3
 
-  # Single-mode: Test with sample data
-  python sankey_lang_plot.py --agent SWE-agent --model deepseek-v3 \\
-                             --lang-path data/samples/SWE-agent/langs/deepseek-v3/languatory.json
+  # 4. Direct file mode with custom output
+  #    Output: results/lang_sankey/SWE-agent_deepseek-v3_sankey.pdf
+  python sankey_lang_plot.py --lang-path data/SWE-agent/langs/deepseek-v3/languatory.json \\
+                             --output-dir ./results
         """
     )
     parser.add_argument(
         "--lang-path",
         type=str,
-        help="Path to languatory.json file (overrides --agent and --model)"
+        help="Path to languatory.json file (single file mode)"
     )
     parser.add_argument(
         "--agent",
         type=str,
-        help="Agent name (used with --model to build default path)"
+        help="Agent name (alone: all models for agent; with --model: single mode)"
     )
     parser.add_argument(
         "--model",
         type=str,
-        help="Model name (used with --agent to build default path)"
+        help="Model name (requires --agent for single mode)"
     )
     parser.add_argument(
         "--output-dir",
