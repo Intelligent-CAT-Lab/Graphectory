@@ -55,24 +55,32 @@ def extract_phase_prefix(lang_item: str) -> str:
 
 def extract_first_appearances(languatory: List[str]) -> Dict[str, int]:
     """
-    Extract first appearance indices for each unique phase.
+    Extract first appearance indices for each unique phase, accounting for run lengths.
 
     Args:
         languatory: List of language items with run-length suffixes
 
     Returns:
-        Dictionary mapping phase prefix to its first appearance index
+        Dictionary mapping phase prefix to its cumulative index (sum of previous run lengths)
 
     Example:
         ["L_navigate_2", "L_reproduce_2", "L_navigate_1", "P_1"]
-        -> {"L_navigate": 0, "L_reproduce": 1, "P": 3}
+        -> {"L_navigate": 0, "L_reproduce": 2, "P": 5}
     """
     first_appearances = {}
+    cumulative_idx = 0
 
-    for idx, item in enumerate(languatory):
+    for item in languatory:
         phase = extract_phase_prefix(item)
+
+        # Extract run length from suffix
+        parts = item.rsplit('_', 1)
+        run_length = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 1
+
         if phase not in first_appearances:
-            first_appearances[phase] = idx
+            first_appearances[phase] = cumulative_idx
+
+        cumulative_idx += run_length
 
     return first_appearances
 
@@ -99,8 +107,8 @@ def check_trajectory_compliance(
                       "V_regression_test_3", "V_newly_generated_test_1"]
         expected_order = ("L_navigate", "L_reproduce", "P", "V_newly_generated_test")
 
-        First appearances: L_navigate=0, L_reproduce=1, P=3, V_newly_generated_test=5
-        Indices: [0, 1, 3, 5] - strictly increasing, so returns True
+        First appearances: L_navigate=0, L_reproduce=2, P=5, V_newly_generated_test=9
+        Indices: [0, 2, 5, 9] - strictly increasing, so returns True
     """
     first_appearances = extract_first_appearances(languatory)
 
