@@ -7,12 +7,15 @@ Mine Longest Common Pattern (LCP) of sequences from trajectory graphs.
 - Uses PatternMiner to compute LCPs
 - Supports both phase and language role sequences
 
-Two modes:
+Three modes:
 1. Multi-mode (default): Scans all agents/models, outputs unified matrix
-   Output: {output_dir}/LCP/{sequence_type}_lcp_matrix.txt
+   Output: {output_dir}/LCP/{sequence_type}/all_lcp_matrix.txt
 
-2. Single-mode (custom data_dir): Requires --agent and --model
-   Output: {output_dir}/LCP/{agent}/{model}/{sequence_type}_lcp_matrix.txt
+2. Agent-specific mode (--agent): Processes all default models for given agent
+   Output: {output_dir}/LCP/{sequence_type}/{agent}_lcp_matrix.txt
+
+3. Single-mode (--agent + --model): Processes specific agent/model
+   Output: {output_dir}/LCP/{sequence_type}/{agent}_{model}_lcp_matrix.txt
 """
 
 from __future__ import annotations
@@ -158,15 +161,17 @@ def center_text(text: str, width: int) -> str:
 
 
 class MultiMatrixRenderer:
-    """Renders multi-agent/model LCP matrix."""
+    """Renders multi-agent/model LCP matrix with dynamic layout."""
 
     COL_STATUS = 10
     COL_DIFF = 12
     COL_CELL = 24
     SEP_BETWEEN_GROUPS = "  "
 
-    def __init__(self, miner: PatternMiner):
+    def __init__(self, miner: PatternMiner, agents: List[str], models: List[str]):
         self.miner = miner
+        self.agents = agents
+        self.models = models
 
     def format_cell(self, sequences_rle: List[dict]) -> str:
         """Format a single cell with the top-1 longest pattern."""
@@ -201,49 +206,60 @@ class MultiMatrixRenderer:
             Formatted matrix string
         """
         lines = []
-
-        # Header row 1: Agent abbreviations (SA | OH)
-        group_width = 4 * self.COL_CELL + 3 * 2
         left_pad = " " * (self.COL_STATUS + 2 + self.COL_DIFF)
-        header1 = (
-            left_pad +
-            center_text(AGENT_ABBR["SWE-agent"], group_width) +
-            self.SEP_BETWEEN_GROUPS +
-            center_text(AGENT_ABBR["OpenHands"], group_width)
-        )
-        lines.append(header1)
 
-        # Header row 2: Model abbreviations
-        model_headers = []
-        for _ in AGENTS:
-            for model in DISPLAY_MODELS:
-                model_headers.append(f"{MODEL_ABBR[model]:<{self.COL_CELL}}")
-        header2 = left_pad + "  ".join(model_headers)
-        lines.append(header2)
+        # Single agent mode: simpler header
+        if len(self.agents) == 1:
+            agent = self.agents[0]
+            agent_abbr = AGENT_ABBR.get(agent, agent)
 
-        # Separator
-        lines.append("-" * len(header2))
+            # Header with agent name
+            lines.append(f"{left_pad}Agent: {agent_abbr}")
+
+            # Model headers
+            model_headers = [f"{MODEL_ABBR.get(m, m):<{self.COL_CELL}}" for m in self.models]
+            header_line = left_pad + "  ".join(model_headers)
+            lines.append(header_line)
+            lines.append("-" * len(header_line))
+
+        else:
+            # Multi-agent mode: agent groups with model columns
+            group_width = len(self.models) * self.COL_CELL + (len(self.models) - 1) * 2
+
+            # Header row 1: Agent abbreviations
+            agent_headers = []
+            for agent in self.agents:
+                agent_abbr = AGENT_ABBR.get(agent, agent)
+                agent_headers.append(center_text(agent_abbr, group_width))
+            header1 = left_pad + self.SEP_BETWEEN_GROUPS.join(agent_headers)
+            lines.append(header1)
+
+            # Header row 2: Model abbreviations
+            model_headers = []
+            for _ in self.agents:
+                for model in self.models:
+                    model_headers.append(f"{MODEL_ABBR.get(model, model):<{self.COL_CELL}}")
+            header2 = left_pad + "  ".join(model_headers)
+            lines.append(header2)
+            lines.append("-" * len(header2))
 
         # Body: Iterate through statuses and difficulties
         for status in ["resolved", "unresolved"]:
-            # Status header
             lines.append(f"{status.capitalize():<{self.COL_STATUS}}")
 
-            # Difficulty rows
             for diff_key, diff_label in zip(DIFF_KEYS, DIFF_LABELS_LOWER):
                 left = f"{'':>{self.COL_STATUS}}  {diff_label:<{self.COL_DIFF}}"
 
                 # Collect cells for all agent/model combinations
                 cells = []
-                for agent in AGENTS:
-                    for model in DISPLAY_MODELS:
+                for agent in self.agents:
+                    for model in self.models:
                         grouped = per_unit_data.get((agent, model), {})
                         cell = self.get_cell_for_group(grouped, status, diff_key)
                         cells.append(f"{cell:<{self.COL_CELL}}")
 
                 lines.append(left + "  " + "  ".join(cells))
 
-            # Spacer between status blocks
             lines.append("")
 
         return "\n".join(lines)
@@ -309,16 +325,30 @@ def generate_lcp_multi(
     output_dir: Path,
     sequence_type: SequenceType,
     min_support: float,
-    max_period_len: int
+    max_period_len: int,
+    target_agent: Optional[str] = None
 ) -> None:
     """
-    Generate unified LCP matrix for all agents and models.
+    Generate unified LCP matrix for agents and models.
 
-    Output: {output_dir}/LCP/{sequence_type}_lcp_matrix.txt
+    Args:
+        base_data_dir: Base data directory
+        output_dir: Output directory
+        sequence_type: Type of sequence ('phases' or 'lang')
+        min_support: Minimum support threshold
+        max_period_len: Maximum pattern length
+        target_agent: If specified, only process this agent
+
+    Output:
+        - All agents: {output_dir}/LCP/{sequence_type}/all_lcp_matrix.txt
+        - Single agent: {output_dir}/LCP/{sequence_type}/{agent}_lcp_matrix.txt
     """
+    # Determine which agents to process
+    agents_to_process = [target_agent] if target_agent else AGENTS
+
     per_unit_data: Dict[Tuple[str, str], Dict[Tuple[str, str], List[dict]]] = {}
 
-    for agent in AGENTS:
+    for agent in agents_to_process:
         for model in DISPLAY_MODELS:
             graph_dir = base_data_dir / agent / "graphs" / model
 
@@ -336,12 +366,18 @@ def generate_lcp_multi(
 
     # Render and write
     miner = PatternMiner(min_support=min_support, max_period_len=max_period_len)
-    renderer = MultiMatrixRenderer(miner)
+    renderer = MultiMatrixRenderer(miner, agents=agents_to_process, models=DISPLAY_MODELS)
 
     print("\n[INFO] Rendering matrix...")
     matrix_text = renderer.render_matrix(per_unit_data)
 
-    output_path = output_dir / "LCP" / f"{sequence_type}_lcp_matrix.txt"
+    # Determine output filename
+    if target_agent:
+        out_filename = f"{target_agent}_lcp_matrix.txt"
+    else:
+        out_filename = "all_lcp_matrix.txt"
+
+    output_path = output_dir / "LCP" / sequence_type / out_filename
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -351,7 +387,7 @@ def generate_lcp_multi(
 
 
 def generate_lcp_single(
-    graph_dir: Path,
+    base_data_dir: Path,
     output_dir: Path,
     agent: str,
     model: str,
@@ -362,8 +398,14 @@ def generate_lcp_single(
     """
     Generate LCP matrix for a single agent/model.
 
-    Output: {output_dir}/LCP/{agent}/{model}/{sequence_type}_lcp_matrix.txt
+    Output: {output_dir}/LCP/{sequence_type}/{agent}_{model}_lcp_matrix.txt
     """
+    graph_dir = base_data_dir / agent / "graphs" / model
+
+    if not graph_dir.exists():
+        print(f"[ERROR] Graph directory not found: {graph_dir}")
+        return
+
     print(f"[INFO] Processing {agent}/{model}...")
     grouped = collect_sequences(graph_dir, sequence_type)
 
@@ -377,7 +419,7 @@ def generate_lcp_single(
     print("\n[INFO] Rendering matrix...")
     matrix_text = renderer.render_matrix(grouped)
 
-    output_path = output_dir / "LCP" / agent / model / f"{sequence_type}_lcp_matrix.txt"
+    output_path = output_dir / "LCP" / sequence_type / f"{agent}_{model}_lcp_matrix.txt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -387,76 +429,71 @@ def generate_lcp_single(
 
 
 def main(
-    data_dir: Optional[str] = None,
-    output_dir: Optional[str] = None,
     agent: Optional[str] = None,
     model: Optional[str] = None,
+    output_dir: Optional[str] = None,
     sequence_type: SequenceType = "phases"
 ) -> None:
     """
     Main entry point.
 
     Args:
-        data_dir: Base data directory (defaults to <project_root>/data)
-        output_dir: Output directory (defaults to data_dir)
-        agent: Agent name (required if data_dir is custom)
-        model: Model name (required if data_dir is custom)
+        agent: Agent name (if model given: single mode; else: agent-specific mode)
+        model: Model name (used with agent for single mode)
+        output_dir: Output directory (defaults to stats/)
         sequence_type: Type of sequence to use ('phases' or 'lang')
     """
-    # Determine mode
-    is_default_mode = data_dir is None
-
     # Resolve paths
-    if is_default_mode:
-        script_dir = Path(__file__).parent
-        project_root = script_dir.parent
-        data_path = project_root / "data"
-    else:
-        data_path = Path(data_dir)
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    base_data_dir = project_root / "data"
 
-    if output_dir is None:
-        output_path = data_path
-    else:
-        output_path = Path(output_dir)
+    output_path = Path(output_dir) if output_dir else project_root / "stats"
 
-    if not data_path.exists():
-        print(f"[ERROR] Data directory not found: {data_path}")
+    if not base_data_dir.exists():
+        print(f"[ERROR] Data directory not found: {base_data_dir}")
         return
 
-    # Validate arguments based on mode
-    if not is_default_mode:
-        if not agent or not model:
-            print("[ERROR] When using custom data-dir, both --agent and --model are required")
-            return
-
-        graph_dir = data_path
-        if not graph_dir.exists():
-            print(f"[ERROR] Graph directory not found: {graph_dir}")
-            return
-
-    # Execute
-    print(f"[INFO] Data directory: {data_path}")
+    # Execute based on mode
+    print(f"[INFO] Data directory: {base_data_dir}")
     print(f"[INFO] Output directory: {output_path}")
     print(f"[INFO] Sequence type: {sequence_type}")
 
-    if is_default_mode:
-        print(f"[INFO] Mode: Multi-agent/model")
+    if agent and model:
+        # Single agent/model mode
+        print(f"[INFO] Mode: Single agent/model ({agent}/{model})")
         print()
-        generate_lcp_multi(
-            base_data_dir=data_path,
+        generate_lcp_single(
+            base_data_dir=base_data_dir,
             output_dir=output_path,
+            agent=agent,
+            model=model,
             sequence_type=sequence_type,
             min_support=MIN_SUPPORT,
             max_period_len=MAX_PERIOD_LEN
         )
-    else:
-        print(f"[INFO] Mode: Single ({agent}/{model})")
+    elif agent:
+        # Agent-specific multi-model mode
+        if agent not in AGENTS:
+            print(f"[WARN] Agent '{agent}' not in default AGENTS list")
+
+        print(f"[INFO] Mode: Agent-specific multi-model ({agent})")
         print()
-        generate_lcp_single(
-            graph_dir=data_path,
+        generate_lcp_multi(
+            base_data_dir=base_data_dir,
             output_dir=output_path,
-            agent=agent,
-            model=model,
+            sequence_type=sequence_type,
+            min_support=MIN_SUPPORT,
+            max_period_len=MAX_PERIOD_LEN,
+            target_agent=agent
+        )
+    else:
+        # Full multi-agent/model mode
+        print(f"[INFO] Mode: Full multi-agent/model")
+        print()
+        generate_lcp_multi(
+            base_data_dir=base_data_dir,
+            output_dir=output_path,
             sequence_type=sequence_type,
             min_support=MIN_SUPPORT,
             max_period_len=MAX_PERIOD_LEN
@@ -471,40 +508,37 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Multi-mode: Scan all agents/models (default)
-  # Output: data/LCP/phases_lcp_matrix.txt
+  # 1. Full multi-mode: All agents/models (default)
+  #    Output: stats/LCP/phases/all_lcp_matrix.txt
   python generate_LCPs.py
 
-  # Single-mode: Custom data directory for specific agent/model
-  # Output: results/LCP/OpenHands/deepseek-v3/phases_lcp_matrix.txt
-  python generate_LCPs.py --data-dir ./custom/graphs \\
-                          --agent OpenHands \\
-                          --model deepseek-v3 \\
-                          --output-dir ./results
+  # 2. Agent-specific mode: All models for one agent
+  #    Output: stats/LCP/phases/OpenHands_lcp_matrix.txt
+  python generate_LCPs.py --agent OpenHands
 
-  # Generate language sequences
-  python generate_LCPs.py --sequence-type lang
+  # 3. Single agent/model mode
+  #    Output: stats/LCP/phases/OpenHands_deepseek-v3_lcp_matrix.txt
+  python generate_LCPs.py --agent OpenHands --model deepseek-v3
+
+  # 4. Generate language sequences with custom output directory
+  #    Output: results/LCP/lang/all_lcp_matrix.txt
+  python generate_LCPs.py --sequence-type lang --output-dir ./results
         """
-    )
-    parser.add_argument(
-        "--data-dir",
-        type=str,
-        help="Data directory. If not specified, uses default multi-mode. If specified, requires --agent and --model."
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        help="Output directory (default: same as data-dir)"
     )
     parser.add_argument(
         "--agent",
         type=str,
-        help="Agent name (required when using custom data-dir)"
+        help="Agent name (alone: all models for agent; with --model: single mode)"
     )
     parser.add_argument(
         "--model",
         type=str,
-        help="Model name (required when using custom data-dir)"
+        help="Model name (requires --agent for single mode)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="Output directory (default: stats/)"
     )
     parser.add_argument(
         "--sequence-type",
@@ -517,9 +551,8 @@ Examples:
     args = parser.parse_args()
 
     main(
-        data_dir=args.data_dir,
-        output_dir=args.output_dir,
         agent=args.agent,
         model=args.model,
+        output_dir=args.output_dir,
         sequence_type=args.sequence_type
     )

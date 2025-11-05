@@ -1,0 +1,15 @@
+                        Agent: SA
+                        DSK-V3                    DSK-R1                    Dev                       CLD-4                   
+------------------------------------------------------------------------------------------------------------------------------
+Resolved  
+            easy          ⟨L_navigate, P, V_newly_generated_test⟩ (67%)  ⟨L_navigate, P, V_newly_generated_test, V_regression_test⟩ (55%)  ⟨L_navigate, L_reproduce, P, V_newly_generated_test⟩ (69%)  ⟨P, (V_regression_test, V_newly_generated_test)^4, V_regression_test⟩ (79%)
+            medium        ⟨L_navigate, P, V_newly_generated_test⟩ (79%)  ⟨L_navigate, P, V_newly_generated_test, V_regression_test⟩ (61%)  ⟨L_navigate, L_reproduce, P, V_newly_generated_test⟩ (82%)  ⟨(V_regression_test, V_newly_generated_test)^5, V_regression_test⟩ (70%)
+            hard          ⟨P, (V_newly_generated_test_2, V_regression_test)^5⟩ (33%)  ⟨L_reproduce_2, L_navigate_2, P_4⟩ (50%)  ⟨L_reproduce_2, P, (V_newly_generated_test, V_regression_test)^3, P_3, V_regression_test, L_navigate_24⟩ (33%)  ⟨L_navigate_2, P, (V_regression_test, V_newly_generated_test)^4, V_regression_test⟩ (92%)
+            very hard     —                         —                         —                         ⟨(L_navigate_7, L_reproduce)^2, (P, L_navigate)^6, P⟩ (100%)
+
+Unresolved
+            easy          ⟨L_navigate, P, V_newly_generated_test⟩ (58%)  ⟨L_navigate, P, (V_newly_generated_test, V_regression_test)^2⟩ (40%)  ⟨L_navigate, L_reproduce, P, V_newly_generated_test⟩ (68%)  ⟨(V_regression_test, V_newly_generated_test)^5, V_regression_test⟩ (69%)
+            medium        ⟨L_navigate, P, V_newly_generated_test⟩ (69%)  ⟨L_navigate, P, V_newly_generated_test⟩ (53%)  ⟨L_navigate, L_reproduce, P, V_newly_generated_test⟩ (77%)  ⟨(V_regression_test, V_newly_generated_test)^5, V_regression_test⟩ (57%)
+            hard          ⟨L_navigate, P, V_newly_generated_test⟩ (59%)  ⟨(L_navigate, P)^2⟩ (53%)  ⟨L_navigate, L_reproduce, P, V_newly_generated_test⟩ (77%)  ⟨P, (V_regression_test, V_newly_generated_test)^4, V_regression_test⟩ (59%)
+            very hard     ⟨(P, L_navigate)^9, P⟩ (33%)  ⟨L_navigate_2, P, V_newly_generated_test_2⟩ (100%)  ⟨L_reproduce_6, (L_navigate_3, P_2)^2, (V_newly_generated_test, V_regression_test, L_navigate)^3⟩ (33%)  ⟨L_reproduce_2, L_navigate_6, (P, V_regression_test)^2, (V_newly_generated_test, V_regression_test_7)^7⟩ (50%)
+
