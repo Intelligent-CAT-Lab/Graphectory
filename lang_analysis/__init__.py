@@ -1,1 +1,1 @@
-"""Graph analysis package for trajectory analysis."""
+"""Graph analysis package for agent trajectory analysis."""
