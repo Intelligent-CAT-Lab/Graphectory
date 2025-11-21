@@ -15,7 +15,8 @@ dependencies = [
     "pyyaml",
     "datasets",
     "pygraphviz",
-    "gsppy"
+    "gsppy",
+    "scipy"
 ]
 
 [tool.setuptools]

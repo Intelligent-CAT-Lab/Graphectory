@@ -4,12 +4,32 @@ Plan Hypothesis Test: deepseek-v3
 
 Expected Phase Order (by first appearance): L_navigate → L_reproduce → P → V_newly_generated_test
 
-Total Trajectories: 498
-Compliant Trajectories: 99
-Non-Compliant Trajectories: 399
+--------------------------------------------------------------------------------
+Breakdown by Resolution Status:
+--------------------------------------------------------------------------------
 
-Compliance Rate: 19.88% (99/498)
-95% Confidence Interval: [16.61%, 23.61%]
+Resolved:
+  Total: 191
+  Compliant: 37
+  Non-Compliant: 154
+  Compliance Rate: 19.37% (37/191)
+  95% CI: [14.39%, 25.56%]
+
+Unresolved:
+  Total: 306
+  Compliant: 62
+  Non-Compliant: 244
+  Compliance Rate: 20.26% (62/306)
+  95% CI: [16.14%, 25.12%]
+
+--------------------------------------------------------------------------------
+Statistical Association (Resolution Status ↔ Compliance):
+--------------------------------------------------------------------------------
+Chi-square test: χ² = 0.0159, p = 0.8996
+Significance: not significant (p ≥ 0.05)
+Phi coefficient: φ = 0.0057
+Effect size: negligible
+Sample size: n = 497
 
 --------------------------------------------------------------------------------
 Compliant Instances (99):
@@ -115,7 +135,7 @@ Compliant Instances (99):
   - sympy__sympy-24066
 
 --------------------------------------------------------------------------------
-Non-Compliant Instances (399):
+Non-Compliant Instances (398):
 --------------------------------------------------------------------------------
   - astropy__astropy-13033
   - astropy__astropy-13236
@@ -471,7 +491,6 @@ Non-Compliant Instances (399):
   - sphinx-doc__sphinx-9591
   - sphinx-doc__sphinx-9602
   - sphinx-doc__sphinx-9658
-  - sphinx-doc__sphinx-9673
   - sphinx-doc__sphinx-9698
   - sphinx-doc__sphinx-9711
   - sympy__sympy-11618

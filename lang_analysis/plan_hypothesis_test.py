@@ -23,6 +23,7 @@ import math
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
+from scipy import stats
 
 
 @dataclass
@@ -158,12 +159,66 @@ def calculate_confidence_interval(
     return p, lower, upper
 
 
+def compute_resolution_compliance_correlation(
+    resolution_stats: Dict[str, Tuple[int, int, List[str], List[str]]]
+) -> Dict[str, float]:
+    """
+    Compute statistical correlation between resolution status and compliance.
+
+    Uses Chi-square test for independence and Phi coefficient for effect size.
+
+    Args:
+        resolution_stats: Dict mapping resolution status to (compliant_count, total_count, compliant_ids, non_compliant_ids)
+
+    Returns:
+        Dict containing:
+            - chi2: Chi-square statistic
+            - p_value: P-value for the test
+            - phi: Phi coefficient (effect size)
+            - cramers_v: Cramer's V (alternative effect size measure)
+    """
+    # Extract counts for 2x2 contingency table
+    # Rows: resolved, unresolved
+    # Cols: compliant, non-compliant
+    resolved_compliant = resolution_stats.get("resolved", [0, 0, [], []])[0]
+    resolved_total = resolution_stats.get("resolved", [0, 0, [], []])[1]
+    resolved_non_compliant = resolved_total - resolved_compliant
+
+    unresolved_compliant = resolution_stats.get("unresolved", [0, 0, [], []])[0]
+    unresolved_total = resolution_stats.get("unresolved", [0, 0, [], []])[1]
+    unresolved_non_compliant = unresolved_total - unresolved_compliant
+
+    # Contingency table
+    contingency_table = [
+        [resolved_compliant, resolved_non_compliant],
+        [unresolved_compliant, unresolved_non_compliant]
+    ]
+
+    # Chi-square test
+    chi2, p_value, dof, expected = stats.chi2_contingency(contingency_table)
+
+    # Phi coefficient (effect size for 2x2 table)
+    n = resolved_total + unresolved_total
+    phi = math.sqrt(chi2 / n) if n > 0 else 0.0
+
+    # Cramer's V (same as Phi for 2x2 table)
+    cramers_v = phi
+
+    return {
+        "chi2": chi2,
+        "p_value": p_value,
+        "phi": phi,
+        "cramers_v": cramers_v,
+        "n": n
+    }
+
+
 def test_model(
     agent: str,
     model: str,
     data_dir: str,
     expected_order: Tuple[str, ...]
-) -> Tuple[int, int, List[str], List[str]]:
+) -> Tuple[int, int, List[str], List[str], Dict[str, Tuple[int, int, List[str], List[str]]]]:
     """
     Test a single model's trajectories for plan compliance.
 
@@ -174,7 +229,8 @@ def test_model(
         expected_order: Expected phase order
 
     Returns:
-        Tuple of (compliant_count, total_count, compliant_ids, non_compliant_ids)
+        Tuple of (compliant_count, total_count, compliant_ids, non_compliant_ids, resolution_stats)
+        where resolution_stats maps "resolved"/"unresolved" to (compliant_count, total_count, compliant_ids, non_compliant_ids)
     """
     lang_file = Path(data_dir) / agent / "langs" / model / "languatory.json"
 
@@ -188,18 +244,36 @@ def test_model(
     compliant_ids = []
     non_compliant_ids = []
 
+    # Track stats by resolution_status (resolved/unresolved only)
+    resolution_stats = {
+        "resolved": [0, 0, [], []],  # [compliant_count, total_count, compliant_ids, non_compliant_ids]
+        "unresolved": [0, 0, [], []]
+    }
+
     for entry in data:
         instance_id = entry.get("instance_id", "unknown")
         languatory = entry.get("languatory", [])
+        resolution_status = entry.get("resolution_status", "")
 
-        if check_trajectory_compliance(languatory, expected_order):
+        # Only process resolved/unresolved
+        if resolution_status not in ["resolved", "unresolved"]:
+            continue
+
+        is_compliant = check_trajectory_compliance(languatory, expected_order)
+
+        if is_compliant:
             compliant_count += 1
             compliant_ids.append(instance_id)
+            resolution_stats[resolution_status][0] += 1
+            resolution_stats[resolution_status][2].append(instance_id)
         else:
             non_compliant_ids.append(instance_id)
+            resolution_stats[resolution_status][3].append(instance_id)
+
+        resolution_stats[resolution_status][1] += 1
 
     total_count = len(data)
-    return compliant_count, total_count, compliant_ids, non_compliant_ids
+    return compliant_count, total_count, compliant_ids, non_compliant_ids, resolution_stats
 
 
 def format_results(
@@ -212,7 +286,8 @@ def format_results(
     confidence_level: float,
     compliant_ids: List[str],
     non_compliant_ids: List[str],
-    expected_order: Tuple[str, ...]
+    expected_order: Tuple[str, ...],
+    resolution_stats: Dict[str, Tuple[int, int, List[str], List[str]]] = None
 ) -> str:
     """
     Format test results as a readable string.
@@ -228,6 +303,7 @@ def format_results(
         compliant_ids: List of compliant instance IDs
         non_compliant_ids: List of non-compliant instance IDs
         expected_order: Expected phase order
+        resolution_stats: Optional dict mapping resolution status to stats
 
     Returns:
         Formatted result string
@@ -239,13 +315,69 @@ def format_results(
     result.append("")
     result.append(f"Expected Phase Order (by first appearance): {' → '.join(expected_order)}")
     result.append("")
-    result.append(f"Total Trajectories: {total}")
-    result.append(f"Compliant Trajectories: {compliant}")
-    result.append(f"Non-Compliant Trajectories: {total - compliant}")
-    result.append("")
-    result.append(f"Compliance Rate: {proportion:.2%} ({compliant}/{total})")
-    result.append(f"{int(confidence_level * 100)}% Confidence Interval: [{lower:.2%}, {upper:.2%}]")
-    result.append("")
+    # result.append(f"Total Trajectories: {total}")
+    # result.append(f"Compliant Trajectories: {compliant}")
+    # result.append(f"Non-Compliant Trajectories: {total - compliant}")
+    # result.append("")
+    # result.append(f"Compliance Rate: {proportion:.2%} ({compliant}/{total})")
+    # result.append(f"{int(confidence_level * 100)}% Confidence Interval: [{lower:.2%}, {upper:.2%}]")
+    # result.append("")
+
+    # Add breakdown by resolution status
+    if resolution_stats:
+        result.append("-" * 80)
+        result.append("Breakdown by Resolution Status:")
+        result.append("-" * 80)
+        for status in ["resolved", "unresolved"]:
+            if status in resolution_stats:
+                res_compliant, res_total, res_compliant_ids, res_non_compliant_ids = resolution_stats[status]
+                if res_total > 0:
+                    res_proportion, res_lower, res_upper = calculate_confidence_interval(
+                        res_compliant, res_total, confidence_level
+                    )
+                    result.append(f"\n{status.capitalize()}:")
+                    result.append(f"  Total: {res_total}")
+                    result.append(f"  Compliant: {res_compliant}")
+                    result.append(f"  Non-Compliant: {res_total - res_compliant}")
+                    result.append(f"  Compliance Rate: {res_proportion:.2%} ({res_compliant}/{res_total})")
+                    result.append(f"  {int(confidence_level * 100)}% CI: [{res_lower:.2%}, {res_upper:.2%}]")
+        result.append("")
+
+        # Add correlation statistics
+        correlation = compute_resolution_compliance_correlation(resolution_stats)
+        result.append("-" * 80)
+        result.append("Statistical Association (Resolution Status ↔ Compliance):")
+        result.append("-" * 80)
+        result.append(f"Chi-square test: χ² = {correlation['chi2']:.4f}, p = {correlation['p_value']:.4f}")
+
+        # Interpret p-value
+        if correlation['p_value'] < 0.001:
+            significance = "highly significant (p < 0.001)"
+        elif correlation['p_value'] < 0.01:
+            significance = "very significant (p < 0.01)"
+        elif correlation['p_value'] < 0.05:
+            significance = "significant (p < 0.05)"
+        else:
+            significance = "not significant (p ≥ 0.05)"
+        result.append(f"Significance: {significance}")
+
+        result.append(f"Phi coefficient: φ = {correlation['phi']:.4f}")
+
+        # Interpret effect size
+        phi_abs = abs(correlation['phi'])
+        if phi_abs < 0.1:
+            effect_size = "negligible"
+        elif phi_abs < 0.3:
+            effect_size = "small"
+        elif phi_abs < 0.5:
+            effect_size = "medium"
+        else:
+            effect_size = "large"
+        result.append(f"Effect size: {effect_size}")
+
+        result.append(f"Sample size: n = {correlation['n']}")
+        result.append("")
+
     result.append("-" * 80)
     result.append(f"Compliant Instances ({len(compliant_ids)}):")
     result.append("-" * 80)
@@ -273,7 +405,7 @@ def run_single_model_test(config: PlanTestConfig, model: str) -> None:
     """
     print(f"Testing model: {model}")
 
-    compliant, total, compliant_ids, non_compliant_ids = test_model(
+    compliant, total, compliant_ids, non_compliant_ids, resolution_stats = test_model(
         config.agent,
         model,
         config.data_dir,
@@ -297,7 +429,8 @@ def run_single_model_test(config: PlanTestConfig, model: str) -> None:
         config.confidence_level,
         compliant_ids,
         non_compliant_ids,
-        config.expected_order
+        config.expected_order,
+        resolution_stats
     )
 
     # Print to console
@@ -331,7 +464,7 @@ def run_multi_model_test(config: PlanTestConfig) -> None:
         print(f"{'=' * 80}\n")
 
         try:
-            compliant, total, compliant_ids, non_compliant_ids = test_model(
+            compliant, total, compliant_ids, non_compliant_ids, resolution_stats = test_model(
                 config.agent,
                 model,
                 config.data_dir,
@@ -354,7 +487,8 @@ def run_multi_model_test(config: PlanTestConfig) -> None:
                 config.confidence_level,
                 compliant_ids,
                 non_compliant_ids,
-                config.expected_order
+                config.expected_order,
+                resolution_stats
             )
 
             all_results.append(results_text)

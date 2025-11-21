@@ -4,15 +4,35 @@ Plan Hypothesis Test: claude-sonnet-4
 
 Expected Phase Order (by first appearance): L_navigate → L_reproduce → P → V_newly_generated_test
 
-Total Trajectories: 500
-Compliant Trajectories: 459
-Non-Compliant Trajectories: 41
+--------------------------------------------------------------------------------
+Breakdown by Resolution Status:
+--------------------------------------------------------------------------------
 
-Compliance Rate: 91.80% (459/500)
-95% Confidence Interval: [89.06%, 93.90%]
+Resolved:
+  Total: 338
+  Compliant: 326
+  Non-Compliant: 12
+  Compliance Rate: 96.45% (326/338)
+  95% CI: [93.90%, 97.96%]
+
+Unresolved:
+  Total: 161
+  Compliant: 132
+  Non-Compliant: 29
+  Compliance Rate: 81.99% (132/161)
+  95% CI: [75.33%, 87.16%]
 
 --------------------------------------------------------------------------------
-Compliant Instances (459):
+Statistical Association (Resolution Status ↔ Compliance):
+--------------------------------------------------------------------------------
+Chi-square test: χ² = 28.3580, p = 0.0000
+Significance: highly significant (p < 0.001)
+Phi coefficient: φ = 0.2384
+Effect size: small
+Sample size: n = 499
+
+--------------------------------------------------------------------------------
+Compliant Instances (458):
 --------------------------------------------------------------------------------
   - astropy__astropy-12907
   - astropy__astropy-13033
@@ -222,7 +242,6 @@ Compliant Instances (459):
   - django__django-16116
   - django__django-16136
   - django__django-16139
-  - django__django-16145
   - django__django-16255
   - django__django-16256
   - django__django-16263

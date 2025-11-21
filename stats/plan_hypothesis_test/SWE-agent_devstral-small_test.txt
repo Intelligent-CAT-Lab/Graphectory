@@ -4,15 +4,35 @@ Plan Hypothesis Test: devstral-small
 
 Expected Phase Order (by first appearance): L_navigate → L_reproduce → P → V_newly_generated_test
 
-Total Trajectories: 500
-Compliant Trajectories: 373
-Non-Compliant Trajectories: 127
+--------------------------------------------------------------------------------
+Breakdown by Resolution Status:
+--------------------------------------------------------------------------------
 
-Compliance Rate: 74.60% (373/500)
-95% Confidence Interval: [70.61%, 78.22%]
+Resolved:
+  Total: 202
+  Compliant: 152
+  Non-Compliant: 50
+  Compliance Rate: 75.25% (152/202)
+  95% CI: [68.86%, 80.69%]
+
+Unresolved:
+  Total: 297
+  Compliant: 220
+  Non-Compliant: 77
+  Compliance Rate: 74.07% (220/297)
+  95% CI: [68.81%, 78.73%]
 
 --------------------------------------------------------------------------------
-Compliant Instances (373):
+Statistical Association (Resolution Status ↔ Compliance):
+--------------------------------------------------------------------------------
+Chi-square test: χ² = 0.0364, p = 0.8488
+Significance: not significant (p ≥ 0.05)
+Phi coefficient: φ = 0.0085
+Effect size: negligible
+Sample size: n = 499
+
+--------------------------------------------------------------------------------
+Compliant Instances (372):
 --------------------------------------------------------------------------------
   - astropy__astropy-13033
   - astropy__astropy-13236
@@ -304,7 +324,6 @@ Compliant Instances (373):
   - sphinx-doc__sphinx-7462
   - sphinx-doc__sphinx-7590
   - sphinx-doc__sphinx-7748
-  - sphinx-doc__sphinx-7757
   - sphinx-doc__sphinx-7889
   - sphinx-doc__sphinx-7910
   - sphinx-doc__sphinx-7985
