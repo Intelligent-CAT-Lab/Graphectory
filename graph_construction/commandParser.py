@@ -240,73 +240,113 @@ class CommandParser:
         return False
 
     def _is_simple_heredoc(self, cmd_str: str) -> bool:
-        """Check if this is a simple heredoc command (cat << EOF, etc.)"""
-        # Match pattern: command << 'DELIMITER' or command <<DELIMITER
-        heredoc_pattern = re.compile(r"^(\w+)\s+<<-?\s*['\"]?(\w+)['\"]?(.*)$", re.DOTALL)
-        return bool(heredoc_pattern.match(cmd_str.strip()))
+        """
+        Check if this is a simple heredoc command.
+        Examples: cat << EOF, python3 - <<'PY', cat <<'EOF' > file.txt
+
+        A command is a simple heredoc if:
+        1. It contains the heredoc operator (<<-?) followed by a delimiter
+        2. The part BEFORE << doesn't contain bash control keywords
+        3. The command doesn't contain compound operators (&&, ||, ;) that would
+           split it into multiple commands (this includes compound commands with
+           multiple heredocs like: cmd1 <<EOF ... EOF && cmd2 <<EOF ... EOF)
+
+        The content after the delimiter can be anything - it's data, not bash commands.
+        """
+        s = cmd_str.strip()
+
+        # Check if heredoc operator exists with a valid delimiter
+        # Delimiter can be quoted or unquoted
+        if not re.search(r'<<-?\s*([\'"]?)\w+\1', s):
+            return False
+
+        # Extract the part before the first << operator
+        before_heredoc = s.split('<<')[0]
+
+        # Check if the part before << contains bash control keywords
+        # These indicate control structures, not simple heredocs
+        control_pattern = r'\b(if|then|fi|for|while|do|done|case|esac|until|function)\b'
+        if re.search(control_pattern, before_heredoc):
+            return False
+
+        # Check if the part before << contains compound operators
+        # If so, this should be split into multiple commands first
+        compound_operators = ['&&', '||', ';']
+        if any(op in before_heredoc for op in compound_operators):
+            return False
+
+        # Check if there are multiple heredocs (indicates compound command)
+        # Pattern: <<DELIM followed by content and delimiter on its own line, then another <<
+        # This catches cases like: python3 <<'PY' ... PY\n&& python3 <<'PY' ... PY
+        heredoc_count = len(re.findall(r'<<-?\s*([\'"]?)\w+\1', s))
+        if heredoc_count > 1:
+            return False
+
+        return True
 
     def _parse_heredoc(self, cmd_str: str) -> Optional[Dict[str, Any]]:
         """
         Parse a heredoc command.
-        Format: command << 'EOF' ... EOF
-        or: command <<EOF ... EOF
+        Formats: cat <<EOF, python3 - <<'PY', cat <<'EOF' > file.txt
+
+        Returns: {command: str, args: [arg1, arg2, ..., heredoc_content], flags: {}}
+        Example: python3 - <<'PY' ... PY → {command: 'python3', args: ['-', content], flags: {}}
         """
-        # Try to extract heredoc using regex
-        # Pattern: command << 'DELIMITER' ... DELIMITER
-        heredoc_pattern = re.compile(
-            r"^(\w+)\s+<<-?\s*(['\"]?)(\w+)\2\s*(.*?)\n\3\s*$",
-            re.DOTALL
-        )
-        match = heredoc_pattern.match(cmd_str.strip())
+        s = cmd_str.strip()
 
-        if not match:
-            # Try without the closing delimiter (might be incomplete or bashlex parsed it differently)
-            # Look for: command << 'DELIMITER' > file pattern
-            simple_pattern = re.compile(
-                r"^(\w+)\s+<<-?\s*(['\"]?)(\w+)\2\s*(.*?)$",
-                re.DOTALL
-            )
-            match = simple_pattern.match(cmd_str.strip())
+        # Find the heredoc operator and extract delimiter
+        heredoc_match = re.search(r'<<-?\s*([\'"]?)(\w+)\1', s)
+        if not heredoc_match:
+            return None
 
-        if match:
-            command = match.group(1)
-            delimiter = match.group(3)
-            rest = match.group(4).strip()
+        delimiter = heredoc_match.group(2)
+        heredoc_start = heredoc_match.start()
 
-            # Check for output redirection
-            redirect_pattern = re.compile(r">\s*([^\n]+)")
-            output_file = None
-            heredoc_content = ""
+        # Extract everything before << (command and args)
+        before_heredoc = s[:heredoc_start].strip()
 
-            redirect_match = redirect_pattern.search(rest)
-            if redirect_match:
-                output_file = redirect_match.group(1).strip()
-                # Content is after the redirect on the next line
-                content_start = redirect_match.end()
-                heredoc_content = rest[content_start:].strip()
-            else:
-                heredoc_content = rest
+        # Extract everything after the heredoc operator
+        after_operator = s[heredoc_match.end():].strip()
 
-            # If there's a newline followed by the delimiter, extract the actual content
-            if f"\n{delimiter}" in heredoc_content:
-                heredoc_content = heredoc_content.split(f"\n{delimiter}")[0]
+        # Parse command and args before <<
+        try:
+            tokens = shlex.split(before_heredoc)
+        except ValueError:
+            tokens = before_heredoc.split()
 
-            result = {
-                "command": command,
-                "args": [],
-                "flags": {}
-            }
+        if not tokens:
+            return None
 
-            if heredoc_content:
-                result["args"].append(heredoc_content)
+        command = tokens[0]
+        args = list(tokens[1:])  # Args before the heredoc
 
-            if output_file:
-                result["args"].append(">")
-                result["args"].append(output_file)
+        # Handle output redirection (e.g., cat <<'EOF' > file.txt)
+        redirect_match = re.match(r'>\s*([^\n]+)', after_operator)
+        output_file = None
+        heredoc_content = after_operator
 
-            return result
+        if redirect_match:
+            output_file = redirect_match.group(1).strip()
+            heredoc_content = after_operator[redirect_match.end():].strip()
 
-        return None
+        # Remove closing delimiter if present
+        if f"\n{delimiter}" in heredoc_content:
+            heredoc_content = heredoc_content.split(f"\n{delimiter}")[0]
+
+        # Add heredoc content to args
+        if heredoc_content:
+            args.append(heredoc_content)
+
+        # Add redirection if present
+        if output_file:
+            args.append(">")
+            args.append(output_file)
+
+        return {
+            "command": command,
+            "args": args,
+            "flags": {"__heredoc__": True}  # Mark as heredoc for mapLang
+        }
 
     def _extract_command_text(self, cmd_str: str, node) -> str:
         """Extract the text for a specific AST node from the original command string."""
@@ -573,6 +613,7 @@ if __name__ == "__main__":
 
     commands = [
         "cd /home/user",
+        "ls -la",
         "grep --color=auto 'pattern' file.txt",
         "rm -rf /tmp/*",
         "echo 'Hello, World!' > /testbed/reproduce_error.py",
@@ -591,6 +632,7 @@ if __name__ == "__main__":
         "\ncd /workspace/astropy__astropy__4.3 && \nfind . -name \"*.py\" -exec grep -l \"class TimeSeries\" {} \;\n\n",
         "\ncd /workspace/psf__requests__2.0 && \n(grep -ri \"test\" README* || grep -ri \"test\" .github/workflows/* || grep -ri \"pytest\" setup.* || true) && \nfind . -name \"*test*.py\" | head -5",
         'cat << \'EOF\' > /workspace/test_hstack_fix.py\nimport sympy as sy\n\n# Test case 1: Zero-height matrices\nM1 = sy.Matrix.zeros(0, 0)\nM2 = sy.Matrix.zeros(0, 1)\nM3 = sy.Matrix.zeros(0, 2)\nM4 = sy.Matrix.zeros(0, 3)\nresult = sy.Matrix.hstack(M1, M2, M3, M4).shape\nprint(f"Zero-height hstack result: {result} (should be (0, 6))")\n\n# Test case 2: Non-zero height matrices\nM1 = sy.Matrix.zeros(1, 0)\nM2 = sy.Matrix.zeros(1, 1)\nM3 = sy.Matrix.zeros(1, 2)\nM4 = sy.Matrix.zeros(1, 3)\nresult = sy.Matrix.hstack(M1, M2, M3, M4).shape\nprint(f"Non-zero height hstack result: {result} (should be (1, 6))")\nEOF',
+        "python3 - <<'PY'\ndef f(self):\n    return 1\nprop = property(f)\nprint(\"before:\", prop.__doc__)\nprop.__doc__ = \"assigned\"\nprint(\"after assign:\", prop.__doc__)\nclass C:\n    @classmethod\n    def cm(cls): \"cmm\"; return 1\nprint(\"classmethod doc before:\", C.cm.__doc__)\n# Try creating a standalone classmethod object and setting __doc__\ndef g(cls): \"gdoc\"; return 2\ncm_obj = classmethod(g)\nprint(\"cm_obj.__doc__ before:\", cm_obj.__doc__)\ncm_obj.__func__.__doc__ = \"changed_gdoc\"\nprint(\"cm_obj.__doc__ after func doc change:\", cm_obj.__doc__)\ncm_obj.__doc__ = \"assigned_cm\"\nprint(\"cm_obj.__doc__ after assign:\", cm_obj.__doc__)\nPY",
         ]
 
     for cmd in commands:

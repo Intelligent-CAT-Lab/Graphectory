@@ -34,6 +34,7 @@ We persist across steps:
 """
 
 from __future__ import annotations
+import ast
 import re
 from typing import Iterable, List, Tuple, Any, Optional, Set, Dict, Union
 
@@ -44,7 +45,7 @@ TEST_HINTS: Tuple[str, ...] = (
 )
 
 READONLY_CMDS: Tuple[str, ...] = (
-    "grep", "find", "cat", "echo", "ls", "head", "tail", "awk", "nl"
+    "grep", "find", "cat", "ls", "head", "tail", "awk", "nl"
 )
 EDIT_CMDS: Tuple[str, ...] = ("sed", "touch")
 SRE_EDIT_SUBCMDS: Tuple[str, ...] = ("create", "str_replace", "insert", "undo_edit")
@@ -241,18 +242,141 @@ def _record_created_tests(
         if _is_test_path(p):
             created_tests.add(p)
 
+def _extract_edited_files_from_python_code(code: str) -> List[str]:
+    """
+    Analyze Python code via AST to extract file paths being edited/created.
+    Looks for patterns like:
+    - Path('file.py').write_text(...)
+    - open('file.py', 'w').write(...)
+    - with open('file.py', 'w') as f: ...
+    Returns list of file paths found.
+    """
+    if not code or not isinstance(code, str):
+        return []
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        # If code doesn't parse, fall back to empty
+        return []
+
+    # First pass: collect all variable assignments
+    path_vars: Dict[str, str] = {}
+    string_vars: Dict[str, str] = {}
+
+    class VariableCollector(ast.NodeVisitor):
+        def visit_Assign(self, node: ast.Assign):
+            # Track assignments like: var = Path('file.py') or var = 'file.py'
+            if isinstance(node.value, ast.Call):
+                if isinstance(node.value.func, ast.Name) and node.value.func.id == 'Path':
+                    if node.value.args and isinstance(node.value.args[0], ast.Constant):
+                        filepath = node.value.args[0].value
+                        if isinstance(filepath, str):
+                            for target in node.targets:
+                                if isinstance(target, ast.Name):
+                                    path_vars[target.id] = filepath
+            elif isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                # Track simple string assignments: var = 'file.py'
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        string_vars[target.id] = node.value.value
+            self.generic_visit(node)
+
+    # Collect variables first
+    var_collector = VariableCollector()
+    var_collector.visit(tree)
+
+    # Second pass: detect file edits using collected variables
+    edited_files: List[str] = []
+    with_files: Set[str] = set()  # Track files in 'with' to avoid duplicates
+
+    class FileEditVisitor(ast.NodeVisitor):
+        def visit_Call(self, node: ast.Call):
+            # Pattern 1: Path('file.py').write_text(...) or Path('file.py').write_bytes(...)
+            if isinstance(node.func, ast.Attribute):
+                if node.func.attr in ('write_text', 'write_bytes'):
+                    # Check if calling on Path(...) directly
+                    if isinstance(node.func.value, ast.Call):
+                        if isinstance(node.func.value.func, ast.Name) and node.func.value.func.id == 'Path':
+                            if node.func.value.args and isinstance(node.func.value.args[0], ast.Constant):
+                                filepath = node.func.value.args[0].value
+                                if isinstance(filepath, str):
+                                    edited_files.append(filepath)
+                    # Check if calling on a variable that was assigned Path(...)
+                    elif isinstance(node.func.value, ast.Name):
+                        var_name = node.func.value.id
+                        if var_name in path_vars:
+                            edited_files.append(path_vars[var_name])
+
+            # Pattern 2: open('file.py', 'w') or open(variable, 'w') - check for write modes
+            if isinstance(node.func, ast.Name) and node.func.id == 'open':
+                if len(node.args) >= 2:
+                    filename = None
+
+                    # First arg can be a constant string or a variable
+                    if isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                        filename = node.args[0].value
+                    elif isinstance(node.args[0], ast.Name):
+                        # Variable reference - check if it was assigned a string
+                        var_name = node.args[0].id
+                        if var_name in string_vars:
+                            filename = string_vars[var_name]
+
+                    if filename:
+                        # Skip if already handled by visit_With
+                        if filename in with_files:
+                            self.generic_visit(node)
+                            return
+                        # Second arg is mode
+                        if isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+                            mode = node.args[1].value
+                            # Check for write/append/exclusive modes
+                            if any(m in mode for m in ['w', 'a', 'x']):
+                                edited_files.append(filename)
+
+            self.generic_visit(node)
+
+        def visit_With(self, node: ast.With):
+            # Pattern 3: with open('file.py', 'w') as f: ... or with open(variable, 'w') as f: ...
+            for item in node.items:
+                if isinstance(item.context_expr, ast.Call):
+                    call = item.context_expr
+                    if isinstance(call.func, ast.Name) and call.func.id == 'open':
+                        if len(call.args) >= 2:
+                            filename = None
+
+                            # First arg can be constant or variable
+                            if isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
+                                filename = call.args[0].value
+                            elif isinstance(call.args[0], ast.Name):
+                                var_name = call.args[0].id
+                                if var_name in string_vars:
+                                    filename = string_vars[var_name]
+
+                            if filename and isinstance(call.args[1], ast.Constant) and isinstance(call.args[1].value, str):
+                                mode = call.args[1].value
+                                if any(m in mode for m in ['w', 'a', 'x']):
+                                    edited_files.append(filename)
+                                    with_files.add(filename)  # Mark as handled
+            self.generic_visit(node)
+
+    visitor = FileEditVisitor()
+    visitor.visit(tree)
+
+    return edited_files
+
 def _dynamic_key_for_inline_test(
     cmd: str,
     tokens: List[str],
     paths: List[str],
 ) -> Optional[str]:
     """
-    Detect inline / ephemeral validation (like python -c/-m assertions) that is NOT
+    Detect inline / ephemeral validation (like python -c/-m assertions or heredocs) that is NOT
     executing a file path from disk.
 
     Dynamic if ALL:
       - cmd is python / python2 / python3
-      - we see an inline-exec style flag ("-c", "-m", "c", "m", or "-cFOO"/"-mFOO")
+      - we see inline-exec: "-c", "-m" flags OR stdin/heredoc ("-" followed by content, or content directly)
       - there are NO path-like args in `paths`
       - it's not just delegating to pytest / py.test
     """
@@ -279,8 +403,10 @@ def _dynamic_key_for_inline_test(
             if maybe_mod.startswith("pytest") or maybe_mod.startswith("py.test"):
                 return None
 
-    # must have inline exec flag
-    if not any(_is_inline_flag(t) for t in tokens):
+    # Check for inline exec: -c/-m flags
+    has_inline_flag = any(_is_inline_flag(t) for t in tokens)
+
+    if not has_inline_flag:
         return None
 
     # if we reference on-disk paths, it's not ephemeral inline
@@ -411,6 +537,7 @@ def get_action_role(
 
     # 2) Python / pytest / pylint / etc.
     if cmd in PY_CMDS:
+        # Check for output redirection (python ... > file)
         if _contains_redirection(tokens):
             redir_targets = _paths_after_redirection(tokens)
             _record_created_tests(redir_targets, created_tests)
@@ -425,9 +552,71 @@ def get_action_role(
                 else "L_reproduce"
             )
 
+        # Check for inline code execution (heredoc, -c, -m)
+        is_heredoc = flags.get("__heredoc__", False)
+
+        # Extract code content from various sources
+        code_content = None
+
+        # Source 1: heredoc (stdin)
+        if is_heredoc and args:
+            args_list = args if isinstance(args, (list, tuple)) else [args]
+            for item in args_list:
+                if isinstance(item, str):
+                    # Check if this looks like Python code
+                    is_code = (
+                        len(item) > 20 or
+                        '\n' in item or
+                        'Path(' in item or
+                        'open(' in item or
+                        'write' in item
+                    )
+                    if is_code and item not in ['-', '>']:
+                        code_content = item
+                        break
+
+        # Source 2: -c flag (python -c 'code')
+        if not code_content and flags:
+            c_code = flags.get('c')
+            if c_code and isinstance(c_code, str) and len(c_code) > 5:
+                code_content = c_code
+
+        # For inline code (heredoc, -c), check if editing files
+        edited_files_from_code: List[str] = []
+        if code_content:
+            edited_files_from_code = _extract_edited_files_from_python_code(code_content)
+
+        # If inline code is editing files, classify based on what files are being edited
+        # This applies to: python -c, python - <<PY, python <<PY
+        if edited_files_from_code:
+            # Note: We don't call _record_created_tests here because we can't tell from
+            # code content alone whether files are being created vs edited
+            test_files_edited = [f for f in edited_files_from_code if _is_test_path(f)]
+
+            if test_files_edited:
+                # Editing/creating test files
+                # Classification depends on whether files are in created_tests
+                if has_patch:
+                    return _postpatch_validation_kind(
+                        test_files_edited,
+                        created_tests=created_tests,
+                        dynamic_key=None,
+                        created_dynamic_suites=created_dynamic_suites,
+                    )
+                else:
+                    # Before patch: setting up tests
+                    return "L_reproduce"
+            else:
+                # Editing non-test files → patching
+                return "P"
+
         if has_patch:
             explicit_test_targets = [p for p in paths if _is_test_path(p)]
             dyn_key = _dynamic_key_for_inline_test(cmd, tokens, paths)
+
+            # Treat heredoc as inline execution
+            if is_heredoc and not dyn_key:
+                dyn_key = "stdin_heredoc"
 
             if dyn_key and created_dynamic_suites is not None and dyn_key in created_dynamic_suites:
                 return "V_newly_generated_test"
@@ -440,6 +629,9 @@ def get_action_role(
             )
         else:
             dyn_key = _dynamic_key_for_inline_test(cmd, tokens, paths)
+            # Heredoc is inline execution, treat as L_reproduce
+            if is_heredoc:
+                return "L_reproduce"
             return "L_reproduce" if (test_related or cmd == "pytest" or dyn_key) else "general"
 
     # 3) Read-only commands
