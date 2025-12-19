@@ -40,8 +40,13 @@ from typing import Iterable, List, Tuple, Any, Optional, Set, Dict, Union
 
 # --------------------------- Configurable Heuristics ---------------------------
 
-TEST_HINTS: Tuple[str, ...] = (
-    "test_", "reproduc", "debug", "_test", "/tests/", "/test/",
+# Regex patterns for test file detection
+TEST_FILE_PATTERNS = (
+    r'/tests?/',           # Directory: /test/ or /tests/
+    r'\btest_[^/]*\.py$',  # File: test_*.py
+    r'\b[^/]*_tests?\.py$', # File: *_test.py or *_tests.py
+    r'.*reproduc.*\.py$',  # File containing 'reproduc'
+    r'.*debug.*\.py$',     # File containing 'debug'
 )
 
 READONLY_CMDS: Tuple[str, ...] = (
@@ -155,7 +160,7 @@ def _has_prior_patch(prev_roles: Optional[Iterable[str]]) -> bool:
 
 def _is_test_path(s: str) -> bool:
     """Heuristic: does this look like a test/repro harness path?"""
-    return any(h in s for h in TEST_HINTS)
+    return any(re.search(pattern, s) for pattern in TEST_FILE_PATTERNS)
 
 def _is_test_related(paths: List[str]) -> bool:
     """Test-related if ANY collected path-like token looks like a test."""

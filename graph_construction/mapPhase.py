@@ -24,8 +24,13 @@ from typing import Iterable, List, Tuple, Any, Optional, Set, Dict
 
 # --------------------------- Configurable Heuristics ---------------------------
 
-TEST_HINTS: Tuple[str, ...] = (
-    "test_", "reproduc", "debug", "_test", "/tests/", "/test/",
+# Regex patterns for test file detection
+TEST_FILE_PATTERNS = (
+    r'/tests?/',           # Directory: /test/ or /tests/
+    r'\btest_[^/]*\.py$',  # File: test_*.py
+    r'\b[^/]*_tests?\.py$', # File: *_test.py or *_tests.py
+    r'.*reproduc.*\.py$',  # File containing 'reproduc'
+    r'.*debug.*\.py$',     # File containing 'debug'
 )
 
 READONLY_CMDS: Tuple[str, ...] = (
@@ -68,7 +73,7 @@ def _has_prior_patch(prev_phases: Optional[Iterable[str]]) -> bool:
 
 def _is_test_path(s: str) -> bool:
     """Heuristic: does this look like a test path?"""
-    return any(h in s for h in TEST_HINTS)
+    return any(re.search(pattern, s) for pattern in TEST_FILE_PATTERNS)
 
 def _is_test_related(paths: List[str]) -> bool:
     """Test-related if ANY collected path-like token looks like a test."""
@@ -406,7 +411,10 @@ if __name__ == "__main__":
         ("str_replace_editor", "create", {"path": "tests/test_file.py"}, None, None, "localization"),
         ("str_replace_editor", "create", {"path": "tests/test_file.py"}, None, ["patch"], "validation"),
         ("str_replace_editor", "view", {"path": "test_file.py"}, None, ["patch"], "validation"),
-        ("str_replace_editor", "str_replace", {"path": "/testbed/django/db/client.py"}, None, None, "patch"),
+        ("str_replace_editor", "str_replace", {"path": "/workspace/pytest-dev__pytest__6.0/src/_pytest/logging.py"}, None, None, "patch"),
+        ("str_replace_editor", "create", {"path": "/workspace/test_example.py"}, None, None, "localization"),
+        ("str_replace_editor", "create", {"path": "/workspace/example_test.py"}, None, None, "localization"),
+        ("str_replace_editor", "create", {"path": "/workspace/tests/example.py"}, None, None, "localization"),
         # Heredoc embedded (redirection → edit-like, test target → localization before patch)
         (None, None, "cat", ["<<", "'EOF'", ">", "/workspace/test_file.py"], None, "localization"),
         # nl piped commands (read-only viewing operations)
