@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Languatory Extraction Script for Graphectories
+Languatory/Phase Extraction Script for Graphectories
 
-Extracts languatory (run-length encoded role sequences) from graphectory JSON files.
+Extracts languatory (run-length encoded role sequences) or phases from graphectory JSON files.
 Supports both SWE-agent and OpenHands graphectories across multiple models.
 
 Usage:
-    # Process all agents and models in data directory
+    # Extract languatory (default)
     python lang_construction/get_lang.py
+
+    # Extract phases
+    python lang_construction/get_lang.py --mode phase
 
     # Process specific agent/model
     python lang_construction/get_lang.py --agent oh --model cld-4
@@ -19,7 +22,8 @@ Usage:
     python lang_construction/get_lang.py --instance_id django__django-10914
 
 Output Structure:
-    {output_dir}/{agent}/langs/{model}/languatory.json
+    Languatory mode: {output_dir}/{agent}/langs/{model}/languatory.json
+    Phase mode: {output_dir}/{agent}/langs/{model}/phases.json
 
     Format:
     [
@@ -28,6 +32,7 @@ Output Structure:
             "resolution_status": "resolved",
             "debug_difficulty": "<15 min fix",
             "languatory": ["L_navigate_5", "L_reproduce_3", "P_2", "V_regression_test_4"]
+            // OR "phases": ["L_5", "L_3", "P_2", "V_4"]
         },
         ...
     ]
@@ -37,11 +42,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Literal
 from dataclasses import dataclass, asdict
 
 from lang_construction.extractSeq import extract_node_sequence
 from lang_construction.buildLang import build_lang_sequence_rle
+from lang_construction.buildPhases import build_phase_sequence_rle
 
 
 # ==================== Configuration ====================
@@ -60,6 +66,13 @@ AGENT_NAMES = {
     "oh": "OpenHands"
 }
 
+# Phase abbreviations for phase mode
+PHASE_ABBR = {
+    'localization': 'L',
+    'patch': 'P',
+    'validation': 'V',
+}
+
 # Reverse mappings for auto-detection
 MODEL_NAMES_REV = {v: k for k, v in MODEL_NAMES.items()}
 AGENT_NAMES_REV = {v: k for k, v in AGENT_NAMES.items()}
@@ -75,12 +88,22 @@ class Languatory:
     languatory: List[str]  # Each element is "Role_runlength", e.g., "P_2", "L_navigate_3"
 
 
+@dataclass
+class Phases:
+    """Phase sequence data for a single instance."""
+    instance_id: str
+    resolution_status: str
+    debug_difficulty: str
+    phases: List[str]  # Each element is "PhaseAbbr_runlength", e.g., "P_2", "L_3", "V_4"
+
+
 # ==================== Path Management ====================
-def get_lang_output_path(base_output_dir: str, agent: str, model: str) -> Path:
-    """Construct the languatory output file path."""
+def get_lang_output_path(base_output_dir: str, agent: str, model: str, mode: Literal["lang", "phase"] = "lang") -> Path:
+    """Construct the output file path based on mode."""
     agent_name = AGENT_NAMES[agent]
     model_name = MODEL_NAMES[model]
-    return Path(base_output_dir) / agent_name / "langs" / model_name / "languatory.json"
+    filename = "languatory.json" if mode == "lang" else "phases.json"
+    return Path(base_output_dir) / agent_name / "langs" / model_name / filename
 
 
 def discover_agent_model_paths(data_dir: Path) -> List[Tuple[str, str, Path]]:
@@ -179,9 +202,53 @@ def extract_languatory(graph_json: Dict[str, Any]) -> Optional[Languatory]:
         return None
 
 
+def extract_phases(graph_json: Dict[str, Any]) -> Optional[Phases]:
+    """Extract phase sequence from a graphectory JSON."""
+    try:
+        # Extract from graph metadata
+        instance_id = graph_json.get("graph", {}).get("instance_name")
+        if not instance_id:
+            return None
+
+        resolution_status = graph_json.get("graph", {}).get("resolution_status")
+        if not resolution_status:
+            return None
+
+        debug_difficulty = graph_json.get("graph", {}).get("debug_difficulty")
+        if not debug_difficulty:
+            return None
+
+        # Extract node sequence
+        step_nodes = extract_node_sequence(graph_json)
+        if not step_nodes:
+            return None
+
+        # Build RLE phase sequence
+        phases_full, run_lengths = build_phase_sequence_rle(step_nodes)
+        if not phases_full:
+            return None
+
+        # Convert to abbreviations
+        phase_abbrs = [PHASE_ABBR.get(p.lower(), p) for p in phases_full]
+
+        # Format as "PhaseAbbr_runlength" strings
+        phases = [f"{phase}_{length}" for phase, length in zip(phase_abbrs, run_lengths)]
+
+        return Phases(
+            instance_id=instance_id,
+            resolution_status=resolution_status,
+            debug_difficulty=debug_difficulty,
+            phases=phases
+        )
+
+    except Exception as e:
+        print(f"  Extraction error: {e}", file=sys.stderr)
+        return None
+
+
 # ==================== Output Management ====================
-def load_existing_languatories(output_path: Path) -> Dict[str, Languatory]:
-    """Load existing languatory data from output file."""
+def load_existing_data(output_path: Path, mode: Literal["lang", "phase"]) -> Dict[str, Any]:
+    """Load existing data from output file."""
     if not output_path.exists():
         return {}
 
@@ -193,15 +260,35 @@ def load_existing_languatories(output_path: Path) -> Dict[str, Languatory]:
         for item in data:
             instance_id = item["instance_id"]
 
-            # Handle both old format (roles + run_lengths) and new format (languatory)
-            if "languatory" in item:
-                result[instance_id] = Languatory(**item)
-            elif "roles" in item and "run_lengths" in item:
-                # Convert old format to new format
-                languatory = [f"{role}_{length}" for role, length in zip(item["roles"], item["run_lengths"])]
-                result[instance_id] = Languatory(instance_id=instance_id, languatory=languatory)
-            else:
-                print(f"  Warning: Skipping malformed entry for {instance_id}", file=sys.stderr)
+            if mode == "lang":
+                # Handle both old format (roles + run_lengths) and new format (languatory)
+                if "languatory" in item:
+                    result[instance_id] = Languatory(**item)
+                elif "roles" in item and "run_lengths" in item:
+                    # Convert old format to new format
+                    languatory = [f"{role}_{length}" for role, length in zip(item["roles"], item["run_lengths"])]
+                    result[instance_id] = Languatory(
+                        instance_id=instance_id,
+                        resolution_status=item.get("resolution_status", ""),
+                        debug_difficulty=item.get("debug_difficulty", ""),
+                        languatory=languatory
+                    )
+                else:
+                    print(f"  Warning: Skipping malformed entry for {instance_id}", file=sys.stderr)
+            else:  # phase mode
+                if "phases" in item:
+                    result[instance_id] = Phases(**item)
+                elif "roles" in item and "run_lengths" in item:
+                    # Convert old format
+                    phases = [f"{role}_{length}" for role, length in zip(item["roles"], item["run_lengths"])]
+                    result[instance_id] = Phases(
+                        instance_id=instance_id,
+                        resolution_status=item.get("resolution_status", ""),
+                        debug_difficulty=item.get("debug_difficulty", ""),
+                        phases=phases
+                    )
+                else:
+                    print(f"  Warning: Skipping malformed entry for {instance_id}", file=sys.stderr)
 
         return result
     except Exception as e:
@@ -209,18 +296,18 @@ def load_existing_languatories(output_path: Path) -> Dict[str, Languatory]:
         return {}
 
 
-def save_languatories(languatories: List[Languatory], output_path: Path, merge: bool = True):
-    """Save languatories to JSON file."""
+def save_data(data_list: List[Any], output_path: Path, merge: bool = True, mode: Literal["lang", "phase"] = "lang"):
+    """Save data to JSON file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Merge with existing data
-    existing = load_existing_languatories(output_path) if merge else {}
-    for lang in languatories:
-        existing[lang.instance_id] = lang
+    existing = load_existing_data(output_path, mode) if merge else {}
+    for item in data_list:
+        existing[item.instance_id] = item
 
     # Convert to sorted list
     output_data = [
-        asdict(lang) for lang in
+        asdict(item) for item in
         sorted(existing.values(), key=lambda x: x.instance_id)
     ]
 
@@ -236,7 +323,8 @@ def process_single_config(
     model: str,
     graphs_path: Path,
     instance_id: Optional[str],
-    output_dir: str
+    output_dir: str,
+    mode: Literal["lang", "phase"] = "lang"
 ) -> Tuple[int, int]:
     """Process graphectories for a single agent/model configuration.
 
@@ -249,21 +337,25 @@ def process_single_config(
         return 0, 0
 
     # Process each graphectory
-    languatories = []
+    results = []
     for json_path in json_paths:
         graph_json = load_graphectory(json_path)
         if graph_json is None:
             continue
 
-        lang = extract_languatory(graph_json)
-        if lang is not None:
-            languatories.append(lang)
+        if mode == "lang":
+            result = extract_languatory(graph_json)
+        else:  # phase
+            result = extract_phases(graph_json)
+
+        if result is not None:
+            results.append(result)
 
     # Save results
-    if languatories:
-        output_path = get_lang_output_path(output_dir, agent, model)
-        total_saved = save_languatories(languatories, output_path, merge=True)
-        return len(languatories), len(json_paths)
+    if results:
+        output_path = get_lang_output_path(output_dir, agent, model, mode)
+        total_saved = save_data(results, output_path, merge=True, mode=mode)
+        return len(results), len(json_paths)
 
     return 0, len(json_paths)
 
@@ -274,7 +366,8 @@ def process_all(
     model: Optional[str] = None,
     graphs_path: Optional[Path] = None,
     instance_id: Optional[str] = None,
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None,
+    mode: Literal["lang", "phase"] = "lang"
 ) -> int:
     """Process graphectories based on provided arguments.
 
@@ -311,7 +404,7 @@ def process_all(
         print(f"Processing: {AGENT_NAMES[agent]} / {MODEL_NAMES[model]}")
         print(f"{'='*60}")
 
-        processed, total = process_single_config(agent, model, graphs_path, instance_id, output_dir)
+        processed, total = process_single_config(agent, model, graphs_path, instance_id, output_dir, mode)
         print(f"  Processed: {processed}/{total} instances")
         total_processed += processed
 
@@ -348,7 +441,7 @@ def process_all(
             print(f"Processing: {AGENT_NAMES[agent]} / {MODEL_NAMES[model]}")
             print(f"{'='*60}")
 
-            processed, total = process_single_config(agent, model, graphs_path, instance_id, output_dir)
+            processed, total = process_single_config(agent, model, graphs_path, instance_id, output_dir, mode)
             if total > 0:
                 print(f"  Processed: {processed}/{total} instances")
                 total_processed += processed
@@ -359,28 +452,39 @@ def process_all(
 # ==================== CLI ====================
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract languatories from graphectory JSON files",
+        description="Extract languatories or phases from graphectory JSON files",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process all agents and models
+  # Extract languatory (default)
   python lang_construction/get_lang.py
 
+  # Extract phases
+  python lang_construction/get_lang.py --mode phase
+
   # Process specific agent
-  python lang_construction/get_lang.py --agent oh
+  python lang_construction/get_lang.py --agent oh --mode phase
 
   # Process specific model across all agents
   python lang_construction/get_lang.py --model cld-4
 
   # Process specific agent and model
-  python lang_construction/get_lang.py --agent sa --model dsk-v3
+  python lang_construction/get_lang.py --agent sa --model dsk-v3 --mode lang
 
   # Process from custom path
   python lang_construction/get_lang.py --graphs_path data/samples/OpenHands/graphs/deepseek-v3
 
   # Process specific instance only
-  python lang_construction/get_lang.py --instance_id django__django-10914
+  python lang_construction/get_lang.py --instance_id django__django-10914 --mode phase
         """
+    )
+
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["lang", "phase"],
+        default="lang",
+        help="Extraction mode: 'lang' for languatory (detailed roles), 'phase' for phases (abbreviated). Default: lang"
     )
 
     parser.add_argument(
@@ -428,7 +532,8 @@ Examples:
     graphs_path = Path(args.graphs_path) if args.graphs_path else None
 
     # Process graphectories
-    print("Languatory Extraction")
+    mode_name = "Languatory" if args.mode == "lang" else "Phase Sequence"
+    print(f"{mode_name} Extraction")
     print("=" * 60)
 
     total = process_all(
@@ -437,7 +542,8 @@ Examples:
         model=args.model,
         graphs_path=graphs_path,
         instance_id=args.instance_id,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        mode=args.mode
     )
 
     print(f"\n{'='*60}")
