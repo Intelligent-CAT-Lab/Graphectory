@@ -1,0 +1,55 @@
+diff --git a/sympy/physics/secondquant.py b/sympy/physics/secondquant.py
+index d19ee2fc63..ebf34af923 100644
+--- a/sympy/physics/secondquant.py
++++ b/sympy/physics/secondquant.py
+@@ -460,19 +460,45 @@ def apply_operator(self, state):
+         Examples
+         ========
+ 
+-        >>> from sympy.physics.secondquant import B, Dagger, BKet
++        >>> from sympy.physics.secondquant import B, BKet
+         >>> from sympy.abc import x, y, n
+-        >>> Dagger(B(x)).apply_operator(y)
+-        y*CreateBoson(x)
++        >>> B(x).apply_operator(y)
++        y*AnnihilateBoson(x)
+         >>> B(0).apply_operator(BKet((n,)))
+         sqrt(n)*FockStateBosonKet((n - 1,))
++
+         """
+         if not self.is_symbolic and isinstance(state, FockStateKet):
+             element = self.state
+-            amp = sqrt(state[element] + 1)
+-            return amp*state.up(element)
++            amp = sqrt(state[element])
++            return amp*state.down(element)
+         else:
+             return Mul(self, state)
++            
++    def __repr__(self):
++        return "CreateBoson(%s)" % self.state
++        
++    def _latex(self, printer):
++        # Use curly braces to properly format double superscripts
++        # This ensures proper rendering when the operator is raised to a power
++        return r"b^{\dagger}_{%s}" % self.state.name
++        
++    def __pow__(self, exponent):
++        # Override power operator to handle LaTeX formatting for exponents
++        if exponent == 1:
++            return self
++        
++        # Create a custom Pow object that handles LaTeX formatting
++        class CreateBosonPow(Pow):
++            def _latex(self, printer):
++                # Format the base with curly braces
++                base_latex = r"{%s}" % printer._print(self.base)
++                # Add the exponent
++                return "%s^{%s}" % (base_latex, printer._print(self.exp))
++                
++        return CreateBosonPow(self, exponent)
++        
++
+ 
+     def __repr__(self):
+         return "CreateBoson(%s)" % self.state

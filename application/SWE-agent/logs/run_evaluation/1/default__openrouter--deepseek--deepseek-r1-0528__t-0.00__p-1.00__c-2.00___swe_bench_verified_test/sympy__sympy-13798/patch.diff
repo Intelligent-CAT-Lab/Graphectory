@@ -1,0 +1,56 @@
+diff --git a/sympy/printing/latex.py b/sympy/printing/latex.py
+index ad4d7d961..07495d2cf 100644
+--- a/sympy/printing/latex.py
++++ b/sympy/printing/latex.py
+@@ -149,18 +149,20 @@ def __init__(self, settings=None):
+                 self._settings['mode'] == 'inline':
+             self._settings['fold_short_frac'] = True
+ 
+-        mul_symbol_table = {
+-            None: r" ",
+-            "ldot": r" \,.\, ",
+-            "dot": r" \cdot ",
+-            "times": r" \times "
+-        }
+-
+-        self._settings['mul_symbol_latex'] = \
+-            mul_symbol_table[self._settings['mul_symbol']]
+-
+-        self._settings['mul_symbol_latex_numbers'] = \
+-            mul_symbol_table[self._settings['mul_symbol'] or 'dot']
++        # Handle custom multiplication symbols
++        if self._settings['mul_symbol'] in [None, "ldot", "dot", "times"]:
++            mul_symbol_table = {
++                None: r" ",
++                "ldot": r" \,.\, ",
++                "dot": r" \cdot ",
++                "times": r" \times "
++            }
++            self._settings['mul_symbol_latex'] = mul_symbol_table[self._settings['mul_symbol']]
++            self._settings['mul_symbol_latex_numbers'] = mul_symbol_table[self._settings['mul_symbol'] or 'dot']
++        else:
++            # Use custom symbol directly
++            self._settings['mul_symbol_latex'] = self._settings['mul_symbol']
++            self._settings['mul_symbol_latex_numbers'] = self._settings['mul_symbol']
+ 
+         self._delim_dict = {'(': ')', '[': ']'}
+ 
+diff --git a/test_latex_mul_symbol.py b/test_latex_mul_symbol.py
+new file mode 100644
+index 000000000..97c9f509d
+--- /dev/null
++++ b/test_latex_mul_symbol.py
+@@ -0,0 +1,12 @@
++from sympy import symbols, latex, Integral
++
++# Test custom multiplication symbol
++x, y = symbols('x y')
++expr = 3 * x**2 * y
++
++# Test with custom mul_symbol
++print(latex(expr, mul_symbol='\\, '))
++
++# Test integral with custom mul_symbol
++integral_expr = Integral(2 * x**2 * y, x)
++print(latex(integral_expr, mul_symbol='\\, '))
+\ No newline at end of file

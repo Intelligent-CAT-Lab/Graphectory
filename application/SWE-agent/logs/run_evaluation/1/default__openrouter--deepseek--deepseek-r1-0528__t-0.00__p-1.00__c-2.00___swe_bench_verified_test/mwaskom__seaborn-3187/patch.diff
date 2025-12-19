@@ -1,0 +1,50 @@
+diff --git a/seaborn/_core/plot.py b/seaborn/_core/plot.py
+index 8915616b..ffb4a024 100644
+--- a/seaborn/_core/plot.py
++++ b/seaborn/_core/plot.py
+@@ -1561,7 +1561,13 @@ class Plotter:
+         for var in legend_vars:
+             var_legend = scales[var]._legend
+             if var_legend is not None:
+-                values, labels = var_legend
++                # Handle both old (values, labels) and new (values, labels, offset) formats
++                if len(var_legend) == 3:
++                    values, labels, offset = var_legend
++                else:
++                    values, labels = var_legend
++                    offset = None
++                
+                 for (_, part_id), part_vars, _ in schema:
+                     if data.ids[var] == part_id:
+                         # Allow multiple plot semantics to represent same data variable
+@@ -1569,6 +1575,9 @@ class Plotter:
+                         break
+                 else:
+                     title = self._resolve_label(p, var, data.names[var])
++                    # Append offset to title if present
++                    if offset:
++                        title = f"{title} ({offset})"
+                     entry = (title, data.ids[var]), [var], (values, labels)
+                     schema.append(entry)
+ 
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..aae9dafb 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -379,7 +379,15 @@ class ContinuousBase(Scale):
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+             labels = axis.major.formatter.format_ticks(locs)
+-            new._legend = list(locs), list(labels)
++            
++            # Get offset value if present
++            offset = axis.major.formatter.get_offset()
++            
++            # Include offset in legend if present
++            if offset:
++                new._legend = list(locs), list(labels), offset
++            else:
++                new._legend = list(locs), list(labels)
+ 
+         return new
+ 
