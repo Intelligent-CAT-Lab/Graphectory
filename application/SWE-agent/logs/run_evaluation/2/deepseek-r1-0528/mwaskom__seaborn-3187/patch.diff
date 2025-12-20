@@ -1,0 +1,28 @@
+diff --git a/output.png b/output.png
+new file mode 100644
+index 00000000..cb527350
+Binary files /dev/null and b/output.png differ
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..847ebf13 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -379,6 +379,19 @@ class ContinuousBase(Scale):
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+             labels = axis.major.formatter.format_ticks(locs)
++            
++            # Get offset value if available
++            offset = getattr(axis.major.formatter, 'offset', 0)
++            use_offset = getattr(axis.major.formatter, 'useOffset', True)
++            
++            # Include offset in legend title if applicable
++            if use_offset and offset != 0:
++                offset_str = f" (× {offset:.0e})".replace("e+00", "").replace("e+0", "e")
++                if prop.label:
++                    prop.label += offset_str
++                else:
++                    prop.label = offset_str.strip()
++            
+             new._legend = list(locs), list(labels)
+ 
+         return new

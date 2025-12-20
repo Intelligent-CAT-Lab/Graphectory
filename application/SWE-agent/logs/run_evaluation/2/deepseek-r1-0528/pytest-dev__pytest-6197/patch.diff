@@ -1,0 +1,193 @@
+diff --git a/clean_test/foobar/__init__.py b/clean_test/foobar/__init__.py
+new file mode 100644
+index 000000000..4b28edb2b
+--- /dev/null
++++ b/clean_test/foobar/__init__.py
+@@ -0,0 +1 @@
++assert False, 'Should not be executed'
+diff --git a/clean_test/reproduce_issue_original.py b/clean_test/reproduce_issue_original.py
+new file mode 100644
+index 000000000..5faa688bc
+--- /dev/null
++++ b/clean_test/reproduce_issue_original.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++"""Script to reproduce the pytest __init__.py collection issue (original example)"""
++import os
++import sys
++import subprocess
++
++def main():
++    # Create test directory structure
++    os.makedirs("foobar", exist_ok=True)
++    with open("foobar/__init__.py", "w") as f:
++        f.write("assert False, 'Should not be executed'\n")
++    with open("test_foo.py", "w") as f:
++        f.write("def test_pass(): pass\n")
++    
++    # Run pytest
++    print("Running pytest...")
++    result = subprocess.run(
++        [sys.executable, "-m", "pytest"],
++        capture_output=True,
++        text=True
++    )
++    
++    # Check output
++    print("=== STDOUT ===")
++    print(result.stdout)
++    print("=== STDERR ===")
++    print(result.stderr)
++    print("=== RETURN CODE ===")
++    print(result.returncode)
++    
++    # Verify if __init__.py was collected
++    if "foobar/__init__.py" in result.stdout or "foobar/__init__.py" in result.stderr:
++        print("\nERROR: __init__.py was collected!")
++        return 1
++    
++    print("\nSUCCESS: __init__.py was not collected")
++    return 0
++
++if __name__ == "__main__":
++    sys.exit(main())
+\ No newline at end of file
+diff --git a/clean_test/test_foo.py b/clean_test/test_foo.py
+new file mode 100644
+index 000000000..e73854b0e
+--- /dev/null
++++ b/clean_test/test_foo.py
+@@ -0,0 +1 @@
++def test_pass(): pass
+diff --git a/foobar/__init__.py b/foobar/__init__.py
+new file mode 100644
+index 000000000..4b28edb2b
+--- /dev/null
++++ b/foobar/__init__.py
+@@ -0,0 +1 @@
++assert False, 'Should not be executed'
+diff --git a/repro/foobar/__init__.py b/repro/foobar/__init__.py
+new file mode 100644
+index 000000000..2cfffa40d
+--- /dev/null
++++ b/repro/foobar/__init__.py
+@@ -0,0 +1 @@
++assert False
+diff --git a/repro/test_foo.py b/repro/test_foo.py
+new file mode 100644
+index 000000000..59124758b
+--- /dev/null
++++ b/repro/test_foo.py
+@@ -0,0 +1 @@
++def test_foo(): pass
+diff --git a/repro/tox.ini b/repro/tox.ini
+new file mode 100644
+index 000000000..47f32ecd2
+--- /dev/null
++++ b/repro/tox.ini
+@@ -0,0 +1,9 @@
++[tox]
++envlist = py37-pytest{522,523}
++skipsdist = true
++
++[testenv]
++deps =
++    pytest522: pytest==5.2.2
++    pytest523: pytest==5.2.3
++commands = pytest
+diff --git a/src/_pytest/main.py b/src/_pytest/main.py
+index 3c205027d..df8f5917d 100644
+--- a/src/_pytest/main.py
++++ b/src/_pytest/main.py
+@@ -304,6 +304,12 @@ def pytest_ignore_collect(path, config):
+     allow_in_venv = config.getoption("collect_in_virtualenv")
+     if not allow_in_venv and _in_venv(path):
+         return True
++        
++    # Ignore __init__.py files unless explicitly passed as arguments
++    if path.basename == "__init__.py" and not any(
++        arg == str(path) or arg.endswith("/__init__.py") for arg in config.args
++    ):
++        return True
+ 
+     return False
+ 
+@@ -510,13 +516,18 @@ class Session(nodes.FSCollector):
+                 if parent.isdir():
+                     pkginit = parent.join("__init__.py")
+                     if pkginit.isfile():
+-                        if pkginit not in self._node_cache:
+-                            col = self._collectfile(pkginit, handle_dupes=False)
+-                            if col:
+-                                if isinstance(col[0], Package):
+-                                    self._pkg_roots[parent] = col[0]
+-                                # always store a list in the cache, matchnodes expects it
+-                                self._node_cache[col[0].fspath] = [col[0]]
++                        # Only collect __init__.py if explicitly passed
++                        if any(
++                            arg == str(pkginit) or arg.endswith("/__init__.py")
++                            for arg in self.config.args
++                        ):
++                            if pkginit not in self._node_cache:
++                                col = self._collectfile(pkginit, handle_dupes=False)
++                                if col:
++                                    if isinstance(col[0], Package):
++                                        self._pkg_roots[parent] = col[0]
++                                    # always store a list in the cache, matchnodes expects it
++                                    self._node_cache[col[0].fspath] = [col[0]]
+ 
+         # If it's a directory argument, recurse and look for any Subpackages.
+         # Let the Package collector deal with subnodes, don't collect here.
+@@ -527,16 +538,27 @@ class Session(nodes.FSCollector):
+             for path in argpath.visit(
+                 fil=self._visit_filter, rec=self._recurse, bf=True, sort=True
+             ):
++                # Skip __init__.py files unless explicitly passed
++                if path.basename == "__init__.py" and not any(
++                    arg == str(path) or arg.endswith("/__init__.py") for arg in self.config.args
++                ):
++                    continue
++                    
+                 dirpath = path.dirpath()
+                 if dirpath not in seen_dirs:
+                     # Collect packages first.
+                     seen_dirs.add(dirpath)
+                     pkginit = dirpath.join("__init__.py")
+                     if pkginit.exists():
+-                        for x in self._collectfile(pkginit):
+-                            yield x
+-                            if isinstance(x, Package):
+-                                self._pkg_roots[dirpath] = x
++                        # Only collect __init__.py if explicitly passed
++                        if any(
++                            arg == str(pkginit) or arg.endswith("/__init__.py")
++                            for arg in self.config.args
++                        ):
++                            for x in self._collectfile(pkginit):
++                                yield x
++                                if isinstance(x, Package):
++                                    self._pkg_roots[dirpath] = x
+                 if dirpath in self._pkg_roots:
+                     # Do not collect packages here.
+                     continue
+diff --git a/test_foo.py b/test_foo.py
+new file mode 100644
+index 000000000..e73854b0e
+--- /dev/null
++++ b/test_foo.py
+@@ -0,0 +1 @@
++def test_pass(): pass
+diff --git a/test_pkg/__init__.py b/test_pkg/__init__.py
+new file mode 100644
+index 000000000..4b28edb2b
+--- /dev/null
++++ b/test_pkg/__init__.py
+@@ -0,0 +1 @@
++assert False, 'Should not be executed'
+diff --git a/test_pkg/test_example.py b/test_pkg/test_example.py
+new file mode 100644
+index 000000000..e73854b0e
+--- /dev/null
++++ b/test_pkg/test_example.py
+@@ -0,0 +1 @@
++def test_pass(): pass
