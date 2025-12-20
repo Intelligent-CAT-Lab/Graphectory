@@ -1,0 +1,20 @@
+diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py
+index 55874bf2..867e63ae 100644
+--- a/seaborn/_core/scales.py
++++ b/seaborn/_core/scales.py
+@@ -379,7 +379,14 @@ class ContinuousBase(Scale):
+             locs = axis.major.locator()
+             locs = locs[(vmin <= locs) & (locs <= vmax)]
+             labels = axis.major.formatter.format_ticks(locs)
+-            new._legend = list(locs), list(labels)
++            
++            # Get the multiplicative factor and additive offset from the formatter
++            multiplier = 10 ** axis.major.formatter.orderOfMagnitude
++            offset = axis.major.formatter.offset
++            
++            # Apply both transformations to get the actual data values
++            actual_values = [(loc * multiplier) + offset for loc in locs]
++            new._legend = list(actual_values), list(labels)
+ 
+         return new
+ 

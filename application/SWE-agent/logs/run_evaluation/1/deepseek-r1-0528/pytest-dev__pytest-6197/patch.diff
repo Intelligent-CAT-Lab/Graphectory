@@ -1,0 +1,57 @@
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 000000000..9504f1c52
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,37 @@
++import os
++import shutil
++import subprocess
++import sys
++
++def test_regression_fix():
++    # Create a temporary directory structure
++    test_dir = "test_regression"
++    os.makedirs(os.path.join(test_dir, "foobar"), exist_ok=True)
++    
++    # Create problematic __init__.py
++    with open(os.path.join(test_dir, "foobar", "__init__.py"), "w") as f:
++        f.write("assert False  # This should cause failure if collected")
++    
++    # Create a simple test file
++    with open(os.path.join(test_dir, "test_example.py"), "w") as f:
++        f.write("def test_pass():\n    assert True")
++    
++    # Run pytest and capture output
++    result = subprocess.run(
++        [sys.executable, "-m", "pytest", test_dir],
++        stdout=subprocess.PIPE,
++        stderr=subprocess.PIPE,
++        text=True
++    )
++    
++    # Verify we have 1 passed test and no errors
++    assert "1 passed" in result.stdout, "Expected 1 passed test"
++    assert "ERROR" not in result.stdout, "Unexpected error during collection"
++    assert "AssertionError" not in result.stdout, "__init__.py was incorrectly collected"
++    
++    # Clean up
++    shutil.rmtree(test_dir)
++
++if __name__ == "__main__":
++    test_regression_fix()
++    print("Test passed successfully!")
+\ No newline at end of file
+diff --git a/src/_pytest/python.py b/src/_pytest/python.py
+index 306e5f217..9bc9dbeef 100644
+--- a/src/_pytest/python.py
++++ b/src/_pytest/python.py
+@@ -192,7 +192,7 @@ def path_matches_patterns(path, patterns):
+ 
+ def pytest_pycollect_makemodule(path, parent):
+     if path.basename == "__init__.py":
+-        return Package(path, parent)
++        return None  # Skip __init__.py files during test collection
+     return Module(path, parent)
+ 
+ 
