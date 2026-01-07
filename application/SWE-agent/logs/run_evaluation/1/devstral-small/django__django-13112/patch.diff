@@ -1,0 +1,26 @@
+diff --git a/django/db/models/fields/related.py b/django/db/models/fields/related.py
+index c2aea9c730..27173a5e21 100644
+--- a/django/db/models/fields/related.py
++++ b/django/db/models/fields/related.py
+@@ -54,7 +54,20 @@ def resolve_relation(scope_model, relation):
+     # Look for an "app.Model" relation
+     if isinstance(relation, str):
+         if "." not in relation:
+-            relation = "%s.%s" % (scope_model._meta.app_label, relation)
++            # Get the app label from the scope model
++            app_label = scope_model._meta.app_label
++            # Try to find the model in any installed app with case-insensitive matching
++            from django.apps import apps
++            model_name = relation
++            for app_config in apps.get_app_configs():
++                try:
++                    model = apps.get_model(app_config.label, model_name)
++                    if model:
++                        return "%s.%s" % (app_config.label, model_name)
++                except LookupError:
++                    continue
++            # If not found with case-insensitive matching, use the original app label
++            relation = "%s.%s" % (app_label, relation)
+ 
+     return relation
+ 

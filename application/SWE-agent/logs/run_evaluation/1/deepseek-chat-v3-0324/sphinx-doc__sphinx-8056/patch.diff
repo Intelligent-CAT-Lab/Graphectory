@@ -1,0 +1,61 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..d114bbde9
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,10 @@
++def example(x1, x2):
++    """Example function.
++
++    Parameters
++    ----------
++    x1, x2 : array_like, optional
++        Input arrays, description of `x1`, `x2`.
++    """
++    pass
++
+diff --git a/sphinx/ext/napoleon/docstring.py b/sphinx/ext/napoleon/docstring.py
+index b3daa06f1..091498ce9 100644
+--- a/sphinx/ext/napoleon/docstring.py
++++ b/sphinx/ext/napoleon/docstring.py
+@@ -407,22 +407,29 @@ class GoogleDocstring:
+         _desc = self._strip_empty(_desc)
+         has_desc = any(_desc)
+         separator = ' -- ' if has_desc else ''
+-        if _name:
+-            if _type:
+-                if '`' in _type:
+-                    field = '**%s** (%s)%s' % (_name, _type, separator)
+-                else:
+-                    field = '**%s** (*%s*)%s' % (_name, _type, separator)
+-            else:
+-                field = '**%s**%s' % (_name, separator)
++        
++        # Handle optional keyword
++        if _type and ', optional' in _type:
++            base_type = _type.replace(', optional', '').strip()
++            type_str = f'*{base_type}* (*optional*)'
+         elif _type:
+             if '`' in _type:
+-                field = '%s%s' % (_type, separator)
++                type_str = _type
+             else:
+-                field = '*%s*%s' % (_type, separator)
++                type_str = f'*{_type}*'
++        else:
++            type_str = ''
++        
++        if _name:
++            if type_str:
++                field = f'**{_name}** ({type_str}){separator}'
++            else:
++                field = f'**{_name}**{separator}'
++        elif type_str:
++            field = f'{type_str}{separator}'
+         else:
+             field = ''
+-
++        
+         if has_desc:
+             _desc = self._fix_field_desc(_desc)
+             if _desc[0]:

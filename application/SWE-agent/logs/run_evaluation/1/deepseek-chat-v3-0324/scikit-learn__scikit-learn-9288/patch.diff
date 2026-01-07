@@ -1,0 +1,78 @@
+diff --git a/sklearn/cluster/k_means_.py b/sklearn/cluster/k_means_.py
+index b7fbdf7da..840c8e26f 100644
+--- a/sklearn/cluster/k_means_.py
++++ b/sklearn/cluster/k_means_.py
+@@ -178,41 +178,16 @@ def _check_normalize_sample_weight(sample_weight, X):
+ def k_means(X, n_clusters, sample_weight=None, init='k-means++',
+             precompute_distances='auto', n_init=10, max_iter=300,
+             verbose=False, tol=1e-4, random_state=None, copy_x=True,
+-            n_jobs=None, algorithm="auto", return_n_iter=False):
++            n_jobs=None, algorithm="auto", return_n_iter=False, deterministic=False):
+     """K-means clustering algorithm.
+ 
+-    Read more in the :ref:`User Guide <k_means>`.
+-
+     Parameters
+     ----------
+-    X : array-like or sparse matrix, shape (n_samples, n_features)
+-        The observations to cluster. It must be noted that the data
+-        will be converted to C ordering, which will cause a memory copy
+-        if the given data is not C-contiguous.
+-
+-    n_clusters : int
+-        The number of clusters to form as well as the number of
+-        centroids to generate.
+-
+-    sample_weight : array-like, shape (n_samples,), optional
+-        The weights for each observation in X. If None, all observations
+-        are assigned equal weight (default: None)
+-
+-    init : {'k-means++', 'random', or ndarray, or a callable}, optional
+-        Method for initialization, default to 'k-means++':
+-
+-        'k-means++' : selects initial cluster centers for k-mean
+-        clustering in a smart way to speed up convergence. See section
+-        Notes in k_init for more details.
+-
+-        'random': choose k observations (rows) at random from data for
+-        the initial centroids.
+-
+-        If an ndarray is passed, it should be of shape (n_clusters, n_features)
+-        and gives the initial centers.
+-
+-        If a callable is passed, it should take arguments X, k and
+-        and a random state and return an initialization.
++    deterministic : bool, default=False
++        If True, forces n_jobs=1 to ensure reproducible results.
++    """
++    if deterministic:
++        n_jobs = 1
+ 
+     precompute_distances : {'auto', True, False}
+         Precompute distances (faster but takes more memory).
+@@ -907,7 +882,7 @@ class KMeans(BaseEstimator, ClusterMixin, TransformerMixin):
+     def __init__(self, n_clusters=8, init='k-means++', n_init=10,
+                  max_iter=300, tol=1e-4, precompute_distances='auto',
+                  verbose=0, random_state=None, copy_x=True,
+-                 n_jobs=None, algorithm='auto'):
++                 n_jobs=None, algorithm='auto', deterministic=False):
+ 
+         self.n_clusters = n_clusters
+         self.init = init
+@@ -918,6 +893,7 @@ class KMeans(BaseEstimator, ClusterMixin, TransformerMixin):
+         self.verbose = verbose
+         self.random_state = random_state
+         self.copy_x = copy_x
++        self.deterministic = deterministic
+         self.n_jobs = n_jobs
+         self.algorithm = algorithm
+ 
+@@ -960,7 +936,7 @@ class KMeans(BaseEstimator, ClusterMixin, TransformerMixin):
+                 precompute_distances=self.precompute_distances,
+                 tol=self.tol, random_state=random_state, copy_x=self.copy_x,
+                 n_jobs=self.n_jobs, algorithm=self.algorithm,
+-                return_n_iter=True)
++                return_n_iter=True, deterministic=self.deterministic)
+         return self
+ 
+     def fit_predict(self, X, y=None, sample_weight=None):

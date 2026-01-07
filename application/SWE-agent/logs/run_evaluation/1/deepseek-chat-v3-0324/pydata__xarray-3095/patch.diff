@@ -1,0 +1,54 @@
+diff --git a/xarray/core/dataset.py b/xarray/core/dataset.py
+index b00dad96..65b4738f 100644
+--- a/xarray/core/dataset.py
++++ b/xarray/core/dataset.py
+@@ -933,8 +933,16 @@ class Dataset(Mapping, ImplementsDatasetReduce, DataWithCoords):
+         pandas.DataFrame.copy
+         """  # noqa
+         if data is None:
+-            variables = OrderedDict((k, v.copy(deep=deep))
+-                                    for k, v in self._variables.items())
++            variables = OrderedDict()
++            for k, v in self._variables.items():
++                if isinstance(v, xr.IndexVariable):
++                    # Ensure IndexVariable dtype is preserved during copy
++                    copied_var = v.copy(deep=deep)
++                    if deep and isinstance(copied_var.data, np.ndarray):
++                        copied_var.data = np.array(copied_var.data, dtype=v.dtype)
++                    variables[k] = copied_var
++                else:
++                    variables[k] = v.copy(deep=deep)
+         elif not utils.is_dict_like(data):
+             raise ValueError('Data must be dict-like')
+         else:
+diff --git a/xarray/core/variable.py b/xarray/core/variable.py
+index 379be8f5..5840b2f8 100644
+--- a/xarray/core/variable.py
++++ b/xarray/core/variable.py
+@@ -180,7 +180,7 @@ def as_compatible_data(data, fastpath=False):
+             data = np.asarray(data)
+ 
+     # validate whether the data is valid data types
+-    data = np.asarray(data)
++    data = np.asarray(data, dtype=getattr(data, 'dtype', None))
+ 
+     if isinstance(data, np.ndarray):
+         if data.dtype.kind == 'O':
+@@ -805,11 +805,16 @@ class Variable(common.AbstractArray, arithmetic.SupportsArithmetic,
+                 data = indexing.MemoryCachedArray(data.array)
+ 
+             if deep:
++                print(f"Original data type: {type(data)}, dtype: {getattr(data, 'dtype', None)}")
+                 if isinstance(data, dask_array_type):
+                     data = data.copy()
+                 elif not isinstance(data, PandasIndexAdapter):
+                     # pandas.Index is immutable
+-                    data = np.array(data)
++                    if isinstance(data, np.ndarray):
++                        data = np.array(data, dtype=data.dtype)
++                    else:
++                        data = np.array(data, dtype=getattr(data, 'dtype', None))
++                print(f"Copied data type: {type(data)}, dtype: {getattr(data, 'dtype', None)}")
+         else:
+             data = as_compatible_data(data)
+             if self.shape != data.shape:

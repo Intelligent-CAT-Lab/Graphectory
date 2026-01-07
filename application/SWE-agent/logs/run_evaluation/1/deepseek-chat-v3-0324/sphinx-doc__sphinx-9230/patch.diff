@@ -1,0 +1,88 @@
+diff --git a/doc/conf.py b/doc/conf.py
+index add9e8d61..8a6704e40 100644
+--- a/doc/conf.py
++++ b/doc/conf.py
+@@ -1,6 +1,10 @@
+ # Sphinx documentation build configuration file
+ 
+ import re
++import sys
++import os
++sys.path.insert(0, os.path.abspath('..'))
++sys.path.insert(0, os.path.abspath('../testbed'))
+ 
+ import sphinx
+ 
+diff --git a/doc/contents.rst b/doc/contents.rst
+index eb6946292..7108deb26 100644
+--- a/doc/contents.rst
++++ b/doc/contents.rst
+@@ -21,6 +21,23 @@ Sphinx documentation contents
+    changes
+    examples
+ 
++.. toctree::
++   :maxdepth: 2
++   :caption: Main Documentation
++
++   usage/index
++   development/index
++   man/index
++   templating
++   latex
++   extdev/index
++   internals/index
++   faq
++   glossary
++   changes
++   examples
++   test_docstring
++
+ 
+ Indices and tables
+ ==================
+diff --git a/doc/test_docstring.rst b/doc/test_docstring.rst
+new file mode 100644
+index 000000000..67220b279
+--- /dev/null
++++ b/doc/test_docstring.rst
+@@ -0,0 +1,7 @@
++Test Docstring
++==============
++
++.. automodule:: test_docstring
++   :members:
++   :undoc-members:
++   :show-inheritance:
+\ No newline at end of file
+diff --git a/sphinx/ext/autodoc/typehints.py b/sphinx/ext/autodoc/typehints.py
+index af4b47bb0..e49f23f93 100644
+--- a/sphinx/ext/autodoc/typehints.py
++++ b/sphinx/ext/autodoc/typehints.py
+@@ -123,7 +123,7 @@ def modify_field_list(node: nodes.field_list, annotations: Dict[str, str]) -> No
+     if 'return' in annotations and 'return' not in arguments:
+         field = nodes.field()
+         field += nodes.field_name('', 'rtype')
+-        field += nodes.field_body('', nodes.paragraph('', annotation))
++        field += nodes.field_body('', nodes.paragraph('', annotations['return']))
+         node += field
+ 
+ 
+diff --git a/test_docstring.py b/test_docstring.py
+new file mode 100644
+index 000000000..0172bb88f
+--- /dev/null
++++ b/test_docstring.py
+@@ -0,0 +1,11 @@
++"""
++Test module for docstring rendering.
++"""
++
++def example_method(opc_meta=None):
++    """
++    Example method with a parameter of type dict(str, str).
++
++    :param dict(str, str) opc_meta: (optional) A dictionary mapping strings to strings.
++    """
++    pass
+\ No newline at end of file

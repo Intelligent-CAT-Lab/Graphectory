@@ -1,0 +1,30 @@
+diff --git a/sympy/assumptions/handlers/calculus.py b/sympy/assumptions/handlers/calculus.py
+index aa0d00aca..d59e7e0ee 100644
+--- a/sympy/assumptions/handlers/calculus.py
++++ b/sympy/assumptions/handlers/calculus.py
+@@ -46,6 +46,10 @@ def Symbol(expr, assumptions):
+         True
+ 
+         """
++        # If symbol is even, it must be finite
++        if ask(Q.even(expr), assumptions):
++            return True
++            
+         if expr.is_finite is not None:
+             return expr.is_finite
+         if Q.finite(expr) in conjuncts(assumptions):
+diff --git a/sympy/core/symbol.py b/sympy/core/symbol.py
+index 44674d198..0a1392126 100644
+--- a/sympy/core/symbol.py
++++ b/sympy/core/symbol.py
+@@ -229,6 +229,10 @@ def __new_stage2__(cls, name, **assumptions):
+         # compute a minimal equivalent assumption set.
+         tmp_asm_copy = assumptions.copy()
+ 
++        # If symbol is even, it must be finite
++        if assumptions.get('even', False):
++            assumptions['finite'] = True
++            
+         # be strict about commutativity
+         is_commutative = fuzzy_bool(assumptions.get('commutative', True))
+         assumptions['commutative'] = is_commutative

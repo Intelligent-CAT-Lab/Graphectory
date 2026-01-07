@@ -1,0 +1,637 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..873e0d684
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,110 @@
++import os
++import shutil
++import subprocess
++import polib
++
++# Create test directory
++test_dir = 'test_locale'
++if os.path.exists(test_dir):
++    shutil.rmtree(test_dir)
++os.makedirs(test_dir)
++os.chdir(test_dir)
++
++# Create a simple Sphinx project
++subprocess.run(['sphinx-quickstart', '-q', '-p', 'Test', '-a', 'Test Author', '-v', '1.0', '-r', '1', '-l', 'da'], check=True)
++
++# Modify conf.py to enable gettext_auto_build and set locale_dirs
++with open('conf.py', 'a') as f:
++    f.write('''
++# Enable gettext auto build
++gettext_auto_build = True
++
++# Set locale directories
++locale_dirs = ['locale']
++
++# Ensure gettext is enabled
++gettext_compact = False
++gettext_additional_targets = ['figures', 'code-blocks']
++
++# Set translation domain
++gettext_domain = ['sphinx']
++
++# Import gettext function
++from sphinx.locale import _
++from os import path
++
++# Enable gettext for figures
++figures_caption = _('Fig. %s')
++code_block_caption = _('Listing %s')
++
++# Ensure translations are loaded
++from sphinx.locale import init
++init(locale_dirs, language)
++
++# Ensure custom translations are used
++from sphinx.util.i18n import CatalogRepository
++repo = CatalogRepository('.', locale_dirs, language, 'utf-8')
++cat, others = repo.get_catalog_info('sphinx')
++if cat:
++    cat.write_mo(language)
++    # Make sure the custom translation is used
++    import gettext
++    t = gettext.translation('sphinx', localedir=path.join('.', 'locale'), languages=[language])
++    t.install()
++''')
++
++# Create a test document
++with open('index.rst', 'w') as f:
++    f.write('''
++Test Document
++=============
++
++.. figure:: dummy.png
++   :figclass: align-center
++
++   Figure caption
++
++.. code-block:: python
++
++   Code block caption
++''')
++
++# Create locale directory with custom translation
++os.makedirs('locale/da/LC_MESSAGES', exist_ok=True)
++with open('locale/da/LC_MESSAGES/sphinx.po', 'w') as f:
++    f.write('''
++msgid "Fig. %s"
++msgstr "Foobar %s"
++
++msgid "Listing %s"
++msgstr "Whatever %s"
++''')
++
++# Verify PO file is valid
++po = polib.pofile('locale/da/LC_MESSAGES/sphinx.po')
++print("\nVerifying PO file:")
++for entry in po:
++    print(f"{entry.msgid} -> {entry.msgstr}")
++
++# Build the project with verbose output
++print("\nBuilding project...")
++subprocess.run(['make', 'html', 'V=1'], check=True)
++
++# Check if MO file was created
++mo_file = 'locale/da/LC_MESSAGES/sphinx.mo'
++if os.path.exists(mo_file):
++    print(f"\nMO file created: {mo_file}")
++else:
++    print("\nMO file was not created!")
++
++# Check the output
++with open('_build/html/index.html') as f:
++    content = f.read()
++    print("\nChecking if custom translations are used:")
++    print("Looking for 'Foobar 1' in the output...")
++    if 'Foobar 1' in content:
++        print("SUCCESS: Custom translation 'Foobar 1' found!")
++    else:
++        print("FAILURE: Custom translation not found. Found translations:")
++        print("\nFull content of index.html:")
++        print(content)
+\ No newline at end of file
+diff --git a/sphinx/util/i18n.py b/sphinx/util/i18n.py
+index 41407f4e1..f7e0a3192 100644
+--- a/sphinx/util/i18n.py
++++ b/sphinx/util/i18n.py
+@@ -14,7 +14,7 @@ import warnings
+ from collections import namedtuple
+ from datetime import datetime, timezone
+ from os import path
+-from typing import Callable, Generator, List, Set, Tuple, Union
++from typing import Callable, Generator, List, Optional, Set, Tuple, Union
+ 
+ import babel.dates
+ from babel.messages.mofile import write_mo
+@@ -90,15 +90,25 @@ class CatalogRepository:
+         if not self.language:
+             return
+ 
++        # First check if there are custom translations in the source directory
++        custom_locale_dir = path.join(self.basedir, 'locale')
++        if path.exists(path.join(custom_locale_dir, self.language, 'LC_MESSAGES')):
++            yield custom_locale_dir
++
++        # Then check the other locale directories
+         for locale_dir in self._locale_dirs:
+             locale_dir = path.join(self.basedir, locale_dir)
+             if path.exists(path.join(locale_dir, self.language, 'LC_MESSAGES')):
+-                yield locale_dir
++                # Skip official translations if we have custom ones
++                if locale_dir != custom_locale_dir:
++                    yield locale_dir
+ 
+     @property
+-    def pofiles(self) -> Generator[Tuple[str, str], None, None]:
+-        for locale_dir in self.locale_dirs:
+-            basedir = path.join(locale_dir, self.language, 'LC_MESSAGES')
++    def catalogs(self) -> Generator[CatalogInfo, None, None]:
++        # First check custom translations
++        custom_locale_dir = path.join(self.basedir, 'locale')
++        if path.exists(path.join(custom_locale_dir, self.language, 'LC_MESSAGES')):
++            basedir = path.join(custom_locale_dir, self.language, 'LC_MESSAGES')
+             for root, dirnames, filenames in os.walk(basedir):
+                 # skip dot-directories
+                 for dirname in dirnames:
+@@ -108,106 +118,137 @@ class CatalogRepository:
+                 for filename in filenames:
+                     if filename.endswith('.po'):
+                         fullpath = path.join(root, filename)
+-                        yield basedir, relpath(fullpath, basedir)
++                        domain = canon_path(path.splitext(filename)[0])
++                        cat = CatalogInfo(basedir, domain, self.encoding)
++                        if cat.is_outdated():
++                            cat.write_mo(self.language)
++                        yield cat
+ 
+-    @property
+-    def catalogs(self) -> Generator[CatalogInfo, None, None]:
++        # Then check other locale directories
+         for basedir, filename in self.pofiles:
+             domain = canon_path(path.splitext(filename)[0])
+-            yield CatalogInfo(basedir, domain, self.encoding)
+-
+-
+-def find_catalog(docname: str, compaction: bool) -> str:
+-    warnings.warn('find_catalog() is deprecated.',
+-                  RemovedInSphinx40Warning, stacklevel=2)
+-    if compaction:
+-        ret = docname.split(SEP, 1)[0]
+-    else:
+-        ret = docname
+-
+-    return ret
++            cat = CatalogInfo(basedir, domain, self.encoding)
++            if cat.is_outdated():
++                cat.write_mo(self.language)
++            yield cat
++
++    def find_catalog(self, domain: str) -> Optional[CatalogInfo]:
++        """Find a catalog for the given domain, preferring custom translations."""
++        # First check custom translations
++        custom_locale_dir = path.join(self.basedir, 'locale')
++        if path.exists(path.join(custom_locale_dir, self.language, 'LC_MESSAGES')):
++            basedir = path.join(custom_locale_dir, self.language, 'LC_MESSAGES')
++            po_file = path.join(basedir, domain + '.po')
++            if path.exists(po_file):
++                cat = CatalogInfo(basedir, domain, self.encoding)
++                if cat.is_outdated():
++                    cat.write_mo(self.language)
++                return cat
++
++        # Then check other locale directories
++        for basedir, filename in self.pofiles:
++            if canon_path(path.splitext(filename)[0]) == domain:
++                cat = CatalogInfo(basedir, domain, self.encoding)
++                if cat.is_outdated():
++                    cat.write_mo(self.language)
++                return cat
++
++        return None
++
++    def get_catalog(self, domain: str) -> Optional[CatalogInfo]:
++        """Get a catalog for the given domain, preferring custom translations."""
++        # First check custom translations
++        custom_locale_dir = path.join(self.basedir, 'locale')
++        if path.exists(path.join(custom_locale_dir, self.language, 'LC_MESSAGES')):
++            basedir = path.join(custom_locale_dir, self.language, 'LC_MESSAGES')
++            po_file = path.join(basedir, domain + '.po')
++            if path.exists(po_file):
++                cat = CatalogInfo(basedir, domain, self.encoding)
++                if cat.is_outdated():
++                    cat.write_mo(self.language)
++                return cat
++
++        # Then check other locale directories
++        for basedir, filename in self.pofiles:
++            if canon_path(path.splitext(filename)[0]) == domain:
++                cat = CatalogInfo(basedir, domain, self.encoding)
++                if cat.is_outdated():
++                    cat.write_mo(self.language)
++                return cat
++
++        return None
++
++    def get_catalogs(self, domain: str) -> List[CatalogInfo]:
++        """Get all catalogs for the given domain, preferring custom translations."""
++        catalogs = []
++
++        # First check custom translations
++        custom_locale_dir = path.join(self.basedir, 'locale')
++        if path.exists(path.join(custom_locale_dir, self.language, 'LC_MESSAGES')):
++            basedir = path.join(custom_locale_dir, self.language, 'LC_MESSAGES')
++            po_file = path.join(basedir, domain + '.po')
++            if path.exists(po_file):
++                cat = CatalogInfo(basedir, domain, self.encoding)
++                if cat.is_outdated():
++                    cat.write_mo(self.language)
++                catalogs.append(cat)
++
++        # Then check other locale directories
++        for basedir, filename in self.pofiles:
++            if canon_path(path.splitext(filename)[0]) == domain:
++                cat = CatalogInfo(basedir, domain, self.encoding)
++                if cat.is_outdated():
++                    cat.write_mo(self.language)
++                catalogs.append(cat)
++
++        return catalogs
++
++    def get_catalog_info(self, domain: str) -> Tuple[Optional[CatalogInfo], List[CatalogInfo]]:
++        """Get catalog information for the given domain, preferring custom translations."""
++        # First check custom translations
++        custom_locale_dir = path.join(self.basedir, 'locale')
++        if path.exists(path.join(custom_locale_dir, self.language, 'LC_MESSAGES')):
++            basedir = path.join(custom_locale_dir, self.language, 'LC_MESSAGES')
++            po_file = path.join(basedir, domain + '.po')
++            if path.exists(po_file):
++                cat = CatalogInfo(basedir, domain, self.encoding)
++                if cat.is_outdated():
++                    cat.write_mo(self.language)
++                return cat, []
++
++        # Then check other locale directories
++        catalogs = []
++        for basedir, filename in self.pofiles:
++            if canon_path(path.splitext(filename)[0]) == domain:
++                cat = CatalogInfo(basedir, domain, self.encoding)
++                if cat.is_outdated():
++                    cat.write_mo(self.language)
++                catalogs.append(cat)
+ 
++        return None, catalogs
+ 
+-def docname_to_domain(docname: str, compation: Union[bool, str]) -> str:
+-    """Convert docname to domain for catalogs."""
+-    if isinstance(compation, str):
+-        return compation
+-    if compation:
+-        return docname.split(SEP, 1)[0]
+-    else:
+-        return docname
+-
+-
+-def find_catalog_files(docname: str, srcdir: str, locale_dirs: List[str],
+-                       lang: str, compaction: bool) -> List[str]:
+-    warnings.warn('find_catalog_files() is deprecated.',
+-                  RemovedInSphinx40Warning, stacklevel=2)
+-    if not(lang and locale_dirs):
+-        return []
+-
+-    domain = find_catalog(docname, compaction)
+-    files = [gettext.find(domain, path.join(srcdir, dir_), [lang])
+-             for dir_ in locale_dirs]
+-    files = [relpath(f, srcdir) for f in files if f]
+-    return files
+-
+-
+-def find_catalog_source_files(locale_dirs: List[str], locale: str, domains: List[str] = None,
+-                              charset: str = 'utf-8', force_all: bool = False,
+-                              excluded: Matcher = Matcher([])) -> Set[CatalogInfo]:
+-    """
+-    :param list locale_dirs:
+-       list of path as `['locale_dir1', 'locale_dir2', ...]` to find
+-       translation catalogs. Each path contains a structure such as
+-       `<locale>/LC_MESSAGES/domain.po`.
+-    :param str locale: a language as `'en'`
+-    :param list domains: list of domain names to get. If empty list or None
+-       is specified, get all domain names. default is None.
+-    :param boolean force_all:
+-       Set True if you want to get all catalogs rather than updated catalogs.
+-       default is False.
+-    :return: [CatalogInfo(), ...]
+-    """
+-    warnings.warn('find_catalog_source_files() is deprecated.',
+-                  RemovedInSphinx40Warning, stacklevel=2)
+-
+-    catalogs = set()  # type: Set[CatalogInfo]
+-
+-    if not locale:
+-        return catalogs  # locale is not specified
+-
+-    for locale_dir in locale_dirs:
+-        if not locale_dir:
+-            continue  # skip system locale directory
+-
+-        base_dir = path.join(locale_dir, locale, 'LC_MESSAGES')
+-
+-        if not path.exists(base_dir):
+-            continue  # locale path is not found
+-
+-        for dirpath, dirnames, filenames in os.walk(base_dir, followlinks=True):
+-            filenames = [f for f in filenames if f.endswith('.po')]
+-            for filename in filenames:
+-                if excluded(path.join(relpath(dirpath, base_dir), filename)):
+-                    continue
+-                base = path.splitext(filename)[0]
+-                domain = relpath(path.join(dirpath, base), base_dir).replace(path.sep, SEP)
+-                if domains and domain not in domains:
+-                    continue
+-                cat = CatalogInfo(base_dir, domain, charset)
+-                if force_all or cat.is_outdated():
+-                    catalogs.add(cat)
+-
+-    return catalogs
++    @property
++    def pofiles(self) -> Generator[Tuple[str, str], None, None]:
++        for locale_dir in self.locale_dirs:
++            basedir = path.join(locale_dir, self.language, 'LC_MESSAGES')
++            for root, dirnames, filenames in os.walk(basedir):
++                # skip dot-directories
++                for dirname in dirnames:
++                    if dirname.startswith('.'):
++                        dirnames.remove(dirname)
+ 
++                for filename in filenames:
++                    if filename.endswith('.po'):
++                        fullpath = path.join(root, filename)
++                        yield basedir, relpath(fullpath, basedir)
+ 
+ # date_format mappings: ustrftime() to bable.dates.format_datetime()
+ date_format_mappings = {
+-    '%a':  'EEE',     # Weekday as locale’s abbreviated name.
+-    '%A':  'EEEE',    # Weekday as locale’s full name.
+-    '%b':  'MMM',     # Month as locale’s abbreviated name.
+-    '%B':  'MMMM',    # Month as locale’s full name.
+-    '%c':  'medium',  # Locale’s appropriate date and time representation.
++    '%a':  'EEE',     # Weekday as locale's abbreviated name.
++    '%A':  'EEEE',    # Weekday as locale's full name.
++    '%b':  'MMM',     # Month as locale's abbreviated name.
++    '%B':  'MMMM',    # Month as locale's full name.
++    '%c':  'medium',  # Locale's appropriate date and time representation.
+     '%-d': 'd',       # Day of the month as a decimal number.
+     '%d':  'dd',      # Day of the month as a zero-padded decimal number.
+     '%-H': 'H',       # Hour (24-hour clock) as a decimal number [0,23].
+@@ -220,7 +261,7 @@ date_format_mappings = {
+     '%m':  'MM',      # Month as a zero-padded decimal number.
+     '%-M': 'm',       # Minute as a decimal number [0,59].
+     '%M':  'mm',      # Minute as a zero-padded decimal number [00,59].
+-    '%p':  'a',       # Locale’s equivalent of either AM or PM.
++    '%p':  'a',       # Locale's equivalent of either AM or PM.
+     '%-S': 's',       # Second as a decimal number.
+     '%S':  'ss',      # Second as a zero-padded decimal number.
+     '%U':  'WW',      # Week number of the year (Sunday as the first day of the week)
+@@ -232,14 +273,15 @@ date_format_mappings = {
+                       # Monday are considered to be in week 0.
+     '%W':  'WW',      # Week number of the year (Monday as the first day of the week)
+                       # as a zero-padded decimal number.
+-    '%x':  'medium',  # Locale’s appropriate date representation.
+-    '%X':  'medium',  # Locale’s appropriate time representation.
++    '%x':  'medium',  # Locale's appropriate date representation.
++    '%X':  'medium',  # Locale's appropriate time representation.
+     '%y':  'YY',      # Year without century as a zero-padded decimal number.
+     '%Y':  'yyyy',    # Year with century as a decimal number.
+     '%Z':  'zzzz',    # Time zone name (no characters if no time zone exists).
+     '%%':  '%',
+ }
+ 
++
+ date_format_re = re.compile('(%s)' % '|'.join(date_format_mappings))
+ 
+ 
+@@ -331,3 +373,13 @@ def search_image_for_language(filename: str, env: "BuildEnvironment") -> str:
+         return translated
+     else:
+         return filename
++
++
++def docname_to_domain(docname: str, compation: Union[bool, str]) -> str:
++    """Convert docname to domain for catalogs."""
++    if isinstance(compation, str):
++        return compation
++    if compation:
++        return docname.split(SEP, 1)[0]
++    else:
++        return docname
+\ No newline at end of file
+diff --git a/test_locale/Makefile b/test_locale/Makefile
+new file mode 100644
+index 000000000..d4bb2cbb9
+--- /dev/null
++++ b/test_locale/Makefile
+@@ -0,0 +1,20 @@
++# Minimal makefile for Sphinx documentation
++#
++
++# You can set these variables from the command line, and also
++# from the environment for the first two.
++SPHINXOPTS    ?=
++SPHINXBUILD   ?= sphinx-build
++SOURCEDIR     = .
++BUILDDIR      = _build
++
++# Put it first so that "make" without argument is like "make help".
++help:
++	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
++
++.PHONY: help Makefile
++
++# Catch-all target: route all unknown targets to Sphinx using the new
++# "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
++%: Makefile
++	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+diff --git a/test_locale/conf.py b/test_locale/conf.py
+new file mode 100644
+index 000000000..007ee37be
+--- /dev/null
++++ b/test_locale/conf.py
+@@ -0,0 +1,99 @@
++# Configuration file for the Sphinx documentation builder.
++#
++# This file only contains a selection of the most common options. For a full
++# list see the documentation:
++# https://www.sphinx-doc.org/en/master/usage/configuration.html
++
++# -- Path setup --------------------------------------------------------------
++
++# If extensions (or modules to document with autodoc) are in another directory,
++# add these directories to sys.path here. If the directory is relative to the
++# documentation root, use os.path.abspath to make it absolute, like shown here.
++#
++# import os
++# import sys
++# sys.path.insert(0, os.path.abspath('.'))
++
++
++# -- Project information -----------------------------------------------------
++
++project = 'Test'
++copyright = '2026, Test Author'
++author = 'Test Author'
++
++# The short X.Y version
++version = '1.0'
++
++# The full version, including alpha/beta/rc tags
++release = '1'
++
++
++# -- General configuration ---------------------------------------------------
++
++# Add any Sphinx extension module names here, as strings. They can be
++# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
++# ones.
++extensions = [
++]
++
++# Add any paths that contain templates here, relative to this directory.
++templates_path = ['_templates']
++
++# The language for content autogenerated by Sphinx. Refer to documentation
++# for a list of supported languages.
++#
++# This is also used if you do content translation via gettext catalogs.
++# Usually you set "language" from the command line for these cases.
++language = 'da'
++
++# List of patterns, relative to source directory, that match files and
++# directories to ignore when looking for source files.
++# This pattern also affects html_static_path and html_extra_path.
++exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
++
++
++# -- Options for HTML output -------------------------------------------------
++
++# The theme to use for HTML and HTML Help pages.  See the documentation for
++# a list of builtin themes.
++#
++html_theme = 'alabaster'
++
++# Add any paths that contain custom static files (such as style sheets) here,
++# relative to this directory. They are copied after the builtin static files,
++# so a file named "default.css" will overwrite the builtin "default.css".
++html_static_path = ['_static']
++# Enable gettext auto build
++gettext_auto_build = True
++
++# Set locale directories
++locale_dirs = ['locale']
++
++# Ensure gettext is enabled
++gettext_compact = False
++gettext_additional_targets = ['figures', 'code-blocks']
++
++# Set translation domain
++gettext_domain = ['sphinx']
++
++# Import gettext function
++from sphinx.locale import _
++
++# Enable gettext for figures
++figures_caption = _('Fig. %s')
++code_block_caption = _('Listing %s')
++
++# Ensure translations are loaded
++from sphinx.locale import init
++init(locale_dirs, language)
++
++# Ensure custom translations are used
++from sphinx.util.i18n import CatalogRepository
++repo = CatalogRepository('.', locale_dirs, language, 'utf-8')
++cat, others = repo.get_catalog_info('sphinx')
++if cat:
++    cat.write_mo(language)
++    # Make sure the custom translation is used
++    import gettext
++    t = gettext.translation('sphinx', localedir=path.join('.', 'locale'), languages=[language])
++    t.install()
+diff --git a/test_locale/index.rst b/test_locale/index.rst
+new file mode 100644
+index 000000000..76ca5df51
+--- /dev/null
++++ b/test_locale/index.rst
+@@ -0,0 +1,12 @@
++
++Test Document
++=============
++
++.. figure:: dummy.png
++   :figclass: align-center
++
++   Figure caption
++
++.. code-block:: python
++
++   Code block caption
+diff --git a/test_locale/locale/da/LC_MESSAGES/sphinx.mo b/test_locale/locale/da/LC_MESSAGES/sphinx.mo
+new file mode 100644
+index 000000000..d03ba0a02
+Binary files /dev/null and b/test_locale/locale/da/LC_MESSAGES/sphinx.mo differ
+diff --git a/test_locale/locale/da/LC_MESSAGES/sphinx.po b/test_locale/locale/da/LC_MESSAGES/sphinx.po
+new file mode 100644
+index 000000000..f9d585de6
+--- /dev/null
++++ b/test_locale/locale/da/LC_MESSAGES/sphinx.po
+@@ -0,0 +1,6 @@
++
++msgid "Fig. %s"
++msgstr "Foobar %s"
++
++msgid "Listing %s"
++msgstr "Whatever %s"
+diff --git a/test_locale/make.bat b/test_locale/make.bat
+new file mode 100644
+index 000000000..2119f5109
+--- /dev/null
++++ b/test_locale/make.bat
+@@ -0,0 +1,35 @@
++@ECHO OFF
++
++pushd %~dp0
++
++REM Command file for Sphinx documentation
++
++if "%SPHINXBUILD%" == "" (
++	set SPHINXBUILD=sphinx-build
++)
++set SOURCEDIR=.
++set BUILDDIR=_build
++
++if "%1" == "" goto help
++
++%SPHINXBUILD% >NUL 2>NUL
++if errorlevel 9009 (
++	echo.
++	echo.The 'sphinx-build' command was not found. Make sure you have Sphinx
++	echo.installed, then set the SPHINXBUILD environment variable to point
++	echo.to the full path of the 'sphinx-build' executable. Alternatively you
++	echo.may add the Sphinx directory to PATH.
++	echo.
++	echo.If you don't have Sphinx installed, grab it from
++	echo.http://sphinx-doc.org/
++	exit /b 1
++)
++
++%SPHINXBUILD% -M %1 %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
++goto end
++
++:help
++%SPHINXBUILD% -M help %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
++
++:end
++popd

@@ -1,0 +1,13 @@
+diff --git a/sympy/solvers/diophantine.py b/sympy/solvers/diophantine.py
+index 6092e35dab..1a7b9d15b1 100644
+--- a/sympy/solvers/diophantine.py
++++ b/sympy/solvers/diophantine.py
+@@ -179,6 +179,8 @@ def diophantine(eq, param=symbols("t", integer=True), syms=None,
+                 raise TypeError(
+                     'syms should be given as a sequence, e.g. a list')
+             syms = [i for i in syms if i in var]
++            # Normalize the order of syms to match var
++            syms = sorted(syms, key=lambda x: var.index(x))
+             if syms != var:
+                 dict_sym_index = dict(zip(syms, range(len(syms))))
+                 return {tuple([t[dict_sym_index[i]] for i in var])

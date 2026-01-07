@@ -1,0 +1,111 @@
+diff --git a/django/contrib/sessions/backends/base.py b/django/contrib/sessions/backends/base.py
+index b5453160a5..69093d1c03 100644
+--- a/django/contrib/sessions/backends/base.py
++++ b/django/contrib/sessions/backends/base.py
+@@ -119,7 +119,22 @@ class SessionBase:
+         # RemovedInDjango40Warning: when the deprecation ends, handle here
+         # exceptions similar to what _legacy_decode() does now.
+         except Exception:
+-            return self._legacy_decode(session_data)
++            try:
++                # Try legacy decode first
++                return self._legacy_decode(session_data)
++            except Exception:
++                # If using sha1 algorithm, try to decode using legacy encode format
++                if getattr(settings, 'DEFAULT_HASHING_ALGORITHM', None) == 'sha1':
++                    from django.core.signing import Signer, JSONSerializer
++                    signer = Signer()
++                    serializer = JSONSerializer()
++                    try:
++                        decoded = signer.legacy_decode(session_data)
++                        if decoded:
++                            return serializer.loads(decoded)
++                    except Exception:
++                        pass
++                return {}
+ 
+     def _legacy_decode(self, session_data):
+         # RemovedInDjango40Warning: pre-Django 3.1 format will be invalid.
+diff --git a/django/contrib/sessions/backends/db.py b/django/contrib/sessions/backends/db.py
+index 7c905a2c99..a637a29620 100644
+--- a/django/contrib/sessions/backends/db.py
++++ b/django/contrib/sessions/backends/db.py
+@@ -1,5 +1,6 @@
+ import logging
+ 
++from django.conf import settings
+ from django.contrib.sessions.backends.base import (
+     CreateError, SessionBase, UpdateError,
+ )
+@@ -41,7 +42,23 @@ class SessionStore(SessionBase):
+ 
+     def load(self):
+         s = self._get_session_from_db()
+-        return self.decode(s.session_data) if s else {}
++        if s:
++            try:
++                return self.decode(s.session_data)
++            except BadSignature:
++                # Try legacy decode if using sha1 algorithm
++                if getattr(settings, 'DEFAULT_HASHING_ALGORITHM', None) == 'sha1':
++                    from django.core.signing import Signer, JSONSerializer
++                    signer = Signer()
++                    serializer = JSONSerializer()
++                    legacy_data = signer.legacy_decode(s.session_data)
++                    if legacy_data:
++                        try:
++                            return serializer.loads(legacy_data)
++                        except (ValueError, TypeError):
++                            pass
++                raise
++        return {}
+ 
+     def exists(self, session_key):
+         return self.model.objects.filter(session_key=session_key).exists()
+@@ -65,9 +82,17 @@ class SessionStore(SessionBase):
+         current session state. Intended to be used for saving the session data
+         to the database.
+         """
++        encoded_data = self.encode(data)
++        # If using sha1 algorithm, also store legacy encoded data
++        if getattr(settings, 'DEFAULT_HASHING_ALGORITHM', None) == 'sha1':
++            from django.core.signing import Signer
++            signer = Signer()
++            legacy_data = signer.legacy_encode(encoded_data)
++            if legacy_data:
++                encoded_data = legacy_data
+         return self.model(
+             session_key=self._get_or_create_session_key(),
+-            session_data=self.encode(data),
++            session_data=encoded_data,
+             expire_date=self.get_expiry_date(),
+         )
+ 
+diff --git a/django/core/signing.py b/django/core/signing.py
+index c6713c3033..5fc7a4f504 100644
+--- a/django/core/signing.py
++++ b/django/core/signing.py
+@@ -183,6 +183,23 @@ class Signer:
+             return value
+         raise BadSignature('Signature "%s" does not match' % sig)
+ 
++    def legacy_encode(self, value):
++        """Encode using legacy format when DEFAULT_HASHING_ALGORITHM is 'sha1'"""
++        if self.algorithm == 'sha1':
++            return self.sign(value)
++        return None
++
++    def legacy_decode(self, signed_value):
++        """Decode using legacy format when DEFAULT_HASHING_ALGORITHM is 'sha1'"""
++        if self.algorithm == 'sha1' and self.sep in signed_value:
++            try:
++                value, sig = signed_value.rsplit(self.sep, 1)
++                if constant_time_compare(sig, self._legacy_signature(value)):
++                    return value
++            except (BadSignature, ValueError):
++                pass
++        return None
++
+ 
+ class TimestampSigner(Signer):
+ 

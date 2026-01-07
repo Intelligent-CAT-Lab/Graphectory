@@ -1,0 +1,41 @@
+diff --git a/sympy/core/relational.py b/sympy/core/relational.py
+index e2e0b7fbcc..d88631a05d 100644
+--- a/sympy/core/relational.py
++++ b/sympy/core/relational.py
+@@ -309,9 +309,17 @@ def _eval_simplify(self, **kwargs):
+             # replace dif with a valid Number that will
+             # allow a definitive comparison with 0
+             v = None
+-            if dif.is_comparable:
++            # Handle set comparisons differently
++            from sympy.sets.sets import Set  # Import Set for set comparisons
++            if isinstance(dif, Set):
++                if dif.is_empty:
++                    v = S.Zero
++                else:
++                    # For non-empty sets, we can't simplify to a number
++                    v = None
++            elif dif.is_comparable:
+                 v = dif.n(2)
+-            elif dif.equals(0):  # XXX this is expensive
++            elif hasattr(dif, 'equals') and dif.equals(0):  # Only call equals if it exists
+                 v = S.Zero
+             if v is not None:
+                 r = r.func._eval_relation(v, S.Zero)
+diff --git a/sympy/sets/sets.py b/sympy/sets/sets.py
+index 3c4aa86e36..1c0d299565 100644
+--- a/sympy/sets/sets.py
++++ b/sympy/sets/sets.py
+@@ -388,6 +388,12 @@ def is_subset(self, other):
+         if ret is not None:
+             return ret
+ 
++        # Special case for ProductSet and FiniteSet
++        if isinstance(self, ProductSet) and other.is_FiniteSet:
++            if self.is_finite_set:
++                return all(elem in other for elem in self)
++            return False
++
+         # Fall back on computing the intersection
+         # XXX: We shouldn't do this. A query like this should be handled
+         # without evaluating new Set objects. It should be the other way round

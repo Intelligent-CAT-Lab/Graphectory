@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphectory-application"
+version = "0.1.0"
+description = "Application layer for Graphectory - plan monitoring and trajectory analysis for software agents"
+requires-python = ">=3.11"
+dependencies = [
+    "bashlex",
+    "networkx",
+    "pyyaml",
+    "pygraphviz",
+]
+
+[tool.setuptools]
+packages = ["plan_monitor"]
+
+[tool.setuptools.package-data]
+plan_monitor = ["config/*.yaml", "config/*.json"]

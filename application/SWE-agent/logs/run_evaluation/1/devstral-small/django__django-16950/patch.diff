@@ -1,0 +1,14 @@
+diff --git a/django/forms/models.py b/django/forms/models.py
+index 3fa04b821f..da17ee13c3 100644
+--- a/django/forms/models.py
++++ b/django/forms/models.py
+@@ -1135,6 +1135,9 @@ class BaseInlineFormSet(BaseModelFormSet):
+         if self.fk.remote_field.field_name != self.fk.remote_field.model._meta.pk.name:
+             fk_value = getattr(self.instance, self.fk.remote_field.field_name)
+             fk_value = getattr(fk_value, "pk", fk_value)
++        
++        # Ensure the instance gets its default values before setting the foreign key
++        form.instance._set_defaults()
+         setattr(form.instance, self.fk.get_attname(), fk_value)
+         return form
+ 

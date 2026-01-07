@@ -1,0 +1,172 @@
+diff --git a/django/db/models/fields/json.py b/django/db/models/fields/json.py
+index fafc1beee8..455affdb86 100644
+--- a/django/db/models/fields/json.py
++++ b/django/db/models/fields/json.py
+@@ -4,7 +4,7 @@ from django import forms
+ from django.core import checks, exceptions
+ from django.db import NotSupportedError, connections, router
+ from django.db.models import lookups
+-from django.db.models.lookups import PostgresOperatorLookup, Transform
++from django.db.models.lookups import PostgresOperatorLookup, Transform, FieldGetDbPrepValueIterableMixin
+ from django.utils.translation import gettext_lazy as _
+ 
+ from . import Field
+@@ -479,6 +479,82 @@ class KeyTransformGte(KeyTransformNumericLookupMixin, lookups.GreaterThanOrEqual
+     pass
+ 
+ 
++class KeyTransformIn(FieldGetDbPrepValueIterableMixin, KeyTransform):
++    lookup_name = 'in'
++
++    def __init__(self, lhs, rhs, key_name):
++        super().__init__(lhs, rhs)
++        self.key_name = key_name
++
++    def get_rhs_op(self, connection, rhs):
++        return 'IN %s' % rhs
++
++    def as_sql(self, compiler, connection):
++        lhs, params, key_transforms = self.preprocess_lhs(compiler, connection)
++        json_path = compile_json_path(key_transforms)
++        if connection.vendor == 'mysql':
++            return 'JSON_EXTRACT(%s, %%s) IN (%s)' % (lhs, ', '.join(['%s'] * len(self.rhs))), tuple(params) + (json_path,) + tuple(self.rhs)
++        elif connection.vendor == 'oracle':
++            return 'JSON_VALUE(%s, %%s) IN (%s)' % (lhs, ', '.join([':p%s'] * len(self.rhs))), tuple(params) + (json_path,) + [f'p{i+1}' for i in range(len(self.rhs))]
++        elif connection.vendor == 'sqlite':
++            return 'JSON_EXTRACT(%s, %%s) IN (%s)' % (lhs, ', '.join(['?'] * len(self.rhs))), tuple(params) + (json_path,) + tuple(self.rhs)
++        else:
++            # PostgreSQL
++            return '(%s ->> %%s)::text IN (%s)' % (lhs, ', '.join(['%s'] * len(self.rhs))), tuple(params) + (json_path,) + tuple(self.rhs)
++
++    @classmethod
++    def get_transform(cls, lhs, rhs, key_name):
++        return cls(lhs, rhs, key_name)
++
++    @classmethod
++    def get_lookup(cls):
++        return In
++
++    @classmethod
++    def get_transform_class(cls, key_name):
++        return lambda lhs, rhs: cls(lhs, rhs, key_name)
++
++    def get_source_expressions(self):
++        return [self.lhs, self.rhs]
++
++    def __call__(self, *args, **kwargs):
++        return self
++
++    def __reduce__(self):
++        return (self.__class__, (self.lhs, self.rhs, self.key_name))
++
++    def __eq__(self, other):
++        return (
++            isinstance(other, KeyTransformIn) and
++            self.lhs == other.lhs and
++            self.rhs == other.rhs and
++            self.key_name == other.key_name
++        )
++
++    def __hash__(self):
++        return hash((self.lhs, self.rhs, self.key_name))
++
++    def __new__(cls, lhs, rhs=None, key_name=None):
++        if rhs is None and key_name is None:
++            return super().__new__(cls)
++        return super().__new__(cls)
++
++    def __init_subclass__(cls, **kwargs):
++        super().__init_subclass__(**kwargs)
++        cls.get_transform_class = lambda key_name: lambda lhs, rhs: cls(lhs, rhs, key_name)
++
++    def __call__(self, *args, **kwargs):
++        if not args and not kwargs:
++            return self
++        return super().__call__(*args, **kwargs)
++
++    def __init__(self, lhs, rhs=None, key_name=None, *args, **kwargs):
++        if rhs is not None and key_name is not None:
++            super().__init__(lhs, rhs, *args, **kwargs)
++            self.key_name = key_name
++        else:
++            super().__init__(lhs, *args, **kwargs)
++
+ KeyTransform.register_lookup(KeyTransformExact)
+ KeyTransform.register_lookup(KeyTransformIExact)
+ KeyTransform.register_lookup(KeyTransformIsNull)
+@@ -489,11 +565,11 @@ KeyTransform.register_lookup(KeyTransformEndsWith)
+ KeyTransform.register_lookup(KeyTransformIEndsWith)
+ KeyTransform.register_lookup(KeyTransformRegex)
+ KeyTransform.register_lookup(KeyTransformIRegex)
+-
+ KeyTransform.register_lookup(KeyTransformLt)
+ KeyTransform.register_lookup(KeyTransformLte)
+ KeyTransform.register_lookup(KeyTransformGt)
+ KeyTransform.register_lookup(KeyTransformGte)
++KeyTransform.register_lookup(KeyTransformIn)
+ 
+ 
+ class KeyTransformFactory:
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..5cd4515325
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,56 @@
++import os
++import json
++import django
++from django.db import models, connection
++from django.conf import settings
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['django.db.backends.sqlite3'],
++)
++
++# Initialize Django
++django.setup()
++
++# Create a test model
++class OurModel(models.Model):
++    our_field = models.JSONField()
++
++    class Meta:
++        app_label = 'test_app'
++        managed = False
++
++# Create the tables
++from django.db import connection
++connection.cursor().execute("""
++CREATE TABLE test_app_ourmodel (
++    id INTEGER PRIMARY KEY,
++    our_field JSON
++)
++""")
++
++# Insert test data
++connection.cursor().execute("""
++INSERT INTO test_app_ourmodel (id, our_field) VALUES
++(1, '{"key": 0}'),
++(2, '{"key": 0}'),
++(3, '{"key": 0}'),
++(4, '{"key": 1}')
++""")
++
++# Test the queries
++from django.db.models import Q
++
++first_filter = {'our_field__key__in': [0]}
++first_items = OurModel.objects.filter(**first_filter)
++print(f"First filter count: {len(first_items)}")
++
++second_filter = {'our_field__key': 0}
++second_items = OurModel.objects.filter(**second_filter)
++print(f"Second filter count: {len(second_items)}")
+\ No newline at end of file

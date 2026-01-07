@@ -1,0 +1,82 @@
+diff --git a/sympy/polys/factortools.py b/sympy/polys/factortools.py
+index c6a5f9f063..5be0f6a3c2 100644
+--- a/sympy/polys/factortools.py
++++ b/sympy/polys/factortools.py
+@@ -1118,10 +1118,20 @@ def dup_ext_factor(f, K):
+     f, F = dup_sqf_part(f, K), f
+     s, g, r = dup_sqf_norm(f, K)
+ 
++    # Factor over the base field first to handle multivariate cases
+     factors = dup_factor_list_include(r, K.dom)
+ 
+     if len(factors) == 1:
+-        return lc, [(f, n//dup_degree(f))]
++        # If we only have one factor, check if it's a product of linear factors
++        # in different variables
++        if dup_degree(factors[0][0]) == 1:
++            return lc, [(f, n//dup_degree(f))]
++        # Otherwise try to factor further
++        f, F = dup_sqf_part(f, K), f
++        s, g, r = dup_sqf_norm(f, K)
++        factors = dup_factor_list_include(r, K.dom)
++        if len(factors) == 1:
++            return lc, [(f, n//dup_degree(f))]
+ 
+     H = s*K.unit
+ 
+@@ -1146,22 +1156,53 @@ def dmp_ext_factor(f, u, K):
+     if all(d <= 0 for d in dmp_degree_list(f, u)):
+         return lc, []
+ 
++    # First try to factor over the base field
+     f, F = dmp_sqf_part(f, u, K), f
+     s, g, r = dmp_sqf_norm(f, u, K)
+ 
++    # Check if the polynomial is a product of linear factors in different variables
++    degrees = dmp_degree_list(f, u)
++    if all(d == 1 for d in degrees):
++        # For linear factors in different variables, try to factor them
++        # over the base field first
++        factors = dmp_factor_list_include(r, u, K.dom)
++        if len(factors) == 1:
++            # If we can't factor it over the base field, try with extension
++            factors = dmp_factor_list_include(r, u, K)
++        return lc, factors
++
+     factors = dmp_factor_list_include(r, u, K.dom)
+ 
+     if len(factors) == 1:
+-        factors = [f]
++        # If we only have one factor, check if it's a product of linear factors
++        # in different variables
++        if all(d == 1 for d in dmp_degree_list(factors[0][0], u)):
++            # For linear factors in different variables, try to factor them
++            # over the base field first
++            factors = dmp_factor_list_include(factors[0][0], u, K.dom)
++            if len(factors) == 1:
++                # If we can't factor it over the base field, try with extension
++                factors = dmp_factor_list_include(factors[0][0], u, K)
++            return lc, factors
++        else:
++            # Otherwise try to factor further
++            f, F = dmp_sqf_part(f, u, K), f
++            s, g, r = dmp_sqf_norm(f, u, K)
++            factors = dmp_factor_list_include(r, u, K.dom)
++            if len(factors) == 1:
++                factors = [(f, 1)]
+     else:
+         H = dmp_raise([K.one, s*K.unit], u, 0, K)
+ 
+         for i, (factor, _) in enumerate(factors):
+             h = dmp_convert(factor, u, K.dom, K)
+             h, _, g = dmp_inner_gcd(h, g, u, K)
+-            h = dmp_compose(h, H, u, K)
++            h = dmp_shift(h, H, u, K)
+             factors[i] = h
+ 
++        factors = dmp_trial_division(F, factors, u, K)
++        return lc, factors
++
+     return lc, dmp_trial_division(F, factors, u, K)
+ 
+ 

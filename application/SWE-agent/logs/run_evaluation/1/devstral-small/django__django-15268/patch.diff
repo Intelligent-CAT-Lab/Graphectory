@@ -1,0 +1,106 @@
+diff --git a/django/db/migrations/operations/models.py b/django/db/migrations/operations/models.py
+index c120f5d32d..356490d71c 100644
+--- a/django/db/migrations/operations/models.py
++++ b/django/db/migrations/operations/models.py
+@@ -410,6 +410,13 @@ class RenameModel(ModelOperation):
+ class ModelOptionOperation(ModelOperation):
+     def reduce(self, operation, app_label):
+         if isinstance(operation, (self.__class__, DeleteModel)) and self.name_lower == operation.name_lower:
++            if isinstance(operation, self.__class__):
++                # If we have two AlterTogetherOptionOperation on the same model,
++                # we can optimize them if the second one has a non-empty value
++                if not self.option_value and operation.option_value:
++                    # First operation removes constraints, second adds them
++                    # We can optimize this to just the second operation
++                    return [operation]
+             return [operation]
+         return super().reduce(operation, app_label)
+ 
+@@ -528,6 +535,18 @@ class AlterTogetherOptionOperation(ModelOptionOperation):
+     def migration_name_fragment(self):
+         return 'alter_%s_%s' % (self.name_lower, self.option_name)
+ 
++    def reduce(self, operation, app_label):
++        if isinstance(operation, (self.__class__, DeleteModel)) and self.name_lower == operation.name_lower:
++            if isinstance(operation, self.__class__):
++                # If we have two AlterTogetherOptionOperation on the same model,
++                # we can optimize them if the second one has a non-empty value
++                if not self.option_value and operation.option_value:
++                    # First operation removes constraints, second adds them
++                    # We can optimize this to just the second operation
++                    return [operation]
++            return [operation]
++        return super().reduce(operation, app_label)
++
+ 
+ class AlterUniqueTogether(AlterTogetherOptionOperation):
+     """
+diff --git a/django/db/migrations/optimizer.py b/django/db/migrations/optimizer.py
+index ee20f62af2..2d6bc6b19b 100644
+--- a/django/db/migrations/optimizer.py
++++ b/django/db/migrations/optimizer.py
+@@ -1,3 +1,8 @@
++from django.db.migrations.operations.models import (
++    AlterUniqueTogether,
++    AlterIndexTogether,
++)
++
+ class MigrationOptimizer:
+     """
+     Power the optimization process, where you provide a list of Operations
+@@ -30,12 +35,55 @@ class MigrationOptimizer:
+         if app_label is None:
+             raise TypeError('app_label must be a str.')
+         self._iterations = 0
++        
++        # First, optimize AlterTogether operations
++        operations = self._optimize_alter_together(operations, app_label)
++        
+         while True:
+             result = self.optimize_inner(operations, app_label)
+             self._iterations += 1
+             if result == operations:
+                 return result
+             operations = result
++            
++    def _optimize_alter_together(self, operations, app_label):
++        """Optimize AlterUniqueTogether and AlterIndexTogether operations."""
++        new_ops = []
++        i = 0
++        while i < len(operations):
++            op = operations[i]
++            if (isinstance(op, AlterUniqueTogether) and 
++                i + 1 < len(operations) and
++                isinstance(operations[i+1], AlterIndexTogether) and
++                op.name_lower == operations[i+1].name_lower and
++                not op.option_value and not operations[i+1].option_value):
++                # Found a pair of remove operations
++                # Look ahead for the add operations
++                j = i + 2
++                while j < len(operations):
++                    if (isinstance(operations[j], AlterUniqueTogether) and
++                        isinstance(operations[j+1], AlterIndexTogether) and
++                        operations[j].name_lower == operations[j+1].name_lower and
++                        operations[j].name_lower == op.name_lower and
++                        operations[j].option_value == operations[j+1].option_value and
++                        operations[j].option_value and
++                        operations[j].option_value != op.option_value):
++                        # Found the matching add operations
++                        # Add any non-AlterTogether operations in between
++                        for k in range(i + 2, j):
++                            new_ops.append(operations[k])
++                        new_ops.extend([operations[j], operations[j+1]])
++                        i = j + 2  # Skip the add operations
++                        break
++                    j += 1
++                else:
++                    # No matching add operations found
++                    new_ops.extend([op, operations[i+1]])
++                    i += 2
++            else:
++                new_ops.append(op)
++                i += 1
++        return new_ops
+ 
+     def optimize_inner(self, operations, app_label):
+         """Inner optimization loop."""

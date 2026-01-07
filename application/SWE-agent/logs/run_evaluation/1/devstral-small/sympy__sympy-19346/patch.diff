@@ -1,0 +1,22 @@
+diff --git a/sympy/printing/repr.py b/sympy/printing/repr.py
+index c936a692c0..4c39a87139 100644
+--- a/sympy/printing/repr.py
++++ b/sympy/printing/repr.py
+@@ -250,6 +250,17 @@ def _print_tuple(self, expr):
+         else:
+             return "(%s)" % self.reprify(expr, ", ")
+ 
++    def _print_set(self, expr):
++        if len(expr) == 1:
++            # Convert to list to get the single element
++            return "{%s}" % self._print(list(expr)[0])
++        else:
++            return "{%s}" % self.reprify(expr, ", ")
++
++    def _print_dict(self, expr):
++        items = [(self._print(k), self._print(v)) for k, v in expr.items()]
++        return "{%s}" % ", ".join(["%s: %s" % item for item in items])
++
+     def _print_WildFunction(self, expr):
+         return "%s('%s')" % (expr.__class__.__name__, expr.name)
+ 

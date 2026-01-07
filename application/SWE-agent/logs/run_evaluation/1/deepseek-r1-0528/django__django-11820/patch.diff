@@ -1,0 +1,17 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 3ce711f3f1..0474a17ada 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -1706,7 +1706,11 @@ class Model(metaclass=ModelBase):
+         for field in related_fields:
+             _cls = cls
+             fld = None
+-            for part in field.split(LOOKUP_SEP):
++            parts = field.split(LOOKUP_SEP)
++            for i, part in enumerate(parts):
++                # Special case: 'pk' is always valid for the last part of a lookup
++                if i == len(parts) - 1 and part == 'pk':
++                    continue
+                 try:
+                     fld = _cls._meta.get_field(part)
+                     if fld.is_relation:

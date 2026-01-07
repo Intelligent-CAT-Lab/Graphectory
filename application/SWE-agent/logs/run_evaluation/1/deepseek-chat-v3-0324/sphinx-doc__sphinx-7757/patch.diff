@@ -1,0 +1,114 @@
+diff --git a/doc/contents.rst b/doc/contents.rst
+index f58655cbf..445c5858d 100644
+--- a/doc/contents.rst
++++ b/doc/contents.rst
+@@ -22,6 +22,7 @@ Sphinx documentation contents
+    examples
+    authors
+    code_of_conduct
++   ../test_positional_args
+ 
+ 
+ 
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index fc1136ae2..7e3a0b3af 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -198,7 +198,35 @@ def _pseudo_parse_arglist(signode: desc_signature, arglist: str) -> None:
+     brackets.  Currently, this will split at any comma, even if it's inside a
+     string literal (e.g. default argument value).
+     """
+-    paramlist = addnodes.desc_parameterlist()
++    # First try to split by / to handle positional-only parameters
++    parts = arglist.split('/')
++    if len(parts) > 1:
++        # We have positional-only parameters
++        pos_only_args = parts[0]
++        other_args = '/'.join(parts[1:])
++        
++        # Process positional-only args
++        pos_only_paramlist = addnodes.desc_parameterlist()
++        _simple_parse_args(pos_only_paramlist, pos_only_args)
++        
++        # Add / separator
++        pos_only_paramlist += addnodes.desc_parameter('', '', addnodes.desc_sig_operator('', '/'))
++        
++        # Process remaining args
++        other_paramlist = addnodes.desc_parameterlist()
++        _simple_parse_args(other_paramlist, other_args)
++        
++        # Combine both parts
++        signode += pos_only_paramlist
++        signode += other_paramlist
++    else:
++        # No positional-only parameters, use original logic
++        paramlist = addnodes.desc_parameterlist()
++        _simple_parse_args(paramlist, arglist)
++        signode += paramlist
++
++def _simple_parse_args(paramlist: addnodes.desc_parameterlist, arglist: str) -> None:
++    """Helper to parse arguments without handling / specially"""
+     stack = [paramlist]  # type: List[Element]
+     try:
+         for argument in arglist.split(','):
+@@ -230,13 +258,8 @@ def _pseudo_parse_arglist(signode: desc_signature, arglist: str) -> None:
+             raise IndexError
+     except IndexError:
+         # if there are too few or too many elements on the stack, just give up
+-        # and treat the whole argument list as one argument, discarding the
+-        # already partially populated paramlist node
+-        paramlist = addnodes.desc_parameterlist()
++        # and treat the whole argument list as one argument
+         paramlist += addnodes.desc_parameter(arglist, arglist)
+-        signode += paramlist
+-    else:
+-        signode += paramlist
+ 
+ 
+ # This override allows our inline type specifiers to behave like :class: link
+diff --git a/test_positional_args.rst b/test_positional_args.rst
+new file mode 100644
+index 000000000..aab735ca9
+--- /dev/null
++++ b/test_positional_args.rst
+@@ -0,0 +1,7 @@
++.. py:function:: foo(a, b=0, /, c=1)
++   
++   Test function with positional-only args
++
++.. py:function:: bar(x=1, y=2, /, z=3, *, kw=4)
++   
++   More complex example
+\ No newline at end of file
+diff --git a/test_positional_docs.py b/test_positional_docs.py
+new file mode 100644
+index 000000000..1316caec1
+--- /dev/null
++++ b/test_positional_docs.py
+@@ -0,0 +1,25 @@
++from sphinx.domains.python import _pseudo_parse_arglist
++from sphinx.addnodes import desc_signature, desc_parameter, desc_sig_operator, desc_parameterlist
++
++def test_positional_args():
++    """Test that positional-only args with defaults are preserved."""
++    # Create a test signature node
++    signode = desc_signature('', '')
++    
++    # Test the example from the PR
++    _pseudo_parse_arglist(signode, "a, b=0, /, c=1")
++    
++    # Check the output
++    params = list(signode.findall(desc_parameter))
++    assert len(params) == 3  # Should have 3 parameters
++    assert params[0].astext() == "a"
++    assert params[1].astext() == "b=0"
++    assert params[2].astext() == "c=1"
++    
++    # Check the / separator is present
++    operators = list(signode.findall(desc_sig_operator))
++    assert any(op.astext() == '/' for op in operators)
++
++if __name__ == "__main__":
++    test_positional_args()
++    print("All tests passed!")
+\ No newline at end of file
