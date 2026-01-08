@@ -40,13 +40,8 @@ from typing import Iterable, List, Tuple, Any, Optional, Set, Dict, Union
 
 # --------------------------- Configurable Heuristics ---------------------------
 
-# Regex patterns for test file detection
-TEST_FILE_PATTERNS = (
-    r'/tests?/',           # Directory: /test/ or /tests/
-    r'\btest_[^/]*\.py$',  # File: test_*.py
-    r'\b[^/]*_tests?\.py$', # File: *_test.py or *_tests.py
-    r'.*reproduc.*\.py$',  # File containing 'reproduc'
-    r'.*debug.*\.py$',     # File containing 'debug'
+TEST_HINTS: Tuple[str, ...] = (
+    "test_", "reproduc", "debug", "_test", "/tests/", "/test/",
 )
 
 READONLY_CMDS: Tuple[str, ...] = (
@@ -160,7 +155,7 @@ def _has_prior_patch(prev_roles: Optional[Iterable[str]]) -> bool:
 
 def _is_test_path(s: str) -> bool:
     """Heuristic: does this look like a test/repro harness path?"""
-    return any(re.search(pattern, s) for pattern in TEST_FILE_PATTERNS)
+    return any(h in s for h in TEST_HINTS)
 
 def _is_test_related(paths: List[str]) -> bool:
     """Test-related if ANY collected path-like token looks like a test."""
@@ -455,9 +450,18 @@ def _postpatch_validation_kind(
     """
     if targets:
         if created_tests:
+            # Normalize paths for matching: compare basenames to handle relative vs absolute paths
             for p in targets:
+                # Direct match (handles exact path matches)
                 if p in created_tests:
                     return "V_newly_generated_test"
+                # Basename match (handles relative vs absolute path differences)
+                # E.g., 'test_file.py' should match '/path/to/test_file.py'
+                p_basename = p.split('/')[-1] if '/' in p else p
+                for created_path in created_tests:
+                    created_basename = created_path.split('/')[-1] if '/' in created_path else created_path
+                    if p_basename == created_basename:
+                        return "V_newly_generated_test"
         return "V_regression_test"
 
     if dynamic_key:
