@@ -7,13 +7,13 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, FancyBboxPatch
 from pathlib import Path
 from networkx.readwrite import json_graph
-from commandParser import CommandParser
+from graph_construction.commandParser import CommandParser
 from datasets import load_dataset
 from collections import defaultdict
 import getpass
 import tempfile
 import multiprocessing
-from mapPhase import get_phase
+from graph_construction.mapPhase import get_phase
 import pygraphviz as pgv
 _HAS_PYGRAPHVIZ = True
 
@@ -48,6 +48,8 @@ def check_edit_status(tool, subcommand, args, observation):
 
 def determine_resolution_status(instance_id: str, eval_report_path: str) -> str:
     """Determine resolution status from eval report given an instance ID."""
+    if not os.path.isfile(eval_report_path):
+        return "N/A"
     with open(eval_report_path, 'r') as f:
         report = json.load(f)
     if instance_id in report.get("resolved_ids", []):

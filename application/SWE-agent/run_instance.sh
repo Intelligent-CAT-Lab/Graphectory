@@ -2,7 +2,7 @@ CONFIG="monitor"
 MODEL_NAME="openrouter/mistralai/devstral-small"
 MODEL="${MODEL_NAME##*/}"
 RUN_ID="${1:-1}"
-INSTANCE="astropy__astropy-14182"
+INSTANCE="django__django-14122"
 OUTPUT_DIR="trajectories/$CONFIG/exp-${RUN_ID}/$MODEL"
 
 sweagent run-batch \
