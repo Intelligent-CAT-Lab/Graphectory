@@ -1,0 +1,242 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 54f3258eac..b71a90f1c6 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -243,7 +243,7 @@ class Query(BaseExpression):
+         # verbatim to the appropriate clause.
+         self.extra = {}  # Maps col_alias -> (col_sql, params).
+ 
+-        self._filtered_relations = {}
++        self._filtered_relations = {}  # Key is (relation_name, alias) tuple
+ 
+     @property
+     def output_field(self):
+@@ -346,7 +346,7 @@ class Query(BaseExpression):
+         if "subq_aliases" in self.__dict__:
+             obj.subq_aliases = self.subq_aliases.copy()
+         obj.used_aliases = self.used_aliases.copy()
+-        obj._filtered_relations = self._filtered_relations.copy()
++        obj._filtered_relations = {k: v for k, v in self._filtered_relations.items()}
+         # Clear the cached_property, if it exists.
+         obj.__dict__.pop("base_table", None)
+         return obj
+@@ -729,8 +729,11 @@ class Query(BaseExpression):
+             opts = orig_opts
+             for name in parts[:-1]:
+                 old_model = cur_model
+-                if name in self._filtered_relations:
+-                    name = self._filtered_relations[name].relation_name
++                # Find the first filtered relation that matches the relation name
++                for (relation_name, alias), filtered_relation in self._filtered_relations.items():
++                    if relation_name == name:
++                        name = relation_name
++                        break
+                 source = opts.get_field(name)
+                 if is_reverse_o2o(source):
+                     cur_model = source.related_model
+@@ -809,9 +812,11 @@ class Query(BaseExpression):
+             alias_list.append(alias)
+         else:
+             # The first occurrence of a table uses the table name directly.
+-            alias = (
+-                filtered_relation.alias if filtered_relation is not None else table_name
+-            )
++            if filtered_relation is not None:
++                # If it's a filtered relation, use a unique alias that includes the relation name
++                alias = f"{filtered_relation.alias}_{filtered_relation.relation_name}"
++            else:
++                alias = table_name
+             self.table_map[table_name] = [alias]
+         self.alias_refcount[alias] = 1
+         return alias, True
+@@ -1027,7 +1032,21 @@ class Query(BaseExpression):
+         reuse_aliases = [
+             a
+             for a, j in self.alias_map.items()
+-            if (reuse is None or a in reuse) and j.equals(join)
++            if (reuse is None or a in reuse) and j.equals(join) and (
++                j.filtered_relation is None or join.filtered_relation is None or (
++                    j.filtered_relation.relation_name == join.filtered_relation.relation_name and
++                    j.filtered_relation.condition == join.filtered_relation.condition and
++                    j.filtered_relation.alias == join.filtered_relation.alias and
++                    j.filtered_relation.path == join.filtered_relation.path and
++                    j.filtered_relation.condition.target == join.filtered_relation.condition.target and
++                    j.filtered_relation.condition.connector == join.filtered_relation.condition.connector and
++                    j.filtered_relation.condition.negated == join.filtered_relation.condition.negated and
++                    j.filtered_relation.condition.children == join.filtered_relation.condition.children and
++                    j.filtered_relation.condition.connector == join.filtered_relation.condition.connector and
++                    j.filtered_relation.condition.negated == join.filtered_relation.condition.negated and
++                    j.filtered_relation.condition.children == join.filtered_relation.condition.children
++                )
++            )
+         ]
+         if reuse_aliases:
+             if join.table_alias in reuse_aliases:
+@@ -1598,7 +1617,9 @@ class Query(BaseExpression):
+                         "relations deeper than the relation_name (got %r for "
+                         "%r)." % (lookup, filtered_relation.relation_name)
+                     )
+-        self._filtered_relations[filtered_relation.alias] = filtered_relation
++        # Store the filtered relation with a unique key that includes both the alias and relation name
++        # This allows multiple filtered relations with the same relation name to coexist
++        self._filtered_relations[(filtered_relation.relation_name, alias)] = filtered_relation
+ 
+     def names_to_path(self, names, opts, allow_many=True, fail_on_missing=False):
+         """
+@@ -1630,8 +1651,32 @@ class Query(BaseExpression):
+             except FieldDoesNotExist:
+                 if name in self.annotation_select:
+                     field = self.annotation_select[name].output_field
+-                elif name in self._filtered_relations and pos == 0:
+-                    filtered_relation = self._filtered_relations[name]
++                elif pos == 0:
++                    # Find the first filtered relation that matches the relation name
++                    for (relation_name, alias), filtered_relation in self._filtered_relations.items():
++                        if relation_name == name:
++                            break
++                    else:
++                        # Check if it's an alias
++                        if name in self.alias_map:
++                            field = self.alias_map[name].output_field
++                            return ([], field, [], [name])
++                        else:
++                            # Check if it's a filtered relation alias
++                            for (relation_name, alias), filtered_relation in self._filtered_relations.items():
++                                if alias == name:
++                                    # Get the first child of the Q object
++                                    child = next(iter(filtered_relation.condition.children))
++                                    if isinstance(child, tuple):
++                                        # Handle (field_name, value) tuples
++                                        field_name = child[0].split('__')[0]  # Get the base field name
++                                        field = opts.get_field(field_name)
++                                        return ([], field, [field], [name])
++                                    else:
++                                        # Handle F expressions
++                                        field = child.output_field
++                                        return ([], field, [field], [name])
++                            raise FieldDoesNotExist
+                     if LOOKUP_SEP in filtered_relation.relation_name:
+                         parts = filtered_relation.relation_name.split(LOOKUP_SEP)
+                         filtered_relation_path, field, _, _ = self.names_to_path(
+@@ -1947,7 +1992,7 @@ class Query(BaseExpression):
+         """
+         # Generate the inner query.
+         query = self.__class__(self.model)
+-        query._filtered_relations = self._filtered_relations
++        query._filtered_relations = {k: v for k, v in self._filtered_relations.items()}
+         filter_lhs, filter_rhs = filter_expr
+         if isinstance(filter_rhs, OuterRef):
+             filter_rhs = OuterRef(filter_rhs)
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..84cd2c8010
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,52 @@
++import os
++import django
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++            'django.contrib.sessions',
++            'django.contrib.messages',
++            'django.contrib.staticfiles',
++            'testapp',
++        ],
++        SECRET_KEY='dummy'
++    )
++
++django.setup()
++
++from django.db import models
++from django.db.models import Q, F, FilteredRelation, Case, When
++from testapp.models import MyModel
++
++# Create a queryset that demonstrates the issue
++qs = MyModel.objects.alias(
++    relation_zone=FilteredRelation(
++        "myrelation_nested",
++        condition=Q(myrelation_nested__zone=F("zone"))
++    ),
++    relation_all=FilteredRelation(
++        "myrelation_nested",
++        condition=Q(myrelation_nested__is_all=True)
++    ),
++    price_zone=F("relation_zone__price")
++).annotate(
++    price_final=Case(
++        When(
++            price_zone__isnull=True,
++            then=F("relation_all__price"),
++        ),
++        default=F("price_zone")
++    )
++)
++
++# Print the query to see if both FilteredRelation are used
++print(str(qs.query))
+\ No newline at end of file
+diff --git a/settings.py b/settings.py
+new file mode 100644
+index 0000000000..4bc5c0c22f
+--- /dev/null
++++ b/settings.py
+@@ -0,0 +1,16 @@
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
++    }
++}
++
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'django.contrib.auth',
++    'django.contrib.sessions',
++    'django.contrib.messages',
++    'django.contrib.staticfiles',
++]
++
++SECRET_KEY = 'dummy'
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testapp/apps.py b/testapp/apps.py
+new file mode 100644
+index 0000000000..7100945a3b
+--- /dev/null
++++ b/testapp/apps.py
+@@ -0,0 +1,4 @@
++from django.apps import AppConfig
++
++class TestAppConfig(AppConfig):
++    name = 'testapp'
+\ No newline at end of file
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..4227a054cf
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,10 @@
++from django.db import models
++
++class Nested(models.Model):
++    zone = models.CharField(max_length=10)
++    is_all = models.BooleanField(default=False)
++    price = models.DecimalField(max_digits=10, decimal_places=2)
++
++class MyModel(models.Model):
++    zone = models.CharField(max_length=10)
++    myrelation_nested = models.ForeignKey(Nested, on_delete=models.CASCADE, related_name='myrelation')
+\ No newline at end of file

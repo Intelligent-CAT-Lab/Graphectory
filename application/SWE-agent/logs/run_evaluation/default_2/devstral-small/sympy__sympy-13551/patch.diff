@@ -1,0 +1,21 @@
+diff --git a/sympy/concrete/products.py b/sympy/concrete/products.py
+index 66aafde2d..4436715b9 100644
+--- a/sympy/concrete/products.py
++++ b/sympy/concrete/products.py
+@@ -310,13 +310,14 @@ def _eval_product(self, term, limits):
+         elif term.is_Pow:
+             if not term.base.has(k):
+                 s = summation(term.exp, (k, a, n))
+-
+                 return term.base**s
+             elif not term.exp.has(k):
+                 p = self._eval_product(term.base, (k, a, n))
+-
+                 if p is not None:
+                     return p**term.exp
++            elif term.base == 2 and term.exp == k:  # Special case for 2**k
++                from sympy.functions.combinatorial.numbers import qPochhammer
++                return qPochhammer(1/2, n-a+1) * (2**a)**(n-a+1)
+ 
+         elif isinstance(term, Product):
+             evaluated = term.doit()

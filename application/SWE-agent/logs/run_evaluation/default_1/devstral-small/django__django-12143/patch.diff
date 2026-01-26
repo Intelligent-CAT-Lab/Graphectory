@@ -1,0 +1,61 @@
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 137e6faa0f..ef9436cd60 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -1631,7 +1631,15 @@ class ModelAdmin(BaseModelAdmin):
+ 
+     def _get_edited_object_pks(self, request, prefix):
+         """Return POST data values of list_editable primary keys."""
+-        pk_pattern = re.compile(r'{}-\d+-{}$'.format(prefix, self.model._meta.pk.name))
++        # Escape any special regex characters in the prefix
++        # But preserve the \d+ pattern if it exists
++        if re.search(r'\[0-9\]\+', prefix):
++            # If the prefix contains a [0-9]+ pattern, we need to handle it specially
++            # to avoid double-escaping the digits
++            base = re.sub(r'\[0-9\]\+', '{DIGITS}', prefix)
++            pk_pattern = re.compile(r'{}-\d+-{}$'.format(re.escape(base).replace(r'\{DIGITS\}', r'\[0-9\]\+'), self.model._meta.pk.name))
++        else:
++            pk_pattern = re.compile(r'{}-\d+-{}$'.format(re.escape(prefix), self.model._meta.pk.name))
+         return [value for key, value in request.POST.items() if pk_pattern.match(key)]
+ 
+     def _get_list_editable_queryset(self, request, prefix):
+diff --git a/reproduce_regex_issue.py b/reproduce_regex_issue.py
+new file mode 100644
+index 0000000000..7f11e8762d
+--- /dev/null
++++ b/reproduce_regex_issue.py
+@@ -0,0 +1,33 @@
++import re
++
++# Simulate the problematic code
++def get_edited_object_pks(prefix, model_pk_name):
++    # The pattern matches: prefix-INDEX-pk_name
++    # Escape any special regex characters in the prefix
++    # But preserve the \d+ pattern if it exists
++    if re.search(r'\[0-9\]\+', prefix):
++        # If the prefix contains a [0-9]+ pattern, we need to handle it specially
++        # to avoid double-escaping the digits
++        base = re.sub(r'\[0-9\]\+', '{DIGITS}', prefix)
++        pk_pattern = re.compile(r'{}-\d+-{}$'.format(re.escape(base).replace(r'\{DIGITS\}', r'\[0-9\]\+'), model_pk_name))
++    else:
++        pk_pattern = re.compile(r'{}-\d+-{}$'.format(re.escape(prefix), model_pk_name))
++    return pk_pattern
++
++# Test with a prefix containing special regex characters
++prefix = "form-[0-9]+"  # This contains regex special characters
++model_pk_name = "id"
++
++pattern = get_edited_object_pks(prefix, model_pk_name)
++
++# Try to match some test keys
++test_keys = [
++    "form-0-id",           # This should match with the escaped prefix
++    "form-1-id",           # Another valid match
++    "form-[0-9]-123-id",   # This won't match because it contains regex chars
++]
++
++print("Testing regex pattern:", pattern.pattern)
++for key in test_keys:
++    print(f"\nTesting key: {key}")
++    print("Match result:", bool(pattern.match(key)))
+\ No newline at end of file

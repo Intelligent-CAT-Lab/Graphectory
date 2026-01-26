@@ -1,0 +1,151 @@
+diff --git a/app/__init__.py b/app/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/app/admin.py b/app/admin.py
+new file mode 100644
+index 0000000000..8c38f3f3da
+--- /dev/null
++++ b/app/admin.py
+@@ -0,0 +1,3 @@
++from django.contrib import admin
++
++# Register your models here.
+diff --git a/app/apps.py b/app/apps.py
+new file mode 100644
+index 0000000000..ed327d22f5
+--- /dev/null
++++ b/app/apps.py
+@@ -0,0 +1,6 @@
++from django.apps import AppConfig
++
++
++class AppConfig(AppConfig):
++    default_auto_field = 'django.db.models.BigAutoField'
++    name = 'app'
+diff --git a/app/migrations/__init__.py b/app/migrations/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/app/models.py b/app/models.py
+new file mode 100644
+index 0000000000..948813aa79
+--- /dev/null
++++ b/app/models.py
+@@ -0,0 +1,15 @@
++from django.db import models
++
++class Baz(models.Model):
++    pass
++
++class Qux(models.Model):
++    bazes = models.ManyToManyField(Baz, related_name="quxes")
++
++class Foo(models.Model):
++    qux = models.ForeignKey(Qux, on_delete=models.CASCADE, related_name="foos")
++
++class Bar(models.Model):
++    foo = models.ForeignKey(Foo, on_delete=models.CASCADE, related_name="bars")
++    another_foo = models.ForeignKey(Foo, on_delete=models.CASCADE, related_name="other_bars")
++    baz = models.ForeignKey(Baz, on_delete=models.CASCADE, related_name="bars")
+diff --git a/app/tests.py b/app/tests.py
+new file mode 100644
+index 0000000000..7ce503c2dd
+--- /dev/null
++++ b/app/tests.py
+@@ -0,0 +1,3 @@
++from django.test import TestCase
++
++# Create your tests here.
+diff --git a/app/views.py b/app/views.py
+new file mode 100644
+index 0000000000..91ea44a218
+--- /dev/null
++++ b/app/views.py
+@@ -0,0 +1,3 @@
++from django.shortcuts import render
++
++# Create your views here.
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index aaf35ee37c..75edda109c 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -599,12 +599,14 @@ class Query(BaseExpression):
+         # Now, add the joins from rhs query into the new query (skipping base
+         # table).
+         rhs_tables = list(rhs.alias_map)[1:]
++        # Pass rhs aliases to table_alias to avoid conflicts
++        exclude_aliases = set(rhs.alias_map.keys())
+         for alias in rhs_tables:
+             join = rhs.alias_map[alias]
+             # If the left side of the join was already relabeled, use the
+             # updated alias.
+             join = join.relabeled_clone(change_map)
+-            new_alias = self.join(join, reuse=reuse)
++            new_alias = self.join(join, reuse=reuse, exclude_aliases=exclude_aliases)
+             if join.join_type == INNER:
+                 rhs_votes.add(new_alias)
+             # We can't reuse the same join again in the query. If we have two
+@@ -745,13 +747,16 @@ class Query(BaseExpression):
+             for model, values in seen.items():
+                 callback(target, model, values)
+ 
+-    def table_alias(self, table_name, create=False, filtered_relation=None):
++    def table_alias(self, table_name, create=False, filtered_relation=None, exclude_aliases=None):
+         """
+         Return a table alias for the given table_name and whether this is a
+         new alias or not.
+ 
+         If 'create' is true, a new alias is always created. Otherwise, the
+         most recently created alias for the table (if one exists) is reused.
++
++        If 'exclude_aliases' is provided, it's a set of aliases that should be
++        avoided when creating new aliases to prevent conflicts.
+         """
+         alias_list = self.table_map.get(table_name)
+         if not create and alias_list:
+@@ -761,7 +766,16 @@ class Query(BaseExpression):
+ 
+         # Create a new alias for this table.
+         if alias_list:
+-            alias = '%s%d' % (self.alias_prefix, len(self.alias_map) + 1)
++            # If we need to avoid certain aliases, find a unique one
++            if exclude_aliases:
++                base = len(self.alias_map) + 1
++                while True:
++                    alias = '%s%d' % (self.alias_prefix, base)
++                    if alias not in exclude_aliases:
++                        break
++                    base += 1
++            else:
++                alias = '%s%d' % (self.alias_prefix, len(self.alias_map) + 1)
+             alias_list.append(alias)
+         else:
+             # The first occurrence of a table uses the table name directly.
+@@ -948,7 +962,7 @@ class Query(BaseExpression):
+         """
+         return len([1 for count in self.alias_refcount.values() if count])
+ 
+-    def join(self, join, reuse=None):
++    def join(self, join, reuse=None, exclude_aliases=None):
+         """
+         Return an alias for the 'join', either reusing an existing alias for
+         that join or creating a new one. 'join' is either a base_table_class or
+@@ -957,6 +971,9 @@ class Query(BaseExpression):
+         The 'reuse' parameter can be either None which means all joins are
+         reusable, or it can be a set containing the aliases that can be reused.
+ 
++        The 'exclude_aliases' parameter is a set of aliases that should be avoided
++        when creating new aliases to prevent conflicts.
++
+         A join is always created as LOUTER if the lhs alias is LOUTER to make
+         sure chains like t1 LOUTER t2 INNER t3 aren't generated. All new
+         joins are created as LOUTER if the join is nullable.
+@@ -976,7 +993,8 @@ class Query(BaseExpression):
+             return reuse_alias
+ 
+         # No reuse is possible, so we need a new alias.
+-        alias, _ = self.table_alias(join.table_name, create=True, filtered_relation=join.filtered_relation)
++        alias, _ = self.table_alias(join.table_name, create=True, filtered_relation=join.filtered_relation,
++                                  exclude_aliases=exclude_aliases)
+         if join.join_type:
+             if self.alias_map[join.parent_alias].join_type == LOUTER or join.nullable:
+                 join_type = LOUTER

@@ -1,0 +1,142 @@
+diff --git a/__init__.py b/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/django/db/models/fields/json.py b/django/db/models/fields/json.py
+index fafc1beee8..d0b7b97d9e 100644
+--- a/django/db/models/fields/json.py
++++ b/django/db/models/fields/json.py
+@@ -4,7 +4,10 @@ from django import forms
+ from django.core import checks, exceptions
+ from django.db import NotSupportedError, connections, router
+ from django.db.models import lookups
+-from django.db.models.lookups import PostgresOperatorLookup, Transform
++from django.db.models.lookups import (
++    PostgresOperatorLookup, Transform,
++    FieldGetDbPrepValueIterableMixin, BuiltinLookup,
++)
+ from django.utils.translation import gettext_lazy as _
+ 
+ from . import Field
+@@ -479,6 +482,30 @@ class KeyTransformGte(KeyTransformNumericLookupMixin, lookups.GreaterThanOrEqual
+     pass
+ 
+ 
++class KeyTransformIn(FieldGetDbPrepValueIterableMixin, BuiltinLookup):
++    lookup_name = 'in'
++
++    def process_rhs(self, compiler, connection):
++        rhs, params = super().process_rhs(compiler, connection)
++        if not connection.features.has_native_json_field and params:
++            params = [json.loads(value) for value in params]
++        return rhs, params
++
++    def as_sql(self, compiler, connection):
++        lhs, lhs_params = self.process_lhs(compiler, connection)
++        rhs, rhs_params = self.process_rhs(compiler, connection)
++        if connection.vendor == 'mysql':
++            return 'JSON_UNQUOTE(JSON_EXTRACT(%s, %%s)) IN (%s)' % (lhs, ', '.join(['%s'] * len(rhs_params))), tuple(lhs_params) + (self.lhs.key_name,) + tuple(rhs_params)
++        elif connection.vendor == 'oracle':
++            return "JSON_VALUE(%s, '$$.%s$$') IN (%s)" % (lhs, self.lhs.key_name, ', '.join(['%s'] * len(rhs_params))), tuple(lhs_params) + tuple(rhs_params)
++        elif connection.vendor == 'sqlite':
++            # For SQLite, we need to use JSON_EXTRACT with a dot-separated path
++            path = self.lhs.key_name
++            return 'JSON_EXTRACT(%s, %s) IN (%s)' % (lhs, path, ', '.join(['?'] * len(rhs_params))), tuple(lhs_params) + (path,) + tuple(rhs_params)
++        else:
++            return '%s->>%%s IN (%s)' % (lhs, ', '.join(['%s'] * len(rhs_params))), tuple(lhs_params) + (self.lhs.key_name,) + tuple(rhs_params)
++
++
+ KeyTransform.register_lookup(KeyTransformExact)
+ KeyTransform.register_lookup(KeyTransformIExact)
+ KeyTransform.register_lookup(KeyTransformIsNull)
+@@ -494,7 +521,7 @@ KeyTransform.register_lookup(KeyTransformLt)
+ KeyTransform.register_lookup(KeyTransformLte)
+ KeyTransform.register_lookup(KeyTransformGt)
+ KeyTransform.register_lookup(KeyTransformGte)
+-
++KeyTransform.register_lookup(KeyTransformIn)
+ 
+ class KeyTransformFactory:
+ 
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..57edcaeea0
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,76 @@
++import os
++import sys
++import json
++from django.db import models
++from django.core.management import call_command
++from django.conf import settings
++from django.apps import apps
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        PASSWORD_RESET_TIMEOUT_DAYS=1,
++    )
++
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'django.conf.global_settings')
++
++# Initialize Django
++import django
++django.setup()
++
++# Create a model class directly
++class OurModel(models.Model):
++    our_field = models.JSONField()
++
++    class Meta:
++        app_label = 'reproduce'
++
++def setup_test_data():
++    # Create test data
++    test_data = [
++        {'id': 1, 'our_field': {'key': 0}},
++        {'id': 2, 'our_field': {'key': 0}},
++        {'id': 3, 'our_field': {'key': 0}},
++        {'id': 4, 'our_field': {'key': 1}},
++    ]
++    
++    # Save test data
++    for data in test_data:
++        obj = OurModel(**{k: v for k, v in data.items() if k != 'id'})
++        obj.save()
++
++def test_filters():
++    # Test the filters
++    first_filter = {'our_field__key__in': [0]}
++    first_items = OurModel.objects.filter(**first_filter)
++    print(f"First filter count: {len(first_items)}")
++    
++    second_filter = {'our_field__key': 0}
++    second_items = OurModel.objects.filter(**second_filter)
++    print(f"Second filter count: {len(second_items)}")
++
++if __name__ == '__main__':
++    # Create tables
++    from django.db import connection
++    cursor = connection.cursor()
++    cursor.execute('''
++    CREATE TABLE reproduce_ourmodel (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        our_field TEXT
++    )
++    ''')
++    
++    # Setup test data
++    setup_test_data()
++    
++    # Test filters
++    test_filters()
+\ No newline at end of file

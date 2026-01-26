@@ -1,0 +1,61 @@
+diff --git a/doc/contents.rst b/doc/contents.rst
+index eb6946292..bea256c6d 100644
+--- a/doc/contents.rst
++++ b/doc/contents.rst
+@@ -9,6 +9,7 @@ Sphinx documentation contents
+    usage/index
+    development/index
+    man/index
++   test_dict_param
+ 
+    templating
+    latex
+diff --git a/doc/test_dict_param.rst b/doc/test_dict_param.rst
+new file mode 100644
+index 000000000..af9bce0b0
+--- /dev/null
++++ b/doc/test_dict_param.rst
+@@ -0,0 +1,7 @@
++Test Dict Parameter Documentation
++==================================
++
++.. automodule:: reproduce
++   :members:
++   :undoc-members:
++   :show-inheritance:
+\ No newline at end of file
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..b05fd3087
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,8 @@
++def test_func(opc_meta: dict[str, str] = None) -> None:
++    """
++    Test function with dict parameter.
++
++    :param dict(str, str) opc_meta: (optional)
++    :return: None
++    """
++    pass
+\ No newline at end of file
+diff --git a/sphinx/util/typing.py b/sphinx/util/typing.py
+index af6edcae0..f697b8a78 100644
+--- a/sphinx/util/typing.py
++++ b/sphinx/util/typing.py
+@@ -373,6 +373,15 @@ def _stringify_py37(annotation: Any) -> str:
+         elif all(is_system_TypeVar(a) for a in annotation.__args__):
+             # Suppress arguments if all system defined TypeVars (ex. Dict[KT, VT])
+             return qualname
++        elif qualname in ('dict', 'Dict'):
++            # Special handling for dict types to ensure proper formatting
++            if len(annotation.__args__) == 2:
++                # Format key and value types separately to handle nested generics
++                key_type = stringify(annotation.__args__[0])
++                value_type = stringify(annotation.__args__[1])
++                return '%s[%s, %s]' % (qualname, key_type, value_type)
++            else:
++                return qualname
+         else:
+             args = ', '.join(stringify(a) for a in annotation.__args__)
+             return '%s[%s]' % (qualname, args)

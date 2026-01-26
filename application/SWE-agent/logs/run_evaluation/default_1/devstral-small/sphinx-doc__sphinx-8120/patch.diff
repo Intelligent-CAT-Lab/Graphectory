@@ -1,0 +1,165 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..eee74cfb5
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,51 @@
++import os
++import shutil
++import subprocess
++
++# Create test directory
++test_dir = 'sphinx-test-locale-override'
++if os.path.exists(test_dir):
++    shutil.rmtree(test_dir)
++os.makedirs(test_dir)
++os.chdir(test_dir)
++
++# Clone test repository
++subprocess.run(['git', 'clone', 'https://github.com/jonascj/sphinx-test-locale-override.git', '.'])
++subprocess.run(['git', 'checkout', '8dea4cd'])
++
++# Create custom da translation
++os.makedirs('locale/da/LC_MESSAGES', exist_ok=True)
++with open('locale/da/LC_MESSAGES/sphinx.po', 'w') as f:
++    f.write('''msgid "Fig. %s"
++msgstr "Foobar %s"
++
++msgid "Listing %s"
++msgstr "Whatever %s"
++''')
++
++# Install sphinx and build
++subprocess.run(['pip', 'install', 'sphinx'])
++
++# Print debug info
++print("\nDebug info:")
++print("Current directory:", os.getcwd())
++print("Directory contents:", os.listdir('.'))
++print("\nLocale directory contents:", os.listdir('locale/da/LC_MESSAGES'))
++
++# Build with verbose output
++subprocess.run(['make', 'html', 'SPHINXOPTS=-v'])
++
++# Check the output
++with open('_build/html/index.html') as f:
++    content = f.read()
++    print("\nChecking if custom translations are used:")
++    print("Looking for 'Foobar 1' in the output...")
++    if 'Foobar 1' in content:
++        print("✓ Custom translation found!")
++    else:
++        print("✗ Custom translation NOT found!")
++        print("\nLooking for original translation 'figur 1'...")
++        if 'figur 1' in content:
++            print("✗ Original translation found - custom translation was ignored!")
++        else:
++            print("? Neither translation found - something else is wrong")
+\ No newline at end of file
+diff --git a/sphinx-test-locale-override b/sphinx-test-locale-override
+new file mode 160000
+index 000000000..8dea4cd78
+--- /dev/null
++++ b/sphinx-test-locale-override
+@@ -0,0 +1 @@
++Subproject commit 8dea4cd78b3ce7fa1f4ab461563815608273dc0e
+diff --git a/sphinx/builders/gettext.py b/sphinx/builders/gettext.py
+index f8a19c57a..78af141df 100644
+--- a/sphinx/builders/gettext.py
++++ b/sphinx/builders/gettext.py
+@@ -281,6 +281,19 @@ class MessageCatalogBuilder(I18nBuilder):
+                 raise ThemeError('%s: %r' % (template, exc)) from exc
+ 
+     def build(self, docnames: Iterable[str], summary: str = None, method: str = 'update') -> None:  # NOQA
++        # First try to load from source directory if it exists
++        if hasattr(self.app, 'srcdir'):
++            srcdir = self.app.srcdir
++            for locale_dir in self.app.config.locale_dirs:
++                if not os.path.isabs(locale_dir):
++                    test_dir = os.path.join(srcdir, locale_dir)
++                    if os.path.exists(test_dir):
++                        # Found source directory, load translations from it
++                        for docname in docnames:
++                            self.write_doc(docname, None)
++                        return
++
++        # If no source directory or no translations found, proceed normally
+         self._extract_from_template()
+         super().build(docnames, summary, method)
+ 
+diff --git a/sphinx/locale/__init__.py b/sphinx/locale/__init__.py
+index 385ca3566..f18d24af0 100644
+--- a/sphinx/locale/__init__.py
++++ b/sphinx/locale/__init__.py
+@@ -10,6 +10,7 @@
+ 
+ import gettext
+ import locale
++import os
+ from collections import UserString, defaultdict
+ from gettext import NullTranslations
+ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+@@ -128,7 +129,41 @@ def init(locale_dirs: List[str], language: str,
+         languages = [language]
+ 
+     # loading
++    # First try to load from source directory if it's in the list
++    source_dir = None
+     for dir_ in locale_dirs:
++        if dir_ is not None:
++            # Handle both absolute and relative paths
++            if os.path.isabs(dir_):
++                if os.path.exists(dir_):
++                    source_dir = dir_
++                    break
++            else:
++                # Try relative to current directory and source directory
++                test_dir = os.path.join(os.getcwd(), dir_)
++                if os.path.exists(test_dir):
++                    source_dir = test_dir
++                    break
++                # Also try relative to the package directory
++                test_dir = os.path.join(package_dir, dir_)
++                if os.path.exists(test_dir):
++                    source_dir = test_dir
++                    break
++    
++    if source_dir:
++        try:
++            trans = gettext.translation(catalog, localedir=source_dir, languages=languages)
++            translator = trans
++        except Exception:
++            # Source directory doesn't have translations, try others
++            pass
++    
++    # Try other directories
++    for dir_ in locale_dirs:
++        if dir_ is None:
++            continue
++        if dir_ == source_dir:
++            continue
+         try:
+             trans = gettext.translation(catalog, localedir=dir_, languages=languages)
+             if translator is None:
+diff --git a/sphinx/util/i18n.py b/sphinx/util/i18n.py
+index 41407f4e1..3d3edecef 100644
+--- a/sphinx/util/i18n.py
++++ b/sphinx/util/i18n.py
+@@ -90,6 +90,17 @@ class CatalogRepository:
+         if not self.language:
+             return
+ 
++        # First try source directory
++        for locale_dir in self._locale_dirs:
++            # Check if it's a source directory (relative path)
++            if not path.isabs(locale_dir):
++                # Try relative to current directory
++                test_dir = path.join(os.getcwd(), locale_dir)
++                if path.exists(path.join(test_dir, self.language, 'LC_MESSAGES')):
++                    yield test_dir
++                    break
++
++        # Then try other directories
+         for locale_dir in self._locale_dirs:
+             locale_dir = path.join(self.basedir, locale_dir)
+             if path.exists(path.join(locale_dir, self.language, 'LC_MESSAGES')):

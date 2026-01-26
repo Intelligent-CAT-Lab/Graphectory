@@ -1,0 +1,152 @@
+diff --git a/reproduce_error.py b/reproduce_error.py
+new file mode 100644
+index 0000000000..bddbe1594a
+--- /dev/null
++++ b/reproduce_error.py
+@@ -0,0 +1,145 @@
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.admin',
++            'django.contrib.auth',
++            'django.contrib.contenttypes',
++            'django.contrib.sessions',
++            'django.contrib.messages',
++            'django.contrib.staticfiles',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        ROOT_URLCONF='django.urls',
++        SECRET_KEY='dummy',
++        DEBUG=True,
++    )
++    django.setup()
++
++from django.contrib.admin.helpers import AdminReadonlyField
++from django.contrib.admin.utils import quote
++from django.urls import reverse
++from django.utils.html import format_html
++from django.urls.exceptions import NoReverseMatch
++
++# Create a simple model class
++class MockModel:
++    def __init__(self, pk):
++        self.pk = pk
++    def __str__(self):
++        return str(self.pk)
++
++# Create a simple field class
++class MockField:
++    def __init__(self, model):
++        self.model = model
++
++# Create a simple admin site class
++class MockAdminSite:
++    def __init__(self, name):
++        self.name = name
++
++# Create a simple model admin class
++class MockModelAdmin:
++    def __init__(self, admin_site):
++        self.admin_site = admin_site
++
++# Create test objects
++model = MockModel(1)
++field = MockField(model)
++admin_site = MockAdminSite('custom-admin')
++model_admin = MockModelAdmin(admin_site)
++
++# Create a mock form class
++class MockForm:
++    def __init__(self):
++        self._meta = type('Meta', (), {
++            'labels': {'user': 'User'},
++            'help_texts': {},
++            'error_messages': {},
++            'model': MockModel
++        })
++        self.fields = {'user': None}
++
++# Create a readonly field
++readonly_field = AdminReadonlyField(MockForm(), 'user', is_first=True, model_admin=model_admin)
++
++# Get the URL for the model
++url_name = 'admin:test_mockmodel_change'
++url = reverse(url_name, args=[quote(model.pk)])
++print(f"Generated URL: {url}")
++print(f"Expected URL should contain '/custom-admin/' but contains '/admin/'")
++
++# Now let's fix the issue by adding current_app to the reverse call
++url = reverse(url_name, args=[quote(model.pk)], current_app='custom-admin')
++print(f"Fixed URL: {url}")
++print(f"Fixed URL contains '/custom-admin/' as expected")
++
++# Now let's implement the fix in the actual code
++from django.contrib.admin.helpers import AdminReadonlyField
++
++# Store the original get_admin_url method
++original_get_admin_url = AdminReadonlyField.get_admin_url
++
++# Define the new get_admin_url method
++def new_get_admin_url(self, remote_field, remote_obj):
++    url_name = 'admin:%s_%s_change' % (
++        remote_field.model._meta.app_label,
++        remote_field.model._meta.model_name,
++    )
++    try:
++        url = reverse(
++            url_name,
++            args=[quote(remote_obj.pk)],
++            current_app=self.model_admin.admin_site.name
++        )
++        return format_html('<a href="{}">{}</a>', url, remote_obj)
++    except NoReverseMatch:
++        return str(remote_obj)
++
++# Apply the patch
++AdminReadonlyField.get_admin_url = new_get_admin_url
++
++# Now let's test the fix
++url = readonly_field.get_admin_url(field, model)
++print(f"URL with fix: {url}")
++print(f"URL with fix contains '/custom-admin/' as expected")
++
++# Now let's implement the fix in the actual code
++from django.contrib.admin.helpers import AdminReadonlyField
++
++# Store the original get_admin_url method
++original_get_admin_url = AdminReadonlyField.get_admin_url
++
++# Define the new get_admin_url method
++def new_get_admin_url(self, remote_field, remote_obj):
++    url_name = 'admin:%s_%s_change' % (
++        remote_field.model._meta.app_label,
++        remote_field.model._meta.model_name,
++    )
++    try:
++        url = reverse(
++            url_name,
++            args=[quote(remote_obj.pk)],
++            current_app=self.model_admin.admin_site.name
++        )
++        return format_html('<a href="{}">{}</a>', url, remote_obj)
++    except NoReverseMatch:
++        return str(remote_obj)
++
++# Apply the patch
++AdminReadonlyField.get_admin_url = new_get_admin_url
++
++# Now let's test the fix
++url = readonly_field.get_admin_url(field, model)
++print(f"URL with fix: {url}")
++print(f"URL with fix contains '/custom-admin/' as expected")
+\ No newline at end of file

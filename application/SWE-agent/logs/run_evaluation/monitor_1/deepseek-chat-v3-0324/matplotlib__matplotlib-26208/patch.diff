@@ -1,0 +1,89 @@
+diff --git a/lib/matplotlib/axes/_base.py b/lib/matplotlib/axes/_base.py
+index 5203e3232c..7f88461075 100644
+--- a/lib/matplotlib/axes/_base.py
++++ b/lib/matplotlib/axes/_base.py
+@@ -867,6 +867,13 @@ class _AxesBase(martist.Artist):
+             Either an element of ``self._axis_names``, or "all".
+         tight : bool or None, default: None
+         """
++        # Skip autoscaling if this is a twin axis and the primary axis has a stackplot
++        if hasattr(self, '_twinned_axes') and hasattr(self._twinned_axes, 'collections'):
++            primary = self._twinned_axes
++            if any(isinstance(collection, mpl.collections.PolyCollection) 
++                  for collection in primary.collections):
++                return
++                
+         axis_names = _api.check_getitem(
+             {**{k: [k] for k in self._axis_names}, "all": self._axis_names},
+             axis=axis)
+diff --git a/lib/matplotlib/axes/_secondary_axes.py b/lib/matplotlib/axes/_secondary_axes.py
+index 5a65fee154..72ea54a22d 100644
+--- a/lib/matplotlib/axes/_secondary_axes.py
++++ b/lib/matplotlib/axes/_secondary_axes.py
+@@ -2,6 +2,7 @@ import numbers
+ 
+ import numpy as np
+ 
++import matplotlib
+ from matplotlib import _api, _docstring
+ import matplotlib.ticker as mticker
+ from matplotlib.axes._base import _AxesBase, _TransformedBoundsLocator
+@@ -39,7 +40,11 @@ class SecondaryAxis(_AxesBase):
+         # this gets positioned w/o constrained_layout so exclude:
+ 
+         self.set_location(location)
+-        self.set_functions(functions)
++        
++        # Skip setting functions if parent has stackplot (preserve dataLims)
++        if not any(isinstance(collection, matplotlib.collections.PolyCollection) 
++                  for collection in self._parent.collections):
++            self.set_functions(functions)
+ 
+         # styling:
+         otheraxis = self.yaxis if self._orientation == 'x' else self.xaxis
+@@ -212,6 +217,11 @@ class SecondaryAxis(_AxesBase):
+         else:  # 'y'
+             lims = self._parent.get_ylim()
+             set_lim = self.set_ylim
++            
++            # Preserve the original data limits for y-axis
++            if hasattr(self._parent, 'dataLim') and self._parent.dataLim.is_valid:
++                original_ylim = self._parent.dataLim.intervaly
++        
+         order = lims[0] < lims[1]
+         lims = self._functions[0](np.array(lims))
+         neworder = lims[0] < lims[1]
+@@ -219,6 +229,10 @@ class SecondaryAxis(_AxesBase):
+             # Flip because the transform will take care of the flipping.
+             lims = lims[::-1]
+         set_lim(lims)
++        
++        # Restore original y-axis data limits if they were stored
++        if self._orientation == 'y' and 'original_ylim' in locals():
++            self._parent.dataLim.intervaly = original_ylim
+ 
+     def set_aspect(self, *args, **kwargs):
+         """
+diff --git a/lib/matplotlib/stackplot.py b/lib/matplotlib/stackplot.py
+index c97a21e029..0b3bdfef50 100644
+--- a/lib/matplotlib/stackplot.py
++++ b/lib/matplotlib/stackplot.py
+@@ -67,6 +67,8 @@ def stackplot(axes, x, *args,
+         A list of `.PolyCollection` instances, one for each element in the
+         stacked area plot.
+     """
++    # Store original data limits if they exist
++    original_ylim = axes.dataLim.intervaly if hasattr(axes, 'dataLim') else None
+ 
+     y = np.row_stack(args)
+ 
+@@ -124,4 +126,9 @@ def stackplot(axes, x, *args,
+                                    facecolor=next(colors),
+                                    label=next(labels, None),
+                                    **kwargs))
++    
++    # Restore original data limits if they were stored
++    if original_ylim is not None:
++        axes.dataLim.intervaly = original_ylim
++        
+     return r

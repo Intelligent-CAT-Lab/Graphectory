@@ -1,0 +1,67 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..ba1e89b750
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,35 @@
++import os
++import django
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++            'test_app',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        }
++    )
++    django.setup()
++
++from django.db.models import Case, When, Q, Value, BooleanField
++from test_app.models import User
++from django.db import connection
++
++# Create a test case
++query = User.objects.annotate(
++    _a=Case(
++        When(~Q(pk__in=[]), then=Value(True)),
++        default=Value(False),
++        output_field=BooleanField(),
++    )
++).order_by("-_a").values("pk")
++
++# Print the SQL query
++print("SQL:", query.query.sql_with_params())
+\ No newline at end of file
+diff --git a/test_app/__init__.py b/test_app/__init__.py
+new file mode 100644
+index 0000000000..c7d51a7967
+--- /dev/null
++++ b/test_app/__init__.py
+@@ -0,0 +1,6 @@
++from django.apps import AppConfig
++
++class TestAppConfig(AppConfig):
++    name = 'test_app'
++
++default_app_config = 'test_app.TestAppConfig'
+\ No newline at end of file
+diff --git a/test_app/models.py b/test_app/models.py
+new file mode 100644
+index 0000000000..e74ca49b78
+--- /dev/null
++++ b/test_app/models.py
+@@ -0,0 +1,5 @@
++from django.db import models
++
++class User(models.Model):
++    name = models.CharField(max_length=100)
++    age = models.IntegerField()
+\ No newline at end of file

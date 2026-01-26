@@ -1,0 +1,15 @@
+diff --git a/django/db/migrations/executor.py b/django/db/migrations/executor.py
+index 57042a8690..4f33f16f5b 100644
+--- a/django/db/migrations/executor.py
++++ b/django/db/migrations/executor.py
+@@ -252,8 +252,10 @@ class MigrationExecutor:
+                 state = migration.unapply(state, schema_editor)
+         # For replacement migrations, record individual statuses
+         if migration.replaces:
++            # Mark both the replaced migrations and the squash migration itself as unapplied
+             for app_label, name in migration.replaces:
+                 self.recorder.record_unapplied(app_label, name)
++            self.recorder.record_unapplied(migration.app_label, migration.name)
+         else:
+             self.recorder.record_unapplied(migration.app_label, migration.name)
+         # Report progress

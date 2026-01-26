@@ -1,0 +1,31 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index e16ab8ce5..70950d7a6 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1552,6 +1552,8 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+         if sig is None:
+             return None
+ 
++        # For classes, we should never show return type annotation
++        # as classes don't have return types
+         return stringify_signature(sig, show_return_annotation=False, **kwargs)
+ 
+     def _find_signature(self) -> Tuple[str, str]:
+@@ -1561,10 +1563,13 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+             result = (result[0], None)
+ 
+         for i, sig in enumerate(self._signatures):
+-            if sig.endswith(' -> None'):
+-                # Strip a return value from signatures of constructor in docstring (subsequent
+-                # entries)
+-                self._signatures[i] = sig[:-8]
++            # Remove any return type annotation (e.g., ' -> None', ' -> str', etc.)
++            # Classes don't have return types, so we should remove any return annotation
++            if ' -> ' in sig:
++                # Find the last occurrence of ' -> ' and remove everything after it
++                pos = sig.rfind(' -> ')
++                if pos != -1:
++                    self._signatures[i] = sig[:pos]
+ 
+         return result
+ 

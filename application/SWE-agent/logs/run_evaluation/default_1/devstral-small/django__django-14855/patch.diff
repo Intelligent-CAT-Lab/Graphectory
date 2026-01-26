@@ -1,0 +1,265 @@
+diff --git a/django/contrib/admin/helpers.py b/django/contrib/admin/helpers.py
+index dd154f72ee..374755f20b 100644
+--- a/django/contrib/admin/helpers.py
++++ b/django/contrib/admin/helpers.py
+@@ -209,7 +209,14 @@ class AdminReadonlyField:
+             remote_field.model._meta.model_name,
+         )
+         try:
+-            url = reverse(url_name, args=[quote(remote_obj.pk)])
++            url = reverse(
++                url_name,
++                args=[quote(remote_obj.pk)],
++                current_app=self.model_admin.admin_site.name
++            )
++            # Add the admin site name to the URL if it's not the default admin site
++            if self.model_admin.admin_site.name != 'admin':
++                url = f"/{self.model_admin.admin_site.name}{url}"
+             return format_html('<a href="{}">{}</a>', url, remote_obj)
+         except NoReverseMatch:
+             return str(remote_obj)
+diff --git a/reproduce_error.py b/reproduce_error.py
+new file mode 100644
+index 0000000000..0ffab6cc6a
+--- /dev/null
++++ b/reproduce_error.py
+@@ -0,0 +1,238 @@
++import os
++import sys
++import django
++from django.conf import settings
++
++# Create test_app package
++import types
++test_app = types.ModuleType('test_app')
++test_app.__file__ = __file__  # For Django's reference
++test_app.__path__ = []  # Make it a package
++sys.modules['test_app'] = test_app
++
++# Create test_app.urls module
++urls_module = types.ModuleType('test_app.urls')
++urls_module.urlpatterns = []
++test_app.urls = urls_module
++sys.modules['test_app.urls'] = urls_module
++
++# Configure Django settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.admin',
++            'django.contrib.auth',
++            'django.contrib.contenttypes',
++            'django.contrib.sites',
++            'test_app',  # Our test app
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        ROOT_URLCONF='test_app.urls',
++        SECRET_KEY='dummy',
++    )
++    django.setup()
++
++# Create app's migration files
++from django.core.management import call_command
++from django.db import connection
++
++# Create tables directly
++cursor = connection.cursor()
++cursor.execute('''
++    CREATE TABLE test_app_parent (
++        id INTEGER PRIMARY KEY,
++        name VARCHAR(100)
++    )
++''')
++cursor.execute('''
++    CREATE TABLE test_app_child (
++        id INTEGER PRIMARY KEY,
++        parent_id INTEGER REFERENCES test_app_parent(id),
++        name VARCHAR(100)
++    )
++''')
++connection.commit()
++
++from django.contrib.admin.sites import AdminSite
++from django.contrib.admin.helpers import AdminReadonlyField
++from django.db import models
++from django.test import RequestFactory
++from django import forms
++from django.urls import path, include
++
++# Create test models
++class Parent(models.Model):
++    name = models.CharField(max_length=100)
++    
++    class Meta:
++        app_label = 'test_app'
++    
++    def __str__(self):
++        return self.name
++
++class Child(models.Model):
++    parent = models.ForeignKey(Parent, on_delete=models.CASCADE)
++    name = models.CharField(max_length=100)
++    
++    class Meta:
++        app_label = 'test_app'
++    
++    def __str__(self):
++        return self.name
++
++# Create a model admin with readonly fields
++class ChildAdmin:
++    readonly_fields = ('parent',)
++    
++    def __init__(self, model, admin_site):
++        self.model = model
++        self.admin_site = admin_site
++        self.opts = model._meta
++    
++    def get_empty_value_display(self):
++        return ""
++    
++    def get_fieldsets(self, request, obj=None):
++        return []
++    
++    def get_urls(self):
++        from django.urls import path
++        return []
++
++# Create a custom admin site
++admin_site = AdminSite(name='custom-admin')
++
++# Register the model with the admin site
++admin_site.register(Child, ChildAdmin)
++
++# Create a form for the test
++class ChildForm(forms.ModelForm):
++    class Meta:
++        model = Child
++        fields = ['parent', 'name']
++
++# Create test objects
++parent = Parent.objects.create(name="Test Parent")
++child = Child.objects.create(parent=parent, name="Test Child")
++
++# Create a mock request
++request = RequestFactory().get('/')
++
++# Test the AdminReadonlyField
++model_admin = ChildAdmin(Child, admin_site)
++form = ChildForm(instance=child)
++readonly_field = AdminReadonlyField(form, 'parent', True, model_admin=model_admin)
++
++# Test the URL generation
++url = readonly_field.get_admin_url(child._meta.get_field('parent'), parent)
++print(f"Generated URL: {url}")
++print(f"Expected URL to contain: /custom-admin/")
++
++# Add URL patterns
++test_app.urls.urlpatterns = [
++    path('custom-admin/', admin_site.urls),
++]
++
++# Add the custom admin site's URLs to the root URLconf
++from django.urls import include, path
++from django.conf import settings
++settings.ROOT_URLCONF = 'test_app.urls'
++
++# Create a request with the custom admin site
++request = RequestFactory().get('/custom-admin/')
++request.current_app = admin_site.name
++
++# Create a request context
++from django.template import RequestContext
++request_context = RequestContext(request)
++
++# Register the model with the default admin site
++from django.contrib.admin import site as default_admin_site
++default_admin_site.register(Child, ChildAdmin)
++
++# Create a new request with the custom admin site
++request = RequestFactory().get('/custom-admin/')
++request.current_app = admin_site.name
++
++# Test the URL generation again
++url = readonly_field.get_admin_url(child._meta.get_field('parent'), parent)
++print(f"Generated URL (with custom admin site): {url}")
++print(f"Expected URL to contain: /custom-admin/")
++
++# Create a new model admin with the custom admin site
++model_admin = ChildAdmin(Child, admin_site)
++form = ChildForm(instance=child)
++readonly_field = AdminReadonlyField(form, 'parent', True, model_admin=model_admin)
++
++# Test the URL generation again
++url = readonly_field.get_admin_url(child._meta.get_field('parent'), parent)
++print(f"Generated URL (with new model admin): {url}")
++print(f"Expected URL to contain: /custom-admin/")
++
++# Create a new request with the custom admin site
++request = RequestFactory().get('/custom-admin/')
++request.current_app = admin_site.name
++
++# Test the URL generation again
++url = readonly_field.get_admin_url(child._meta.get_field('parent'), parent)
++print(f"Generated URL (with new request): {url}")
++print(f"Expected URL to contain: /custom-admin/")
++
++# Create a new request with the custom admin site
++request = RequestFactory().get('/custom-admin/')
++request.current_app = admin_site.name
++request.META['SERVER_NAME'] = 'testserver'
++request.META['SERVER_PORT'] = '80'
++request.META['REQUEST_SCHEME'] = 'http'
++
++# Test the URL generation again
++url = readonly_field.get_admin_url(child._meta.get_field('parent'), parent)
++print(f"Generated URL (with server info): {url}")
++print(f"Expected URL to contain: /custom-admin/")
++
++# Create a new request with the custom admin site
++request = RequestFactory().get('/custom-admin/')
++request.current_app = admin_site.name
++request.META['SERVER_NAME'] = 'testserver'
++request.META['SERVER_PORT'] = '80'
++request.META['REQUEST_SCHEME'] = 'http'
++request.META['PATH_INFO'] = '/custom-admin/test_app/parent/1/'
++
++# Test the URL generation again
++url = readonly_field.get_admin_url(child._meta.get_field('parent'), parent)
++print(f"Generated URL (with path info): {url}")
++print(f"Expected URL to contain: /custom-admin/")
++
++# Create a new request with the custom admin site
++request = RequestFactory().get('/custom-admin/')
++request.current_app = admin_site.name
++request.META['SERVER_NAME'] = 'testserver'
++request.META['SERVER_PORT'] = '80'
++request.META['REQUEST_SCHEME'] = 'http'
++request.META['PATH_INFO'] = '/custom-admin/test_app/parent/1/'
++request.META['SCRIPT_NAME'] = '/custom-admin'
++
++# Test the URL generation again
++url = readonly_field.get_admin_url(child._meta.get_field('parent'), parent)
++print(f"Generated URL (with script name): {url}")
++print(f"Expected URL to contain: /custom-admin/")
++
++# Create a new request with the custom admin site
++request = RequestFactory().get('/custom-admin/')
++request.current_app = admin_site.name
++request.META['SERVER_NAME'] = 'testserver'
++request.META['SERVER_PORT'] = '80'
++request.META['REQUEST_SCHEME'] = 'http'
++request.META['PATH_INFO'] = '/custom-admin/test_app/parent/1/'
++request.META['SCRIPT_NAME'] = '/custom-admin'
++request.META['HTTP_HOST'] = 'testserver'
++
++# Test the URL generation again
++url = readonly_field.get_admin_url(child._meta.get_field('parent'), parent)
++print(f"Generated URL (with host): {url}")
++print(f"Expected URL to contain: /custom-admin/")
+\ No newline at end of file

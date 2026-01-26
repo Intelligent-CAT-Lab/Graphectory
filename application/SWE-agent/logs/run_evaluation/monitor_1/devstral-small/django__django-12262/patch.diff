@@ -1,0 +1,182 @@
+diff --git a/custom_tags.py b/custom_tags.py
+new file mode 100644
+index 0000000000..24a58ea830
+--- /dev/null
++++ b/custom_tags.py
+@@ -0,0 +1,11 @@
++from django import template
++
++register = template.Library()
++
++@register.simple_tag
++def hello(*, greeting='hello'):
++    return f'{greeting} world'
++
++@register.simple_tag
++def hi(*, greeting):
++    return f'{greeting} world'
+\ No newline at end of file
+diff --git a/custom_tags/__init__.py b/custom_tags/__init__.py
+new file mode 100644
+index 0000000000..519187641e
+--- /dev/null
++++ b/custom_tags/__init__.py
+@@ -0,0 +1 @@
++from .custom_tags import register
+\ No newline at end of file
+diff --git a/custom_tags/custom_tags.py b/custom_tags/custom_tags.py
+new file mode 100644
+index 0000000000..24a58ea830
+--- /dev/null
++++ b/custom_tags/custom_tags.py
+@@ -0,0 +1,11 @@
++from django import template
++
++register = template.Library()
++
++@register.simple_tag
++def hello(*, greeting='hello'):
++    return f'{greeting} world'
++
++@register.simple_tag
++def hi(*, greeting):
++    return f'{greeting} world'
+\ No newline at end of file
+diff --git a/django/template/library.py b/django/template/library.py
+index 20bc86dac8..23a287fecd 100644
+--- a/django/template/library.py
++++ b/django/template/library.py
+@@ -251,17 +251,14 @@ def parse_bits(parser, bits, params, varargs, varkw, defaults,
+     args = []
+     kwargs = {}
+     unhandled_params = list(params)
+-    unhandled_kwargs = [
+-        kwarg for kwarg in kwonly
+-        if not kwonly_defaults or kwarg not in kwonly_defaults
+-    ]
++    unhandled_kwargs = list(kwonly)  # All keyword-only args are unhandled initially
+     for bit in bits:
+         # First we try to extract a potential kwarg from the bit
+         kwarg = token_kwargs([bit], parser)
+         if kwarg:
+             # The kwarg was successfully extracted
+             param, value = kwarg.popitem()
+-            if param not in params and param not in unhandled_kwargs and varkw is None:
++            if param not in params and param not in unhandled_kwargs and param not in kwonly and varkw is None:
+                 # An unexpected keyword argument was supplied
+                 raise TemplateSyntaxError(
+                     "'%s' received unexpected keyword argument '%s'" %
+@@ -297,15 +294,31 @@ def parse_bits(parser, bits, params, varargs, varkw, defaults,
+                         raise TemplateSyntaxError(
+                             "'%s' received too many positional arguments" %
+                             name)
++    # Remove handled keyword-only arguments from unhandled_kwargs
++    for param in list(kwargs.keys()):
++        if param in unhandled_kwargs:
++            unhandled_kwargs.remove(param)
++
+     if defaults is not None:
+         # Consider the last n params handled, where n is the
+         # number of defaults.
+         unhandled_params = unhandled_params[:-len(defaults)]
+-    if unhandled_params or unhandled_kwargs:
+-        # Some positional arguments were not supplied
++
++    # Check for missing required arguments
++    missing_args = []
++    for param in unhandled_params:
++        if param not in kwargs:
++            missing_args.append(param)
++    for param in unhandled_kwargs:
++        if param not in kwargs and param not in kwonly_defaults:
++            missing_args.append(param)
++
++    if missing_args:
+         raise TemplateSyntaxError(
+             "'%s' did not receive value(s) for the argument(s): %s" %
+-            (name, ", ".join("'%s'" % p for p in unhandled_params + unhandled_kwargs)))
++            (name, ", ".join("'%s'" % p for p in missing_args))
++        )
++
+     return args, kwargs
+ 
+ 
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..1818b70ca8
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,72 @@
++import os
++import django
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        TEMPLATES=[
++            {
++                'BACKEND': 'django.template.backends.django.DjangoTemplates',
++                'DIRS': [os.path.join(os.path.dirname(__file__))],
++                'OPTIONS': {
++                    'libraries': {
++                        'custom_tags': 'custom_tags.custom_tags',
++                    },
++                },
++            },
++        ],
++    )
++    django.setup()
++
++from django import template
++from custom_tags.custom_tags import register
++
++@register.simple_tag
++def hello(*, greeting='hello'):
++    return f'{greeting} world'
++
++@register.simple_tag
++def hi(*, greeting):
++    return f'{greeting} world'
++
++# Test 1: Basic case with default value
++t = template.Template('{% load custom_tags %}{% hello greeting="hi" %}')
++c = template.Context()
++print("Test 1 (basic case with default):", t.render(c))
++
++# Test 2: Multiple values for same keyword
++t2 = template.Template('{% load custom_tags %}{% hi greeting="hi" greeting="hello" %}')
++c2 = template.Context()
++try:
++    print("Test 2 (multiple values):", t2.render(c2))
++except template.TemplateSyntaxError as e:
++    print("Test 2 (multiple values error):", str(e))
++
++# Test 3: No value provided for required keyword-only arg
++t3 = template.Template('{% load custom_tags %}{% hi %}')
++c3 = template.Context()
++try:
++    print("Test 3 (missing required arg):", t3.render(c3))
++except template.TemplateSyntaxError as e:
++    print("Test 3 (missing required arg error):", str(e))
++
++# Test 4: Positional arg after keyword arg
++t4 = template.Template('{% load custom_tags %}{% hello greeting="hi" extra %}')
++c4 = template.Context()
++try:
++    print("Test 4 (positional after keyword):", t4.render(c4))
++except template.TemplateSyntaxError as e:
++    print("Test 4 (positional after keyword error):", str(e))
++
++# Test 5: Using default value
++t5 = template.Template('{% load custom_tags %}{% hello %}')
++c5 = template.Context()
++print("Test 5 (using default):", t5.render(c5))
++
++# Test 6: Invalid keyword arg
++t6 = template.Template('{% load custom_tags %}{% hello invalid="test" %}')
++c6 = template.Context()
++try:
++    print("Test 6 (invalid keyword):", t6.render(c6))
++except template.TemplateSyntaxError as e:
++    print("Test 6 (invalid keyword error):", str(e))
+\ No newline at end of file

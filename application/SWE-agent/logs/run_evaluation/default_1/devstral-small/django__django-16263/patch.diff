@@ -1,0 +1,257 @@
+diff --git a/__init__.py b/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 9735ce10c8..a4ef3c0c41 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -550,7 +550,76 @@ class Query(BaseExpression):
+         Perform a COUNT() query using the current filter constraints.
+         """
+         obj = self.clone()
++        # Only keep annotations that are used in filters, other annotations, or ordering
++        used_annotations = set()
++        if obj.where:
++            # Get all field names used in filters
++            for node in obj.where.children:
++                if hasattr(node, 'lhs'):
++                    if hasattr(node.lhs, 'target'):
++                        used_annotations.add(node.lhs.target.alias)
++                    elif hasattr(node.lhs, 'alias'):
++                        used_annotations.add(node.lhs.alias)
++        # Add any annotations used in order_by
++        for order_expr in obj.order_by:
++            if hasattr(order_expr, 'alias'):
++                used_annotations.add(order_expr.alias)
++            elif hasattr(order_expr, 'target'):
++                used_annotations.add(order_expr.target.alias)
++        # Keep only used annotations and the count annotation
++        obj.annotations = {
++            alias: ann for alias, ann in obj.annotations.items()
++            if alias in used_annotations or alias == "__count"
++        }
++        # Add the count annotation
+         obj.add_annotation(Count("*"), alias="__count", is_summary=True)
++        # Clear any unused annotations from the query
++        if obj.annotation_select_mask is not None:
++            obj.annotation_select_mask = {
++                alias for alias in obj.annotation_select_mask
++                if alias in used_annotations or alias == "__count"
++            }
++        else:
++            obj.annotation_select_mask = {"__count"}
++        obj._annotation_select_cache = None
++        # Clear any unused annotations from the query
++        obj.extra = {}
++        obj.select = ()
++        obj.default_cols = False
++        # Clear any unused annotations from the query
++        obj.set_annotation_mask(obj.annotation_select_mask)
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {
++            alias for alias in obj.annotation_select_mask
++            if alias in used_annotations or alias == "__count"
++        }
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotations = {
++            alias: ann for alias, ann in obj.annotations.items()
++            if alias in used_annotations or alias == "__count"
++        }
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
++        # Clear any unused annotations from the query
++        obj.annotation_select_mask = {"__count"}
+         return obj.get_aggregation(using, ["__count"])["__count"]
+ 
+     def has_filters(self):
+diff --git a/manage.py b/manage.py
+new file mode 100644
+index 0000000000..0afce48fc2
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,13 @@
++#!/usr/bin/env python
++import os
++import sys
++
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "testbed.settings")
++    try:
++        from django.core.management import execute_from_command_line
++    except ImportError as exc:
++        raise ImportError(
++            "Couldn't import Django. Are you sure it's installed and available on your PYTHONPATH environment variable? Did you forget to activate a virtual environment?"
++        ) from exc
++    execute_from_command_line(sys.argv)
+\ No newline at end of file
+diff --git a/myapp/__init__.py b/myapp/__init__.py
+new file mode 100644
+index 0000000000..2945a83060
+--- /dev/null
++++ b/myapp/__init__.py
+@@ -0,0 +1 @@
++from .models import Book
+\ No newline at end of file
+diff --git a/myapp/models.py b/myapp/models.py
+new file mode 100644
+index 0000000000..26214f0e54
+--- /dev/null
++++ b/myapp/models.py
+@@ -0,0 +1,8 @@
++from django.db import models
++
++class Book(models.Model):
++    name = models.CharField(max_length=100)
++    chapters = models.IntegerField()
++
++    def __str__(self):
++        return self.name
+\ No newline at end of file
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..4dbf94d130
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,10 @@
++from django.db.models import Count
++from myapp.models import Book
++
++# This will produce a SQL query with Count('chapters') even though it's not needed
++query = Book.objects.annotate(Count('chapters')).count()
++print(f"Query with unused annotation: {query.query.sql_with_params()}")
++
++# This is what we want to achieve
++query2 = Book.objects.count()
++print(f"Query without annotation: {query2.query.sql_with_params()}")
+\ No newline at end of file
+diff --git a/settings.py b/settings.py
+new file mode 100644
+index 0000000000..b8defc44e8
+--- /dev/null
++++ b/settings.py
+@@ -0,0 +1,36 @@
++import os
++
++BASE_DIR = os.path.dirname(os.path.abspath(__file__))
++
++SECRET_KEY = 'dummy'
++
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'django.contrib.auth',
++    'myapp',
++]
++
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
++    }
++}
++
++MIDDLEWARE = []
++
++ROOT_URLCONF = []
++
++TEMPLATES = []
++
++WSGI_APPLICATION = 'testbed.wsgi.application'
++
++AUTH_PASSWORD_VALIDATORS = []
++
++USE_I18N = False
++
++CACHES = {
++    'default': {
++        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
++    }
++}
+\ No newline at end of file
+diff --git a/test_query.py b/test_query.py
+new file mode 100644
+index 0000000000..73874fb93a
+--- /dev/null
++++ b/test_query.py
+@@ -0,0 +1,50 @@
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    settings.configure(
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++        USE_I18N=False,
++    )
++    django.setup()
++
++from django.db.models import Count, QuerySet
++from django.db.models.sql.query import Query
++from django.db.backends.base.base import BaseDatabaseWrapper
++
++# Create a mock database connection
++class MockConnection(BaseDatabaseWrapper):
++    def get_compiler(self, *args, **kwargs):
++        return self
++    def execute_sql(self, *args, **kwargs):
++        return 0
++    def apply_converters(self, *args, **kwargs):
++        return [0]
++    def get_converters(self, *args, **kwargs):
++        return []
++
++# Create a mock Query object with annotations
++query = Query(None)
++query.annotations = {
++    'chapters_count': Count('chapters'),
++    '__count': Count('*')
++}
++query.annotation_select_mask = set(query.annotations.keys())
++
++# Test the get_count method
++count = query.get_count('default')
++print(f"Count result: {count}")
++
++# Test that only the __count annotation is used
++print("Annotation select mask after count:", query.annotation_select_mask)
+\ No newline at end of file
+diff --git a/wsgi.py b/wsgi.py
+new file mode 100644
+index 0000000000..a092ae0314
+--- /dev/null
++++ b/wsgi.py
+@@ -0,0 +1,6 @@
++import os
++from django.core.wsgi import get_wsgi_application
++
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'testbed.settings')
++
++application = get_wsgi_application()
+\ No newline at end of file

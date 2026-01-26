@@ -1,0 +1,13 @@
+diff --git a/sphinx/ext/napoleon/docstring.py b/sphinx/ext/napoleon/docstring.py
+index d8cb75a5f..0e1b49235 100644
+--- a/sphinx/ext/napoleon/docstring.py
++++ b/sphinx/ext/napoleon/docstring.py
+@@ -44,7 +44,7 @@ _enumerated_list_regex = re.compile(
+     r'(?(paren)\)|\.)(\s+\S|\s*$)')
+ _token_regex = re.compile(
+     r"(,\sor\s|\sor\s|\sof\s|:\s|\sto\s|,\sand\s|\sand\s|,\s"
+-    r"|[{]|[}]"
++    r"|[{]|[}]|,\s*[a-zA-Z0-9_]+\s*\)|,\s*[a-zA-Z0-9_]+\s*[a-zA-Z0-9_]+\s*\)"
+     r'|"(?:\\"|[^"])*"'
+     r"|'(?:\\'|[^'])*')"
+ )

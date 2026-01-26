@@ -1,0 +1,92 @@
+diff --git a/django/db/models/expressions.py b/django/db/models/expressions.py
+index 5e3c7cab82..6cff8bd5ab 100644
+--- a/django/db/models/expressions.py
++++ b/django/db/models/expressions.py
+@@ -533,6 +533,7 @@ _connector_combinations = [
+             Combinable.SUB,
+             Combinable.MUL,
+             Combinable.DIV,
++            Combinable.MOD,  # Added MOD operator
+         )
+     },
+     # Bitwise operators.
+diff --git a/reproduce_mod.py b/reproduce_mod.py
+new file mode 100644
+index 0000000000..c5b71b4c19
+--- /dev/null
++++ b/reproduce_mod.py
+@@ -0,0 +1,60 @@
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++            'test_app',  # Our test app
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        }
++    )
++    django.setup()
++
++from django.db import models, connection
++from django.db.models import F, DecimalField, IntegerField
++from django.db.models.expressions import CombinedExpression
++
++# Create a model with both field types
++class TestModel(models.Model):
++    decimal_field = DecimalField(max_digits=10, decimal_places=2)
++    integer_field = IntegerField()
++
++    class Meta:
++        app_label = 'test_app'
++
++# Create the table
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(TestModel)
++
++# Create an instance of the model
++model_instance = TestModel(decimal_field=10.5, integer_field=3)
++model_instance.save()
++
++# Create a CombinedExpression with MOD operator between Decimal and Integer
++lhs = F('decimal_field', output_field=DecimalField(max_digits=10, decimal_places=2))
++rhs = F('integer_field', output_field=IntegerField())
++connector = '%%'  # MOD operator
++
++# This should now resolve output field type correctly
++expr = CombinedExpression(lhs, connector, rhs)
++
++# Print the output field type
++print(f"Output field type: {expr.output_field}")
++
++# Try to use the expression in a query
++query = TestModel.objects.annotate(result=expr)
++
++# Get the SQL and params
++sql, params = query.query.sql_with_params()
++
++print(f"SQL: {sql}")
++print(f"Params: {params}")
+\ No newline at end of file
+diff --git a/test_app/__init__.py b/test_app/__init__.py
+new file mode 100644
+index 0000000000..c7d51a7967
+--- /dev/null
++++ b/test_app/__init__.py
+@@ -0,0 +1,6 @@
++from django.apps import AppConfig
++
++class TestAppConfig(AppConfig):
++    name = 'test_app'
++
++default_app_config = 'test_app.TestAppConfig'
+\ No newline at end of file

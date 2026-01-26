@@ -1,0 +1,93 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..76d2cd49a
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,19 @@
++from sympy import Poly, symbols, S
++
++x = symbols('x')
++
++# Test cases from PR description
++print("Poly(x)*x:")
++print(Poly(x)*x)
++
++print("\nx*Poly(x):")
++print(x*Poly(x))
++
++print("\n-2*Poly(x):")
++print(-2*Poly(x))
++
++print("\nS(-2)*Poly(x):")
++print(S(-2)*Poly(x))
++
++print("\nPoly(x)*S(-2):")
++print(Poly(x)*S(-2))
+\ No newline at end of file
+diff --git a/sympy/polys/polytools.py b/sympy/polys/polytools.py
+index d5ac051f6..a60be90f9 100644
+--- a/sympy/polys/polytools.py
++++ b/sympy/polys/polytools.py
+@@ -1396,7 +1396,13 @@ def mul(f, g):
+         g = sympify(g)
+ 
+         if not g.is_Poly:
+-            return f.mul_ground(g)
++            if g.is_number:
++                return f.mul_ground(g)
++            else:
++                try:
++                    g = f.__class__(g, *f.gens)
++                except PolynomialError:
++                    return f.as_expr() * g
+ 
+         _, per, F, G = f._unify(g)
+ 
+@@ -1405,7 +1411,10 @@ def mul(f, g):
+         else:  # pragma: no cover
+             raise OperationNotSupported(f, 'mul')
+ 
+-        return per(result)
++        result = per(result)
++        if not isinstance(g, Poly) or not all(g.has(f.gen) for g in f.gens):
++            return result.as_expr()
++        return result
+ 
+     def sqr(f):
+         """
+@@ -4039,23 +4048,27 @@ def __rsub__(f, g):
+ 
+     @_sympifyit('g', NotImplemented)
+     def __mul__(f, g):
+-        if not g.is_Poly:
++        g = sympify(g)
++        if g.is_number:
++            return f.mul_ground(g)
++        else:
+             try:
+                 g = f.__class__(g, *f.gens)
++                return f.mul(g)
+             except PolynomialError:
+-                return f.as_expr()*g
+-
+-        return f.mul(g)
++                return f.as_expr() * g
+ 
+     @_sympifyit('g', NotImplemented)
+     def __rmul__(f, g):
+-        if not g.is_Poly:
++        g = sympify(g)
++        if g.is_number:
++            return f.mul_ground(g)
++        else:
+             try:
+                 g = f.__class__(g, *f.gens)
++                return f.mul(g).as_expr()
+             except PolynomialError:
+-                return g*f.as_expr()
+-
+-        return g.mul(f)
++                return g * f.as_expr()
+ 
+     @_sympifyit('n', NotImplemented)
+     def __pow__(f, n):

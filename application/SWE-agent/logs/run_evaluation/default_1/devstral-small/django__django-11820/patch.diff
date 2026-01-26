@@ -1,0 +1,135 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 3ce711f3f1..707160cbae 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -1706,21 +1706,65 @@ class Model(metaclass=ModelBase):
+         for field in related_fields:
+             _cls = cls
+             fld = None
+-            for part in field.split(LOOKUP_SEP):
++            parts = field.split(LOOKUP_SEP)
++            for i, part in enumerate(parts):
++                if i < len(parts) - 1:  # Skip the last part for now
++                    try:
++                        fld = _cls._meta.get_field(part)
++                        if fld.is_relation:
++                            _cls = fld.get_path_info()[-1].to_opts.model
++                    except (FieldDoesNotExist, AttributeError):
++                        if fld is None or fld.get_transform(part) is None:
++                            errors.append(
++                                checks.Error(
++                                    "'ordering' refers to the nonexistent field, "
++                                    "related field, or lookup '%s'." % field,
++                                    obj=cls,
++                                    id='models.E015',
++                                )
++                            )
++                            break
++            else:  # If we didn't break from the loop
++                # The last part is 'pk' or a field name, which is always valid for ordering
++                if parts[-1] == 'pk':
++                    continue
++                # Check if the last part exists in the related model
+                 try:
+-                    fld = _cls._meta.get_field(part)
+-                    if fld.is_relation:
+-                        _cls = fld.get_path_info()[-1].to_opts.model
++                    # Try to get the field from the related model
++                    related_field = _cls._meta.get_field(parts[-1])
++                    # If we get here, the field exists in the related model
++                    continue
+                 except (FieldDoesNotExist, AttributeError):
+-                    if fld is None or fld.get_transform(part) is None:
+-                        errors.append(
+-                            checks.Error(
+-                                "'ordering' refers to the nonexistent field, "
+-                                "related field, or lookup '%s'." % field,
+-                                obj=cls,
+-                                id='models.E015',
++                    # If we get here, the field doesn't exist in the related model
++                    # Check if it's a valid field name in the original model
++                    try:
++                        cls._meta.get_field(parts[-1])
++                    except (FieldDoesNotExist, AttributeError):
++                        # Check if it's a valid field name in any of the related models
++                        valid = False
++                        current_model = cls
++                        for part in parts[:-1]:
++                            try:
++                                fld = current_model._meta.get_field(part)
++                                if fld.is_relation:
++                                    current_model = fld.get_path_info()[-1].to_opts.model
++                                    try:
++                                        current_model._meta.get_field(parts[-1])
++                                        valid = True
++                                        break
++                                    except (FieldDoesNotExist, AttributeError):
++                                        continue
++                            except (FieldDoesNotExist, AttributeError):
++                                break
++                        if not valid:
++                            errors.append(
++                                checks.Error(
++                                    "'ordering' refers to the nonexistent field, "
++                                    "related field, or lookup '%s'." % field,
++                                    obj=cls,
++                                    id='models.E015',
++                                )
+                             )
+-                        )
+ 
+         # Skip ordering on pk. This is always a valid order_by field
+         # but is an alias and therefore won't be found by opts.get_field.
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..11c13a416e
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,46 @@
++import os
++import django
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++            '__main__',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        }
++    )
++    django.setup()
++
++from django.db import models
++from django.core.checks import run_checks
++
++class Option(models.Model):
++    name = models.CharField(max_length=100)
++    value = models.IntegerField()
++
++class AnotherModel(models.Model):
++    name = models.CharField(max_length=100)
++
++class SomeModel(models.Model):
++    option = models.ForeignKey(Option, on_delete=models.CASCADE)
++    other = models.ForeignKey(AnotherModel, on_delete=models.CASCADE)
++    
++    class Meta:
++        ordering = [
++            'option__pk',  # Should be valid
++            'other__value',  # Should be valid
++            'other__nonexistent',  # Should raise error
++            'option__nonexistent',  # Should raise error
++        ]
++
++# Run model checks
++errors = run_checks()
++for error in errors:
++    print(error)
+\ No newline at end of file

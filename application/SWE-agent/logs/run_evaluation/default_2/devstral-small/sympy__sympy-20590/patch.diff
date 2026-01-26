@@ -1,0 +1,30 @@
+diff --git a/sympy/core/basic.py b/sympy/core/basic.py
+index 9f609177dd..1b78015a8c 100644
+--- a/sympy/core/basic.py
++++ b/sympy/core/basic.py
+@@ -69,10 +69,7 @@ class Basic(Printable, metaclass=ManagedProperties):
+         >>> isinstance(B, Basic)
+         True
+     """
+-    __slots__ = ('_mhash',              # hash value
+-                 '_args',               # arguments
+-                 '_assumptions'
+-                )
++    # No __slots__ to allow proper inheritance and __dict__ handling
+ 
+     # To be overridden with True in the appropriate subclasses
+     is_number = False
+diff --git a/sympy/core/symbol.py b/sympy/core/symbol.py
+index 70e6953559..fc67488b0a 100644
+--- a/sympy/core/symbol.py
++++ b/sympy/core/symbol.py
+@@ -200,8 +200,7 @@ class Symbol(AtomicExpr, Boolean):
+ 
+     is_comparable = False
+ 
+-    __slots__ = ('name',)
+-
++    # No __slots__ to allow proper attribute storage and compatibility with parent classes
+     is_Symbol = True
+     is_symbol = True
+ 

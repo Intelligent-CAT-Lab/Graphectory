@@ -1,0 +1,96 @@
+diff --git a/lib/matplotlib/axes/_axes.py b/lib/matplotlib/axes/_axes.py
+index 4d06707de8..d657253fa7 100644
+--- a/lib/matplotlib/axes/_axes.py
++++ b/lib/matplotlib/axes/_axes.py
+@@ -5294,6 +5294,10 @@ default: :rc:`scatter.edgecolors`
+         # fill_betweenx (*ind_dir*="y").  *ind* is the independent variable,
+         # *dep* the dependent variable.  The docstring below is interpolated
+         # to generate both methods' docstrings.
++        
++        # Ensure dataLim updates are isolated to the current axis
++        if hasattr(self, '_twinned_axes') and self._twinned_axes:
++            self.dataLim.ignore(True)
+         """
+         Fill the area between two {dir} curves.
+ 
+diff --git a/lib/matplotlib/axes/_base.py b/lib/matplotlib/axes/_base.py
+index 5203e3232c..e9dbbe1774 100644
+--- a/lib/matplotlib/axes/_base.py
++++ b/lib/matplotlib/axes/_base.py
+@@ -2353,7 +2353,16 @@ class _AxesBase(martist.Artist):
+                 updatex = False
+             if updatey and line_trf == self.get_xaxis_transform():
+                 updatey = False
++                
++        # Skip dataLim updates for twinned axes to prevent affecting primary axis
++        if hasattr(self, '_twinned_axes') and self._twinned_axes:
++            return
++            
+         self.dataLim.update_from_path(data_path,
++                                  self.ignore_existing_data_limits,
++                                  updatex=updatex, updatey=updatey)
++        if not hasattr(self, '_twinned_axes') or not self._twinned_axes:
++            self.dataLim.update_from_path(data_path,
+                                       self.ignore_existing_data_limits,
+                                       updatex=updatex, updatey=updatey)
+         self.ignore_existing_data_limits = False
+@@ -2491,6 +2500,14 @@ class _AxesBase(martist.Artist):
+         updatex, updatey : bool, default: True
+             Whether to update the x/y limits.
+         """
++        # Skip dataLim updates for twinned axes to prevent affecting primary axis
++        if hasattr(self, '_twinned_axes') and self._twinned_axes:
++            return
++            
++        self.dataLim.update_from_data_xy(xys, self.ignore_existing_data_limits,
++                                      updatex=updatex, updatey=updatey)
++            Whether to update the x/y limits.
++        """
+         xys = np.asarray(xys)
+         if not np.any(np.isfinite(xys)):
+             return
+@@ -4433,6 +4450,17 @@ class _AxesBase(martist.Artist):
+         For those who are 'picking' artists while using twinx, pick
+         events are only called for the artists in the top-most Axes.
+         """
++        # Preserve the original dataLim before creating twin
++        original_dataLim = self.dataLim.frozen()
++        
++        twin = self._make_twin_axes(sharex=self)
++        twin.yaxis.set_label_position('right')
++        twin.yaxis.set_ticks_position('right')
++        twin._twinned_axes = True
++        
++        # Restore the original dataLim after twin creation
++        self.dataLim.set(original_dataLim)
++        return twin
+         ax2 = self._make_twin_axes(sharex=self)
+         ax2.yaxis.tick_right()
+         ax2.yaxis.set_label_position('right')
+diff --git a/lib/matplotlib/stackplot.py b/lib/matplotlib/stackplot.py
+index c97a21e029..248f5cc25d 100644
+--- a/lib/matplotlib/stackplot.py
++++ b/lib/matplotlib/stackplot.py
+@@ -18,6 +18,12 @@ __all__ = ['stackplot']
+ def stackplot(axes, x, *args,
+               labels=(), colors=None, baseline='zero',
+               **kwargs):
++    # Ensure dataLim updates are isolated to the current axis
++    if hasattr(axes, '_twinned_axes') and axes._twinned_axes:
++        axes.dataLim.ignore(True)
++    
++    # Preserve the original dataLim before plotting
++    original_dataLim = axes.dataLim.frozen()
+     """
+     Draw a stacked area plot.
+ 
+@@ -124,4 +130,9 @@ def stackplot(axes, x, *args,
+                                    facecolor=next(colors),
+                                    label=next(labels, None),
+                                    **kwargs))
++    
++    # Ensure dataLim updates are isolated to the current axis
++    if hasattr(axes, 'twinx') and axes._twinned_axes:
++        axes.dataLim.ignore(True)
++    
+     return r

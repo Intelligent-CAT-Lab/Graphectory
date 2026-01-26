@@ -1,0 +1,29 @@
+diff --git a/lib/matplotlib/scale.py b/lib/matplotlib/scale.py
+index b482a664b..718a11254 100644
+--- a/lib/matplotlib/scale.py
++++ b/lib/matplotlib/scale.py
+@@ -419,14 +419,21 @@ class LogScale(ScaleBase):
+ 
+     def limit_range_for_scale(self, vmin, vmax, minpos):
+         """
+-        Limit the domain to positive values.
++        Limit the domain to positive values, preserving inversion if vmin > vmax.
+         """
+         if not np.isfinite(minpos):
+             minpos = 1e-300  # This value should rarely if ever
+                              # end up with a visible effect.
+ 
+-        return (minpos if vmin <= 0 else vmin,
+-                minpos if vmax <= 0 else vmax)
++        if vmin > vmax:
++            # Inverted limits: ensure both are positive but preserve inversion
++            new_vmin = minpos if vmin <= 0 else vmin
++            new_vmax = minpos if vmax <= 0 else vmax
++            return (new_vmin, new_vmax)
++        else:
++            # Normal limits: ensure both are positive
++            return (minpos if vmin <= 0 else vmin,
++                    minpos if vmax <= 0 else vmax)
+ 
+ 
+ class FuncScaleLog(LogScale):

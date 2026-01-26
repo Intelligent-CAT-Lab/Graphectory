@@ -1,0 +1,52 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index fc1136ae2..6090d3eb1 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -172,12 +172,14 @@ def _parse_arglist(arglist: str) -> addnodes.desc_parameterlist:
+             node += nodes.Text(' ')
+             node += addnodes.desc_sig_name('', '', *children)  # type: ignore
+         if param.default is not param.empty:
++            # Always add space before and after equals sign
+             if param.annotation is not param.empty:
+                 node += nodes.Text(' ')
+-                node += addnodes.desc_sig_operator('', '=')
+-                node += nodes.Text(' ')
+             else:
+-                node += addnodes.desc_sig_operator('', '=')
++                # For parameters without annotation, add space before equals sign
++                node += nodes.Text(' ')
++            node += addnodes.desc_sig_operator('', '=')
++            node += nodes.Text(' ')
+             node += nodes.inline('', param.default, classes=['default_value'],
+                                  support_smartquotes=False)
+ 
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index 15f0d66e2..dc69b2a55 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -521,10 +521,23 @@ def signature_from_str(signature: str) -> inspect.Signature:
+     params = []
+ 
+     if hasattr(args, "posonlyargs"):
+-        for arg in args.posonlyargs:  # type: ignore
++        # Process positional-only parameters with default values
++        num_posonly = len(args.posonlyargs)
++        num_args = len(args.args)
++        total_positional = num_posonly + num_args
++        num_defaults = len(args.defaults) if args.defaults else 0
++        
++        for i, arg in enumerate(args.posonlyargs):  # type: ignore
++            # Check if this parameter has a default value
++            default = Parameter.empty
++            if args.defaults and i >= total_positional - num_defaults:
++                default_index = i - (total_positional - num_defaults)
++                if default_index < len(args.defaults):
++                    default = ast_unparse(args.defaults[default_index])
++            
+             annotation = ast_unparse(arg.annotation) or Parameter.empty
+             params.append(Parameter(arg.arg, Parameter.POSITIONAL_ONLY,
+-                                    annotation=annotation))
++                                    default=default, annotation=annotation))
+ 
+     for i, arg in enumerate(args.args):
+         if len(args.args) - i <= len(args.defaults):

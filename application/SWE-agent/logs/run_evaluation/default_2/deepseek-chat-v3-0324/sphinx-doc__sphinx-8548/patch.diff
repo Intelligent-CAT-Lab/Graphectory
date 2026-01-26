@@ -1,0 +1,88 @@
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index a26c818c0..3e6627ac9 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -888,6 +888,20 @@ class Signature:
+         return stringify_annotation(annotation)
+ 
+ 
++def _get_inherited_attr_doc(cls: Any, name: str, attrgetter: Callable) -> Optional[str]:
++    """Get docstring for an attribute by checking base classes."""
++    for basecls in getattr(cls, '__mro__', []):
++        # Check if base class has the attribute
++        if name in basecls.__dict__ or name in getattr(basecls, '__annotations__', {}):
++            # Get the attribute object
++            attr = attrgetter(basecls, name, None)
++            if attr is not None:
++                # Get its docstring
++                doc = attrgetter(attr, '__doc__', None)
++                if doc:
++                    return doc
++    return None
++
+ def getdoc(obj: Any, attrgetter: Callable = safe_getattr,
+            allow_inherited: bool = False, cls: Any = None, name: str = None) -> str:
+     """Get the docstring for the object.
+@@ -897,6 +911,7 @@ def getdoc(obj: Any, attrgetter: Callable = safe_getattr,
+     * partial functions
+     * inherited docstring
+     * inherited decorated methods
++    * inherited attributes (data members)
+     """
+     doc = attrgetter(obj, '__doc__', None)
+     if ispartial(obj) and doc == obj.__class__.__doc__:
+@@ -904,14 +919,17 @@ def getdoc(obj: Any, attrgetter: Callable = safe_getattr,
+     elif doc is None and allow_inherited:
+         doc = inspect.getdoc(obj)
+ 
+-        if doc is None and cls:
+-            # inspect.getdoc() does not support some kind of inherited and decorated methods.
+-            # This tries to obtain the docstring from super classes.
++        if doc is None and cls and name:
++            # First try method inheritance (existing behavior)
+             for basecls in getattr(cls, '__mro__', []):
+                 meth = safe_getattr(basecls, name, None)
+                 if meth is not None:
+                     doc = inspect.getdoc(meth)
+                     if doc:
+                         break
++            
++            # If still no docstring, try attribute inheritance (new behavior)
++            if doc is None:
++                doc = _get_inherited_attr_doc(cls, name, attrgetter)
+ 
+     return doc
+diff --git a/sphinx/util/inspect.py.bak b/sphinx/util/inspect.py.bak
+new file mode 100644
+index 000000000..d5b094672
+--- /dev/null
++++ b/sphinx/util/inspect.py.bak
+@@ -0,0 +1,27 @@
++def getdoc(obj: Any, attrgetter: Callable = safe_getattr,
++           allow_inherited: bool = False, cls: Any = None, name: str = None) -> str:
++    """Get the docstring for the object.
++
++    This tries to obtain the docstring for some kind of objects additionally:
++
++    * partial functions
++    * inherited docstring
++    * inherited decorated methods
++    """
++    doc = attrgetter(obj, '__doc__', None)
++    if ispartial(obj) and doc == obj.__class__.__doc__:
++        return getdoc(obj.func)
++    elif doc is None and allow_inherited:
++        doc = inspect.getdoc(obj)
++
++        if doc is None and cls:
++            # inspect.getdoc() does not support some kind of inherited and decorated methods.
++            # This tries to obtain the docstring from super classes.
++            for basecls in getattr(cls, '__mro__', []):
++                meth = safe_getattr(basecls, name, None)
++                if meth is not None:
++                    doc = inspect.getdoc(meth)
++                    if doc:
++                        break
++
++    return doc
+\ No newline at end of file

@@ -1,0 +1,285 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..6d77bc710
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,149 @@
++import logging
++from _pytest.stash import StashKey
++from io import StringIO
++
++# Create a key that matches pytest's implementation
++caplog_records_key = StashKey[dict]()
++
++def test() -> None:
++    def verify_consistency() -> None:
++        print(f"get_records: {caplog.get_records('call')}")
++        print(f"records: {caplog.records}")
++        assert caplog.get_records("call") == caplog.records
++
++    verify_consistency()
++    logging.warning("test")
++    verify_consistency()
++    caplog.clear()
++    verify_consistency()  # fails: assert [<LogRecord: ...y, 8, "test">] == []
++
++# Mock caplog fixture
++class MockItem:
++    _all_items = []
++
++    def __init__(self):
++        self.stash = {}
++        self._all_items.append(self)
++
++class MockHandler(logging.StreamHandler):
++    def __init__(self):
++        super().__init__(StringIO())
++        # Initialize stashed records for all test phases
++        for item in MockItem._all_items:
++            if caplog_records_key not in item.stash:
++                item.stash[caplog_records_key] = {
++                    "setup": [],
++                    "call": [],
++                    "teardown": []
++                }
++            # Use the same list for both handler.records and stashed records
++            self.records = item.stash[caplog_records_key]["call"]
++            # Ensure we're using the same list
++            if self.records is not item.stash[caplog_records_key]["call"]:
++                item.stash[caplog_records_key]["call"] = self.records
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
++            # Ensure we're using the same list for all phases
++            item.stash[caplog_records_key] = {
++                "setup": self.records,
++                "call": self.records,
++                "teardown": self.records
++            }
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
++
++    def emit(self, record: logging.LogRecord) -> None:
++        # Get the current test phase
++        when = getattr(self, '_when', 'call')
++        # Find the stashed records for this phase
++        for item in MockItem._all_items:
++            if caplog_records_key in item.stash:
++                # Use the same list for both handler.records and stashed records
++                records = item.stash[caplog_records_key][when]
++                # Ensure we're using the same list
++                if self.records is not records:
++                    self.records = records
++                    item.stash[caplog_records_key][when] = self.records
++                # Add to both lists
++                self.records.append(record)
++                records.append(record)
++                # Ensure all phases use the same list
++                for phase in ["setup", "call", "teardown"]:
++                    if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                        item.stash[caplog_records_key][phase] = self.records
++                # Ensure we're using the same list for all phases
++                item.stash[caplog_records_key] = {
++                    "setup": self.records,
++                    "call": self.records,
++                    "teardown": self.records
++                }
++                # Ensure we're using the same list for all phases
++                for phase in ["setup", "call", "teardown"]:
++                    if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                        item.stash[caplog_records_key][phase] = self.records
++                break
++        super().emit(record)
++
++    def reset(self) -> None:
++        """Reset the handler and ensure stashed records are cleared."""
++        self.stream = StringIO()
++        # Initialize fresh lists for all test phases
++        for item in MockItem._all_items:
++            if caplog_records_key in item.stash:
++                # Create fresh lists for each phase
++                item.stash[caplog_records_key] = {
++                    "setup": [],
++                    "call": [],
++                    "teardown": []
++                }
++            # Use the same list for both handler.records and stashed records
++            self.records = item.stash[caplog_records_key]["call"]
++            # Ensure we're using the same list
++            if self.records is not item.stash[caplog_records_key]["call"]:
++                item.stash[caplog_records_key]["call"] = self.records
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
++            # Ensure we're using the same list for all phases
++            item.stash[caplog_records_key] = {
++                "setup": self.records,
++                "call": self.records,
++                "teardown": self.records
++            }
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
++
++class MockCaplog:
++    def __init__(self):
++        self.records = []
++        self._item = MockItem()
++        self._item.stash[caplog_records_key] = {"call": self.records}
++        self.handler = MockHandler()
++
++    def get_records(self, when: str):
++        return self._item.stash[caplog_records_key].get(when, [])
++
++    def clear(self):
++        self.handler.reset()
++        self._item.stash[caplog_records_key] = {
++            "setup": self.records,
++            "call": self.records,
++            "teardown": self.records
++        }
++
++# Create mock caplog
++caplog = MockCaplog()
++
++# Add handler to capture logs
++logging.getLogger().addHandler(caplog.handler)
++logging.getLogger().setLevel(logging.WARNING)
++
++# Run test
++test()
+\ No newline at end of file
+diff --git a/src/_pytest/logging.py b/src/_pytest/logging.py
+index a4f4214b1..3fbdecbec 100644
+--- a/src/_pytest/logging.py
++++ b/src/_pytest/logging.py
+@@ -334,16 +334,109 @@ class LogCaptureHandler(logging_StreamHandler):
+     def __init__(self) -> None:
+         """Create a new log handler."""
+         super().__init__(StringIO())
+-        self.records: List[logging.LogRecord] = []
++        # Initialize stashed records for all test phases
++        for item in nodes.Item._all_items:
++            if caplog_records_key not in item.stash:
++                item.stash[caplog_records_key] = {
++                    "setup": [],
++                    "call": [],
++                    "teardown": []
++                }
++            # Use the same list for both handler.records and stashed records
++            self.records = item.stash[caplog_records_key]["call"]
++            # Ensure we're using the same list
++            if self.records is not item.stash[caplog_records_key]["call"]:
++                item.stash[caplog_records_key]["call"] = self.records
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
++            # Ensure we're using the same list for all phases
++            item.stash[caplog_records_key] = {
++                "setup": self.records,
++                "call": self.records,
++                "teardown": self.records
++            }
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
++            # Ensure we're using the same list for all phases
++            item.stash[caplog_records_key] = {
++                "setup": self.records,
++                "call": self.records,
++                "teardown": self.records
++            }
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
+ 
+     def emit(self, record: logging.LogRecord) -> None:
+         """Keep the log records in a list in addition to the log text."""
+-        self.records.append(record)
++        # Get the current test phase
++        when = getattr(self, '_when', 'call')
++        # Find the stashed records for this phase
++        for item in nodes.Item._all_items:
++            if caplog_records_key in item.stash:
++                # Use the same list for both handler.records and stashed records
++                records = item.stash[caplog_records_key][when]
++                # Ensure we're using the same list
++                if self.records is not records:
++                    self.records = records
++                    item.stash[caplog_records_key][when] = self.records
++                # Add to both lists
++                self.records.append(record)
++                records.append(record)
++                # Ensure all phases use the same list
++                for phase in ["setup", "call", "teardown"]:
++                    if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                        item.stash[caplog_records_key][phase] = self.records
++                # Ensure we're using the same list for all phases
++                item.stash[caplog_records_key] = {
++                    "setup": self.records,
++                    "call": self.records,
++                    "teardown": self.records
++                }
++                # Ensure we're using the same list for all phases
++                for phase in ["setup", "call", "teardown"]:
++                    if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                        item.stash[caplog_records_key][phase] = self.records
++                break
+         super().emit(record)
+ 
+     def reset(self) -> None:
+-        self.records = []
++        """Reset the handler and ensure stashed records are cleared."""
++        # Clear both the handler's records and the stashed records
+         self.stream = StringIO()
++        # Initialize fresh lists for all test phases
++        for item in nodes.Item._all_items:
++            if caplog_records_key in item.stash:
++                # Create fresh lists for each phase
++                item.stash[caplog_records_key] = {
++                    "setup": [],
++                    "call": [],
++                    "teardown": []
++                }
++            # Use the same list for both handler.records and stashed records
++            self.records = item.stash[caplog_records_key]["call"]
++            # Ensure we're using the same list
++            if self.records is not item.stash[caplog_records_key]["call"]:
++                item.stash[caplog_records_key]["call"] = self.records
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
++            # Ensure we're using the same list for all phases
++            item.stash[caplog_records_key] = {
++                "setup": self.records,
++                "call": self.records,
++                "teardown": self.records
++            }
++            # Ensure we're using the same list for all phases
++            for phase in ["setup", "call", "teardown"]:
++                if phase in item.stash[caplog_records_key] and item.stash[caplog_records_key][phase] is not self.records:
++                    item.stash[caplog_records_key][phase] = self.records
+ 
+     def handleError(self, record: logging.LogRecord) -> None:
+         if logging.raiseExceptions:
+@@ -441,6 +534,11 @@ class LogCaptureFixture:
+     def clear(self) -> None:
+         """Reset the list of log records and the captured log text."""
+         self.handler.reset()
++        # Also clear the stashed records to maintain consistency
++        self._item.stash[caplog_records_key] = {}
++        self._item.stash[caplog_records_key]["setup"] = []
++        self._item.stash[caplog_records_key]["call"] = []
++        self._item.stash[caplog_records_key]["teardown"] = []
+ 
+     def set_level(self, level: Union[int, str], logger: Optional[str] = None) -> None:
+         """Set the level of a logger for the duration of a test.

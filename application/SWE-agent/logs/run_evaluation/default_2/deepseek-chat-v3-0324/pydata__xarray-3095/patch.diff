@@ -1,0 +1,29 @@
+diff --git a/xarray/core/variable.py b/xarray/core/variable.py
+index 379be8f5..358e64b2 100644
+--- a/xarray/core/variable.py
++++ b/xarray/core/variable.py
+@@ -180,7 +180,10 @@ def as_compatible_data(data, fastpath=False):
+             data = np.asarray(data)
+ 
+     # validate whether the data is valid data types
+-    data = np.asarray(data)
++    if isinstance(data, np.ndarray) and data.dtype.kind == 'U':
++        data = np.asarray(data, dtype=data.dtype)
++    else:
++        data = np.asarray(data)
+ 
+     if isinstance(data, np.ndarray):
+         if data.dtype.kind == 'O':
+@@ -798,7 +801,11 @@ class Variable(common.AbstractArray, arithmetic.SupportsArithmetic,
+         pandas.DataFrame.copy
+         """
+         if data is None:
+-            data = self._data
++            # Preserve the dtype of Unicode arrays during deep copy
++            if deep and isinstance(self._data, np.ndarray) and self._data.dtype.kind == 'U':
++                data = np.array(self._data, dtype=self._data.dtype)
++            else:
++                data = self._data
+ 
+             if isinstance(data, indexing.MemoryCachedArray):
+                 # don't share caching between copies

@@ -1,0 +1,13 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index d7c5d2242..5194b642c 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -58,7 +58,7 @@ py_ext_sig_re = re.compile(
+     r'''^ ([\w.]+::)?            # explicit module name
+           ([\w.]+\.)?            # module and/or class name(s)
+           (\w+)  \s*             # thing name
+-          (?: \((.*)\)           # optional: arguments
++          (?: \((.*?)\)           # optional: arguments (non-greedy)
+            (?:\s* -> \s* (.*))?  #           return annotation
+           )? $                   # and nothing more
+           ''', re.VERBOSE)

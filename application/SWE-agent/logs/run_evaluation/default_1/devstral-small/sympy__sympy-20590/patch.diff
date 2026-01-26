@@ -1,0 +1,25 @@
+diff --git a/sympy/core/_print_helpers.py b/sympy/core/_print_helpers.py
+index 96d7e72676..40ac1cec31 100644
+--- a/sympy/core/_print_helpers.py
++++ b/sympy/core/_print_helpers.py
+@@ -16,6 +16,7 @@ class Printable:
+ 
+     This also adds support for LaTeX printing in jupyter notebooks.
+     """
++    __slots__ = ()
+ 
+     # Note, we always use the default ordering (lex) in __str__ and __repr__,
+     # regardless of the global setting. See issue 5487.
+diff --git a/sympy/core/basic.py b/sympy/core/basic.py
+index 9f609177dd..78221411d0 100644
+--- a/sympy/core/basic.py
++++ b/sympy/core/basic.py
+@@ -28,6 +28,8 @@ def as_Basic(expr):
+ class Basic(Printable, metaclass=ManagedProperties):
+     """
+     Base class for all SymPy objects.
++    
++    Using __slots__ to prevent creation of __dict__ for all SymPy objects.
+ 
+     Notes and conventions
+     =====================

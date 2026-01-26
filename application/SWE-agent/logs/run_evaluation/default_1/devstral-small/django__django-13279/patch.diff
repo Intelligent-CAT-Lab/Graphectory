@@ -1,0 +1,54 @@
+diff --git a/django/core/signing.py b/django/core/signing.py
+index c6713c3033..4916eee954 100644
+--- a/django/core/signing.py
++++ b/django/core/signing.py
+@@ -36,10 +36,12 @@ These functions make use of all of them.
+ import base64
+ import datetime
+ import json
++import logging
+ import time
+ import zlib
+ 
+ from django.conf import settings
++from django.core.exceptions import SuspiciousOperation
+ from django.utils import baseconv
+ from django.utils.crypto import constant_time_compare, salted_hmac
+ from django.utils.encoding import force_bytes
+@@ -167,6 +169,23 @@ class Signer:
+         # RemovedInDjango40Warning.
+         return base64_hmac(self.salt + 'signer', value, self.key, algorithm=self.legacy_algorithm)
+ 
++    def _legacy_decode(self, session_data):
++        # RemovedInDjango40Warning: pre-Django 3.1 format will be invalid.
++        try:
++            # The session data format is "value:signature"
++            value, sig = session_data.rsplit(':', 1)
++            if constant_time_compare(sig, self._legacy_signature(value).decode()):
++                return value
++            else:
++                raise BadSignature("Session data corrupted")
++        except Exception as e:
++            # ValueError, SuspiciousOperation, unpickling exceptions. If any of
++            # these happen, just return an empty dictionary (an empty session).
++            if isinstance(e, SuspiciousOperation):
++                logger = logging.getLogger('django.security.%s' % e.__class__.__name__)
++                logger.warning(str(e))
++            return {}
++
+     def sign(self, value):
+         return '%s%s%s' % (value, self.sep, self.signature(value))
+ 
+@@ -181,6 +200,12 @@ class Signer:
+             )
+         ):
+             return value
++        # If we're using sha1 as the default algorithm, try the legacy format
++        if getattr(settings, 'DEFAULT_HASHING_ALGORITHM', None) == 'sha1':
++            try:
++                return self._legacy_decode(signed_value)
++            except Exception:
++                pass
+         raise BadSignature('Signature "%s" does not match' % sig)
+ 
+ 

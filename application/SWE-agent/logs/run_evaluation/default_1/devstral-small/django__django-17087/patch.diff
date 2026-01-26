@@ -1,0 +1,50 @@
+diff --git a/django/db/migrations/state.py b/django/db/migrations/state.py
+index ae55967383..312be0ebbd 100644
+--- a/django/db/migrations/state.py
++++ b/django/db/migrations/state.py
+@@ -244,6 +244,21 @@ class ProjectState:
+             field.default = NOT_PROVIDED
+         else:
+             field = field
++        # Handle nested class methods in defaults
++        if field.default and callable(field.default) and not isinstance(field.default, type):
++            default_path = field.default.__qualname__.split('.')
++            if len(default_path) > 1:
++                # Get the model class
++                model_state = self.models[app_label, model_name]
++                model_cls = model_state.render(self.apps)._meta.model
++                # Try to resolve the full path to the method
++                try:
++                    field.default = model_cls
++                    for part in default_path[:-1]:
++                        field.default = getattr(field.default, part)
++                    field.default = getattr(field.default, default_path[-1])
++                except AttributeError:
++                    pass
+         model_key = app_label, model_name
+         self.models[model_key].fields[name] = field
+         if self._relations is not None:
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..1a0e003aee
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,17 @@
++from django.db import models
++from django.contrib.postgres.fields import ArrayField
++
++class Profile(models.Model):
++    class Capability(models.TextChoices):
++        BASIC = ("BASIC", "Basic")
++        PROFESSIONAL = ("PROFESSIONAL", "Professional")
++        
++        @classmethod
++        def default(cls) -> list[str]:
++            return [cls.BASIC]
++    
++    capabilities = ArrayField(
++        models.CharField(choices=Capability.choices, max_length=30, blank=True),
++        null=True,
++        default=Capability.default
++    )
+\ No newline at end of file

@@ -1,0 +1,90 @@
+diff --git a/django/db/backends/postgresql/introspection.py b/django/db/backends/postgresql/introspection.py
+index 4e35cb9e97..1059579dae 100644
+--- a/django/db/backends/postgresql/introspection.py
++++ b/django/db/backends/postgresql/introspection.py
+@@ -129,13 +129,20 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
+             FROM pg_constraint con
+             LEFT JOIN pg_class c1 ON con.conrelid = c1.oid
+             LEFT JOIN pg_class c2 ON con.confrelid = c2.oid
+-            LEFT JOIN pg_attribute a1 ON c1.oid = a1.attrelid AND a1.attnum = con.conkey[1]
+-            LEFT JOIN pg_attribute a2 ON c2.oid = a2.attrelid AND a2.attnum = con.confkey[1]
++            LEFT JOIN (
++                SELECT attname, attrelid, unnest(conkey) WITH ORDINALITY AS conkey(colid, arridx)
++                FROM pg_attribute
++            ) a1 ON c1.oid = a1.attrelid AND a1.conkey.colid = ANY(con.conkey)
++            LEFT JOIN (
++                SELECT attname, attrelid, unnest(confkey) WITH ORDINALITY AS confkey(colid, arridx)
++                FROM pg_attribute
++            ) a2 ON c2.oid = a2.attrelid AND a2.confkey.colid = ANY(con.confkey)
+             WHERE
+                 c1.relname = %s AND
+                 con.contype = 'f' AND
+                 c1.relnamespace = c2.relnamespace AND
+                 pg_catalog.pg_table_is_visible(c1.oid)
++            ORDER BY a1.conkey.arridx, a2.confkey.arridx
+         """, [table_name])
+         return cursor.fetchall()
+ 
+@@ -160,10 +167,11 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
+                     ORDER BY cols.arridx
+                 ),
+                 c.contype,
+-                (SELECT fkc.relname || '.' || fka.attname
++                (SELECT string_agg(fkc.relname || '.' || fka.attname, ', ')
+                 FROM pg_attribute AS fka
+                 JOIN pg_class AS fkc ON fka.attrelid = fkc.oid
+-                WHERE fka.attrelid = c.confrelid AND fka.attnum = c.confkey[1]),
++                WHERE fka.attrelid = c.confrelid AND fka.attnum = ANY(c.confkey)
++                ORDER BY array_position(c.confkey, fka.attnum)),
+                 cl.reloptions
+             FROM pg_constraint AS c
+             JOIN pg_class AS cl ON c.conrelid = cl.oid
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..f43ec7a153
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,42 @@
++import os
++import sys
++import django
++from django.conf import settings
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=[
++        'django.contrib.contenttypes',
++        'django.contrib.auth',
++    ]
++)
++django.setup()
++
++from django.core.management import call_command
++from django.db import connection
++
++# Create test tables
++with connection.cursor() as cursor:
++    cursor.execute("""
++    CREATE TABLE IF NOT EXISTS foo (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        other_id INTEGER UNIQUE
++    )
++    """)
++    cursor.execute("""
++    CREATE TABLE IF NOT EXISTS bar (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        other_id INTEGER,
++        FOREIGN KEY(other_id) REFERENCES foo(other_id)
++    )
++    """)
++
++# Run inspectdb
++print("Running inspectdb...")
++call_command('inspectdb', 'bar')
+\ No newline at end of file

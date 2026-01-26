@@ -1,0 +1,18 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 79d7e4f46..f9de13ecf 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -269,6 +269,13 @@ class PyXrefMixin:
+     def make_xref(self, rolename: str, domain: str, target: str,
+                   innernode: "Type[TextlikeNode]" = nodes.emphasis,
+                   contnode: Node = None, env: BuildEnvironment = None) -> Node:
++        # For class roles in type fields, respect current module context
++        if rolename == 'class' and env:
++            current_module = env.ref_context.get('py:module')
++            if current_module and '.' not in target and target != 'None':
++                # Prepend current module to unqualified names
++                target = f"{current_module}.{target}"
++                
+         result = super().make_xref(rolename, domain, target,  # type: ignore
+                                    innernode, contnode, env)
+         result['refspecific'] = True

@@ -1,0 +1,178 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 00000000..b98b99e3
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,31 @@
++import xarray as xr
++import numpy as np
++
++values = np.array(
++    [
++        "2021-04-01T05:25:19.000000000",
++        "2021-04-01T05:25:29.000000000",
++        "2021-04-01T05:25:39.000000000",
++        "2021-04-01T05:25:49.000000000",
++        "2021-04-01T05:25:59.000000000",
++        "2021-04-01T05:26:09.000000000",
++    ],
++    dtype="datetime64[ns]",
++)
++azimuth_time = xr.DataArray(
++    values, name="azimuth_time", coords={"azimuth_time": values - values[0]}
++)
++
++polyfit_coefficients = xr.DataArray(
++    [
++        [2.33333335e-43, 1.62499999e-43, 2.79166678e-43],
++        [-1.15316667e-30, 1.49518518e-31, 9.08833333e-31],
++        [-2.50272583e-18, -1.23851062e-18, -2.99098229e-18],
++        [5.83965193e-06, -1.53321770e-07, -4.84640242e-06],
++        [4.44739216e06, 1.45053974e06, 5.29960857e06],
++    ],
++    dims=("degree", "axis"),
++    coords={"axis": [0, 1, 2], "degree": [4, 3, 2, 1, 0]},
++)
++
++print(xr.polyval(azimuth_time, polyfit_coefficients))
+\ No newline at end of file
+diff --git a/xarray/core/computation.py b/xarray/core/computation.py
+index 823cbe02..ce669eb4 100644
+--- a/xarray/core/computation.py
++++ b/xarray/core/computation.py
+@@ -1905,35 +1905,72 @@ def polyval(
+     coeffs = coeffs.reindex(
+         {degree_dim: np.arange(max_deg + 1)}, fill_value=0, copy=False
+     )
+-    coord = _ensure_numeric(coord)  # type: ignore # https://github.com/python/mypy/issues/1533 ?
++
++    # Convert coord to numeric if needed
++    if coord.dtype.kind == "m":  # timedelta64
++        # Convert to nanoseconds first to preserve precision
++        coord_numeric = coord.astype("timedelta64[ns]")
++        # Then convert to float64
++        coord_numeric = coord_numeric.astype(np.float64)
++    else:
++        coord_numeric = coord
++
++    # Convert coeffs to numeric if needed
++    coeffs_numeric = coeffs.copy()
++    if coeffs_numeric.dtype.kind == "m":  # timedelta64
++        # Convert to nanoseconds first to preserve precision
++        coeffs_numeric = coeffs_numeric.astype("timedelta64[ns]")
++        # Then convert to float64
++        coeffs_numeric = coeffs_numeric.astype(np.float64)
+ 
+     # using Horner's method
+     # https://en.wikipedia.org/wiki/Horner%27s_method
+-    res = coeffs.isel({degree_dim: max_deg}, drop=True) + zeros_like(coord)
++    res = coeffs_numeric.isel({degree_dim: max_deg}, drop=True)
++    zeros = zeros_like(res)
++    res = res + zeros
+     for deg in range(max_deg - 1, -1, -1):
+-        res *= coord
+-        res += coeffs.isel({degree_dim: deg}, drop=True)
++        # Convert each coefficient to numeric if needed
++        coeff = coeffs_numeric.isel({degree_dim: deg}, drop=True)
++        if coeff.dtype.kind == "m":  # timedelta64
++            coeff = coeff.astype("timedelta64[ns]").astype(np.float64)
++        # Convert res to numeric if needed
++        if res.dtype.kind == "m":  # timedelta64
++            res = res.astype("timedelta64[ns]").astype(np.float64)
++        # Convert coord to numeric if needed
++        if coord_numeric.dtype.kind == "m":  # timedelta64
++            coord_numeric = coord_numeric.astype("timedelta64[ns]").astype(np.float64)
++        # Convert all operands to float64
++        res = res.astype(np.float64) * coord_numeric.astype(np.float64) + coeff.astype(np.float64)
++
++    # Convert res back to timedelta64 if needed
++    if coord.dtype.kind == "m":  # timedelta64
++        # Convert to nanoseconds first to preserve precision
++        res = res.astype("timedelta64[ns]")
++        # Then convert to float64
++        res = res.astype(np.float64)
++        # Then convert back to timedelta64
++        res = res.astype("timedelta64[ns]")
+ 
+     return res
+ 
+ 
+ def _ensure_numeric(data: T_Xarray) -> T_Xarray:
+-    """Converts all datetime64 variables to float64
++    """Converts all datetime64 and timedelta64 variables to float64
+ 
+     Parameters
+     ----------
+     data : DataArray or Dataset
+-        Variables with possible datetime dtypes.
++        Variables with possible datetime/timedelta dtypes.
+ 
+     Returns
+     -------
+     DataArray or Dataset
+-        Variables with datetime64 dtypes converted to float64.
++        Variables with datetime64/timedelta64 dtypes converted to float64.
+     """
+     from .dataset import Dataset
+ 
+     def to_floatable(x: DataArray) -> DataArray:
+-        if x.dtype.kind in "mM":
++        if x.dtype.kind == "M":  # datetime64
+             return x.copy(
+                 data=datetime_to_numeric(
+                     x.data,
+@@ -1941,6 +1978,13 @@ def _ensure_numeric(data: T_Xarray) -> T_Xarray:
+                     datetime_unit="ns",
+                 ),
+             )
++        elif x.dtype.kind == "m":  # timedelta64
++            return x.copy(
++                data=timedelta_to_numeric(
++                    x.data,
++                    datetime_unit="ns",
++                ),
++            )
+         return x
+ 
+     if isinstance(data, Dataset):
+diff --git a/xarray/core/duck_array_ops.py b/xarray/core/duck_array_ops.py
+index 253a68b7..af461c52 100644
+--- a/xarray/core/duck_array_ops.py
++++ b/xarray/core/duck_array_ops.py
+@@ -469,7 +469,13 @@ def timedelta_to_numeric(value, datetime_unit="ns", dtype=float):
+     if isinstance(value, dt.timedelta):
+         out = py_timedelta_to_float(value, datetime_unit)
+     elif isinstance(value, np.timedelta64):
+-        out = np_timedelta64_to_float(value, datetime_unit)
++        # Convert to nanoseconds first to preserve precision
++        out = value.astype("timedelta64[ns]")
++        # Then convert to the target unit if needed
++        if datetime_unit != "ns":
++            out = out / np.timedelta64(1, datetime_unit)
++        # Finally convert to float64
++        out = out.astype(np.float64)
+     elif isinstance(value, pd.Timedelta):
+         out = pd_timedelta_to_float(value, datetime_unit)
+     elif isinstance(value, str):
+@@ -497,12 +503,16 @@ def np_timedelta64_to_float(array, datetime_unit):
+ 
+     Notes
+     -----
+-    The array is first converted to microseconds, which is less likely to
+-    cause overflow errors.
++    The array is first converted to nanoseconds, which is the highest resolution
++    unit that preserves all information.
+     """
+-    array = array.astype("timedelta64[ns]").astype(np.float64)
+-    conversion_factor = np.timedelta64(1, "ns") / np.timedelta64(1, datetime_unit)
+-    return conversion_factor * array
++    # Convert to nanoseconds first to preserve precision
++    array = array.astype("timedelta64[ns]")
++    # Then convert to the target unit if needed
++    if datetime_unit != "ns":
++        array = array / np.timedelta64(1, datetime_unit)
++    # Finally convert to float64
++    return array.astype(np.float64)
+ 
+ 
+ def pd_timedelta_to_float(value, datetime_unit):

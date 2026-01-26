@@ -1,0 +1,22 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..3799815f37
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,15 @@
++from django.contrib.admindocs.views import simplify_regex
++
++# Test case from PR description
++pattern = r'entries/(?P<pk>[^/.]+)/relationships/(?P<related_field>\w+)'
++result = simplify_regex(pattern)
++print(f"Input: {pattern}")
++print(f"Output: {result}")
++print(f"Expected: /entries/<pk>/relationships/<related_field>/")
++
++# Test with trailing slash
++pattern2 = r'entries/(?P<pk>[^/.]+)/relationships/(?P<related_field>\w+)/'
++result2 = simplify_regex(pattern2)
++print(f"\nInput: {pattern2}")
++print(f"Output: {result2}")
++print(f"Expected: /entries/<pk>/relationships/<related_field>/")
+\ No newline at end of file

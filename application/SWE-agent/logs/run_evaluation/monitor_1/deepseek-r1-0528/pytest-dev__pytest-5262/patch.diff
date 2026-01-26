@@ -1,0 +1,18 @@
+diff --git a/src/_pytest/capture.py b/src/_pytest/capture.py
+index 25eab7fd..4e3a4ba6 100644
+--- a/src/_pytest/capture.py
++++ b/src/_pytest/capture.py
+@@ -429,6 +429,13 @@ class EncodedFile(object):
+         self.buffer = buffer
+         self.encoding = encoding
+ 
++    @property
++    def mode(self):
++        """The mode of the encoded file, which is the same as the underlying buffer
++        but with the 'b' flag removed since this is a text-oriented wrapper."""
++        # Remove 'b' flag from mode to indicate this is a text file
++        return self.buffer.mode.replace('b', '')
++
+     def write(self, obj):
+         if isinstance(obj, six.text_type):
+             obj = obj.encode(self.encoding, "replace")

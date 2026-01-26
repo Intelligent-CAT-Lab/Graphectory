@@ -1,0 +1,13 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index d610dc86f0..c13df16f98 100644
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -792,6 +792,8 @@ class Field(RegisterLookupMixin):
+         """Perform preliminary non-db specific value checks and conversions."""
+         if isinstance(value, Promise):
+             value = value._proxy____cast()
++        if hasattr(value, 'value'):  # Handle enum values
++            return value.value
+         return value
+ 
+     def get_db_prep_value(self, value, connection, prepared=False):

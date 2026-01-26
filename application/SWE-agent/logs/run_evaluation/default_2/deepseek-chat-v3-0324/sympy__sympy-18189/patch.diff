@@ -1,0 +1,98 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..6049b81f21
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,12 @@
++from sympy.solvers.diophantine import diophantine
++from sympy.abc import m, n
++
++# Case 1: syms=(m,n)
++result1 = diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(m,n), permute=True)
++print("syms=(m,n):", result1)
++
++# Case 2: syms=(n,m)
++result2 = diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(n,m), permute=True)
++print("syms=(n,m):", result2)
++
++# Expected both should return the same set of solutions, just ordered differently
+\ No newline at end of file
+diff --git a/sympy/solvers/diophantine.py b/sympy/solvers/diophantine.py
+index 6092e35dab..78a790c3f1 100644
+--- a/sympy/solvers/diophantine.py
++++ b/sympy/solvers/diophantine.py
+@@ -1,4 +1,5 @@
+ from __future__ import print_function, division
++from itertools import permutations
+ 
+ from sympy.core.add import Add
+ from sympy.core.compatibility import as_int, is_sequence, range
+@@ -333,21 +334,23 @@ def diophantine(eq, param=symbols("t", integer=True), syms=None,
+     final_soln = set([])
+     for sol in sols:
+         if all(_is_int(s) for s in sol):
+-            if do_permute_signs:
+-                permuted_sign = set(permute_signs(sol))
+-                final_soln.update(permuted_sign)
+-            elif permute_few_signs:
+-                lst = list(permute_signs(sol))
+-                lst = list(filter(lambda x: x[0]*x[1] == sol[1]*sol[0], lst))
+-                permuted_sign = set(lst)
+-                final_soln.update(permuted_sign)
+-            elif do_permute_signs_var:
+-                permuted_sign_var = set(signed_permutations(sol))
+-                final_soln.update(permuted_sign_var)
++            if permute:
++                # For binary cases, ensure we have all permutations regardless of input order
++                if len(sol) == 2:
++                    # Generate all value permutations
++                    perms = set(permutations(sol))
++                    # Generate all sign permutations for each value permutation
++                    all_perms = set()
++                    for p in perms:
++                        all_perms.update(permute_signs(p))
++                    final_soln.update(all_perms)
++                else:
++                    # For non-binary cases, use the existing logic
++                    final_soln.update(permute_signs(sol))
+             else:
+                 final_soln.add(sol)
+         else:
+-                final_soln.add(sol)
++            final_soln.add(sol)
+     return final_soln
+ 
+ 
+@@ -368,19 +371,24 @@ def merge_solution(var, var_t, solution):
+     if None in solution:
+         return ()
+ 
+-    solution = iter(solution)
+-    params = numbered_symbols("n", integer=True, start=1)
++    # Create a mapping from target variables to their positions in the solution
++    var_pos = {v: i for i, v in enumerate(var_t)}
++    
++    # Reorder the solution to match the input var order
++    reordered_solution = []
++    solution = list(solution)
+     for v in var:
+-        if v in var_t:
+-            sol.append(next(solution))
++        if v in var_pos:
++            reordered_solution.append(solution[var_pos[v]])
+         else:
+-            sol.append(next(params))
+-
+-    for val, symb in zip(sol, var):
++            reordered_solution.append(next(numbered_symbols("n", integer=True, start=1)))
++    
++    # Check assumptions
++    for val, symb in zip(reordered_solution, var):
+         if check_assumptions(val, **symb.assumptions0) is False:
+             return tuple()
+ 
+-    return tuple(sol)
++    return tuple(reordered_solution)
+ 
+ 
+ def diop_solve(eq, param=symbols("t", integer=True)):

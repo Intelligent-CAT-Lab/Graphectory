@@ -1,0 +1,27 @@
+diff --git a/sympy/matrices/expressions/blockmatrix.py b/sympy/matrices/expressions/blockmatrix.py
+index 95302a05ca..d13568a007 100644
+--- a/sympy/matrices/expressions/blockmatrix.py
++++ b/sympy/matrices/expressions/blockmatrix.py
+@@ -164,7 +164,21 @@ def structurally_equal(self, other):
+     def _blockmul(self, other):
+         if (isinstance(other, BlockMatrix) and
+                 self.colblocksizes == other.rowblocksizes):
+-            return BlockMatrix(self.blocks*other.blocks)
++            product = self.blocks*other.blocks
++            # Ensure ZeroMatrix remains after multiplication
++            from sympy.matrices.expressions.matexpr import ZeroMatrix
++            from sympy.core.numbers import Zero
++            from sympy.matrices import MutableMatrix
++            # Convert to mutable matrix for modification
++            mutable_product = MutableMatrix(product)
++            for i in range(mutable_product.rows):
++                for j in range(mutable_product.cols):
++                    if isinstance(mutable_product[i,j], Zero):
++                        # Get appropriate dimensions from the product
++                        row_size = self.blocks[i,0].rows
++                        col_size = other.blocks[0,j].cols
++                        mutable_product[i,j] = ZeroMatrix(row_size, col_size)
++            return BlockMatrix(mutable_product)
+ 
+         return self * other
+ 

@@ -1,0 +1,20 @@
+diff --git a/xarray/core/computation.py b/xarray/core/computation.py
+index 9fe93c88..b22d89b5 100644
+--- a/xarray/core/computation.py
++++ b/xarray/core/computation.py
+@@ -33,6 +33,7 @@ from .options import OPTIONS, _get_keep_attrs
+ from .pycompat import is_duck_dask_array
+ from .utils import is_dict_like
+ from .variable import Variable
++from .dataarray import DataArray
+ 
+ if TYPE_CHECKING:
+     from .coordinates import Coordinates
+@@ -1817,6 +1818,7 @@ def where(cond, x, y):
+         join="exact",
+         dataset_join="exact",
+         dask="allowed",
++        keep_attrs=True,
+     )
+ 
+ 

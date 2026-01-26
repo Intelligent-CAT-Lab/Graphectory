@@ -1,0 +1,58 @@
+diff --git a/sympy/printing/pycode.py b/sympy/printing/pycode.py
+index 1877c3f92a..f874e11ce9 100644
+--- a/sympy/printing/pycode.py
++++ b/sympy/printing/pycode.py
+@@ -5,7 +5,7 @@
+ """
+ from collections import defaultdict
+ from itertools import chain
+-from sympy.core import S
++from sympy.core import S, Tuple
+ from sympy.core.mod import Mod
+ from .precedence import precedence
+ from .codeprinter import CodePrinter
+@@ -552,6 +552,25 @@ def _print_Half(self, expr):
+ 
+     def _print_frac(self, expr):
+         return self._print_Mod(Mod(expr.args[0], 1))
++        
++    def _print(self, expr):
++        """Override the default _print method to handle tuples"""
++        # Handle Python tuples
++        if isinstance(expr, tuple):
++            elements = [self._print(e) for e in expr]
++            if len(elements) == 1:
++                return "(%s,)" % elements[0]
++            return "(%s)" % ", ".join(elements)
++        
++        # Handle SymPy Tuple objects
++        if isinstance(expr, Tuple):
++            elements = [self._print(e) for e in expr.args]
++            if len(elements) == 1:
++                return "(%s,)" % elements[0]
++            return "(%s)" % ", ".join(elements)
++        
++        # For all other types, use the default printing
++        return super()._print(expr)
+ 
+     def _print_Symbol(self, expr):
+ 
+diff --git a/sympy/utilities/lambdify.py b/sympy/utilities/lambdify.py
+index da67263b19..e9aad06fa1 100644
+--- a/sympy/utilities/lambdify.py
++++ b/sympy/utilities/lambdify.py
+@@ -957,11 +957,12 @@ def _recursive_to_string(doprint, arg):
+     elif iterable(arg):
+         if isinstance(arg, list):
+             left, right = "[]"
++            return left +', '.join(_recursive_to_string(doprint, e) for e in arg) + right
+         elif isinstance(arg, tuple):
+-            left, right = "()"
++            # Use the printer to handle tuples properly, including single-element tuples
++            return doprint(arg)
+         else:
+             raise NotImplementedError("unhandled type: %s, %s" % (type(arg), arg))
+-        return left +', '.join(_recursive_to_string(doprint, e) for e in arg) + right
+     elif isinstance(arg, str):
+         return arg
+     else:

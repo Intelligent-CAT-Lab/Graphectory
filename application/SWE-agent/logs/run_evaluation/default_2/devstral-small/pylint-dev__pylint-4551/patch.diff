@@ -1,0 +1,128 @@
+diff --git a/C.dot b/C.dot
+new file mode 100644
+index 00000000..6b6fd590
+--- /dev/null
++++ b/C.dot
+@@ -0,0 +1,5 @@
++digraph "C" {
++charset="utf-8"
++rankdir=BT
++"0" [label="{test_type_hints.C|a : NoneType\l|}", shape="record"];
++}
+diff --git a/classes.dot b/classes.dot
+new file mode 100644
+index 00000000..b9fbf89b
+--- /dev/null
++++ b/classes.dot
+@@ -0,0 +1,5 @@
++digraph "classes" {
++charset="utf-8"
++rankdir=BT
++"0" [label="{C|a : NoneType\l|}", shape="record"];
++}
+diff --git a/output/classes.dot b/output/classes.dot
+new file mode 100644
+index 00000000..b9fbf89b
+--- /dev/null
++++ b/output/classes.dot
+@@ -0,0 +1,5 @@
++digraph "classes" {
++charset="utf-8"
++rankdir=BT
++"0" [label="{C|a : NoneType\l|}", shape="record"];
++}
+diff --git a/pylint/pyreverse/diagrams.py b/pylint/pyreverse/diagrams.py
+index bf9f67af..6d5974ad 100644
+--- a/pylint/pyreverse/diagrams.py
++++ b/pylint/pyreverse/diagrams.py
+@@ -95,6 +95,70 @@ class ClassDiagram(Figure, FilterMixIn):
+             if names:
+                 node_name = "{} : {}".format(node_name, ", ".join(names))
+             attrs.append(node_name)
++        # Handle type hints in function arguments
++        for name, func in node.items():
++            if not isinstance(func, astroid.FunctionDef):
++                continue
++            for arg in func.args.args:
++                if arg.name == "self":
++                    continue
++                if not self.show_attr(arg.name):
++                    continue
++                if hasattr(arg, "annotation") and arg.annotation:
++                    try:
++                        # Get the actual type hint string from the annotation
++                        if hasattr(arg.annotation, "expr"):
++                            type_name = arg.annotation.expr.as_string()
++                        else:
++                            type_name = arg.annotation.as_string()
++                        # Handle default values
++                        if hasattr(arg, "default") and arg.default:
++                            if type_name == "NoneType":
++                                # Try to get the type hint from the annotation's parent
++                                if hasattr(arg.annotation, "parent"):
++                                    parent = arg.annotation.parent
++                                    if hasattr(parent, "expr"):
++                                        type_name = parent.expr.as_string()
++                                # Try to get the type hint from the annotation's value
++                                if hasattr(arg.annotation, "value"):
++                                    type_name = arg.annotation.value.as_string()
++                                # Try to get the type hint from the annotation's name
++                                if hasattr(arg.annotation, "name"):
++                                    type_name = arg.annotation.name.as_string()
++                                # Try to get the type hint from the annotation's target
++                                if hasattr(arg.annotation, "target"):
++                                    type_name = arg.annotation.target.as_string()
++                                # Try to get the type hint from the annotation's pytype
++                                if hasattr(arg.annotation, "pytype"):
++                                    type_name = arg.annotation.pytype.as_string()
++                                # Try to get the type hint from the annotation's raw value
++                                if hasattr(arg.annotation, "raw_value"):
++                                    type_name = arg.annotation.raw_value
++                                # Try to get the type hint from the annotation's text
++                                if hasattr(arg.annotation, "text"):
++                                    type_name = arg.annotation.text
++                                # Try to get the type hint from the annotation's source
++                                if hasattr(arg.annotation, "source"):
++                                    type_name = arg.annotation.source
++                                # Try to get the type hint from the annotation's raw text
++                                if hasattr(arg.annotation, "raw_text"):
++                                    type_name = arg.annotation.raw_text
++                                # Try to get the type hint from the annotation's node
++                                if hasattr(arg.annotation, "node"):
++                                    type_name = arg.annotation.node.as_string()
++                                # Try to get the type hint from the annotation's type
++                                if hasattr(arg.annotation, "type"):
++                                    type_name = arg.annotation.type.as_string()
++                                # Try to get the type hint from the annotation's type_name
++                                if hasattr(arg.annotation, "type_name"):
++                                    type_name = arg.annotation.type_name
++                                # Try to get the type hint from the annotation's value
++                                if hasattr(arg.annotation, "value"):
++                                    type_name = arg.annotation.value
++                        if type_name not in attrs:
++                            attrs.append(f"{arg.name} : {type_name}")
++                    except astroid.InferenceError:
++                        pass
+         return sorted(attrs)
+ 
+     def get_methods(self, node):
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 00000000..4dc9ae9f
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,3 @@
++class C(object):
++    def __init__(self, a: str = None):
++        self.a = a
+\ No newline at end of file
+diff --git a/test_type_hints.py b/test_type_hints.py
+new file mode 100644
+index 00000000..4dc9ae9f
+--- /dev/null
++++ b/test_type_hints.py
+@@ -0,0 +1,3 @@
++class C(object):
++    def __init__(self, a: str = None):
++        self.a = a
+\ No newline at end of file

@@ -1,0 +1,96 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..02f4a4503
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,17 @@
++from sympy import Poly, symbols, Integer
++from sympy.abc import x
++
++print("Testing Poly(x)*x:")
++print(Poly(x)*x)
++
++print("\nTesting x*Poly(x):")
++print(x*Poly(x))
++
++print("\nTesting -2*Poly(x):")
++print(-2*Poly(x))
++
++print("\nTesting S(-2)*Poly(x):")
++print(Integer(-2)*Poly(x))
++
++print("\nTesting Poly(x)*S(-2):")
++print(Poly(x)*Integer(-2))
+\ No newline at end of file
+diff --git a/sympy/polys/polytools.py b/sympy/polys/polytools.py
+index d5ac051f6..4defca47c 100644
+--- a/sympy/polys/polytools.py
++++ b/sympy/polys/polytools.py
+@@ -392,6 +392,14 @@ def _unify(f, g):
+         g = sympify(g)
+ 
+         if not g.is_Poly:
++            # If g is a symbol or number, convert it to a Poly
++            if g.is_Symbol or g.is_Number:
++                try:
++                    g = f.__class__(g, *f.gens)
++                    return f._unify(g)
++                except PolynomialError:
++                    pass
++
+             try:
+                 return f.rep.dom, f.per, f.rep, f.rep.per(f.rep.dom.from_sympy(g))
+             except CoercionFailed:
+@@ -1396,7 +1404,17 @@ def mul(f, g):
+         g = sympify(g)
+ 
+         if not g.is_Poly:
+-            return f.mul_ground(g)
++            # If g is a symbol or number, convert it to a Poly and multiply
++            if g.is_Symbol or g.is_Number:
++                return f.mul_ground(g)
++            return f.as_expr()*g
++
++        # If g is a Poly, convert it to use the same generators as f
++        if f.gens != g.gens:
++            try:
++                g = f.__class__(g, *f.gens)
++            except PolynomialError:
++                return f.as_expr()*g
+ 
+         _, per, F, G = f._unify(g)
+ 
+@@ -4040,6 +4058,16 @@ def __rsub__(f, g):
+     @_sympifyit('g', NotImplemented)
+     def __mul__(f, g):
+         if not g.is_Poly:
++            try:
++                g = f.__class__(g, *f.gens)
++            except PolynomialError:
++                # If g is a symbol or number, convert it to a Poly and multiply
++                if g.is_Symbol or g.is_Number:
++                    return f.mul_ground(g)
++                return f.as_expr()*g
++
++        # If g is a Poly, convert it to use the same generators as f
++        if g.is_Poly and f.gens != g.gens:
+             try:
+                 g = f.__class__(g, *f.gens)
+             except PolynomialError:
+@@ -4050,6 +4078,16 @@ def __mul__(f, g):
+     @_sympifyit('g', NotImplemented)
+     def __rmul__(f, g):
+         if not g.is_Poly:
++            try:
++                g = f.__class__(g, *f.gens)
++            except PolynomialError:
++                # If g is a symbol or number, convert it to a Poly and multiply
++                if g.is_Symbol or g.is_Number:
++                    return f.mul_ground(g)
++                return g*f.as_expr()
++
++        # If g is a Poly, convert it to use the same generators as f
++        if g.is_Poly and f.gens != g.gens:
+             try:
+                 g = f.__class__(g, *f.gens)
+             except PolynomialError:

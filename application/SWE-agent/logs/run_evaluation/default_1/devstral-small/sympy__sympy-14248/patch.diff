@@ -1,0 +1,314 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..f6d34a067
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,9 @@
++from sympy import *
++A = MatrixSymbol('A', 2, 2)
++B = MatrixSymbol('B', 2, 2)
++print("String representation:")
++print(A - A*B - B)
++print("\nPretty representation:")
++pprint(A - A*B - B)
++print("\nLaTeX representation:")
++print(latex(A - A*B - B))
+\ No newline at end of file
+diff --git a/sympy/matrices/expressions/matadd.py b/sympy/matrices/expressions/matadd.py
+index bef8e1e9e..18e3c67a6 100644
+--- a/sympy/matrices/expressions/matadd.py
++++ b/sympy/matrices/expressions/matadd.py
+@@ -3,7 +3,7 @@
+ from sympy.core.compatibility import reduce
+ from operator import add
+ 
+-from sympy.core import Add, Basic, sympify
++from sympy.core import Add, Basic, sympify, Mul
+ from sympy.functions import adjoint
+ from sympy.matrices.matrices import MatrixBase
+ from sympy.matrices.expressions.transpose import transpose
+@@ -31,6 +31,31 @@ def __new__(cls, *args, **kwargs):
+         args = list(map(sympify, args))
+         check = kwargs.get('check', True)
+ 
++        # Handle negative terms
++        new_args = []
++        for arg in args:
++            if isinstance(arg, Mul) and arg.args[0] == S.NegativeOne:
++                # Convert (-1)*matrix to -matrix
++                new_args.append(-arg.args[1])
++            elif isinstance(arg, MatAdd):
++                # Flatten MatAdd expressions
++                new_args.extend(arg.args)
++            else:
++                new_args.append(arg)
++        args = new_args
++
++        # Group positive and negative terms
++        pos_terms = []
++        neg_terms = []
++        for arg in args:
++            if isinstance(arg, Mul) and arg.args[0] == S.NegativeOne:
++                neg_terms.append(arg.args[1])
++            else:
++                pos_terms.append(arg)
++
++        # Combine terms
++        args = pos_terms + [-arg for arg in neg_terms]
++
+         obj = Basic.__new__(cls, *args)
+         if check:
+             validate(*args)
+@@ -61,6 +86,78 @@ def doit(self, **kwargs):
+             args = self.args
+         return canonicalize(MatAdd(*args))
+ 
++    def _print_str(self, printer):
++        terms = []
++        for arg in self.args:
++            if isinstance(arg, Mul) and arg.args[0] == S.NegativeOne:
++                terms.append('-' + printer._print(arg.args[1]))
++            else:
++                terms.append(printer._print(arg))
++        return ' + '.join(terms)
++
++    def _print_pretty(self, printer):
++        terms = []
++        for arg in self.args:
++            if isinstance(arg, Mul) and arg.args[0] == S.NegativeOne:
++                terms.append('-' + printer._print(arg.args[1]))
++            else:
++                terms.append(printer._print(arg))
++        return ' + '.join(terms)
++
++    def _print_latex(self, printer):
++        terms = []
++        for arg in self.args:
++            if isinstance(arg, Mul) and arg.args[0] == S.NegativeOne:
++                terms.append('-' + printer._print(arg.args[1]))
++            else:
++                terms.append(printer._print(arg))
++        return ' + '.join(terms)
++
++    def __str__(self):
++        terms = []
++        for arg in self.args:
++            if isinstance(arg, Mul) and arg.args[0] == S.NegativeOne:
++                terms.append('-' + str(arg.args[1]))
++            else:
++                terms.append(str(arg))
++        return ' + '.join(terms)
++
++    def __pretty__(self, printer):
++        terms = []
++        for arg in self.args:
++            if isinstance(arg, Mul) and arg.args[0] == S.NegativeOne:
++                terms.append('-' + str(arg.args[1]))
++            else:
++                terms.append(str(arg))
++        return ' + '.join(terms)
++
++    def _latex(self, printer):
++        terms = []
++        for arg in self.args:
++            if isinstance(arg, Mul) and arg.args[0] == S.NegativeOne:
++                terms.append('-' + str(arg.args[1]))
++            else:
++                terms.append(str(arg))
++        return ' + '.join(terms)
++
++    def as_coeff_add(self):
++        """Return a tuple of (coeff, add) where add is a sum without coefficients."""
++        coeff = 1
++        add = self
++        return coeff, add
++
++    def as_coeff_mmul(self):
++        """Return a tuple of (coeff, mmul) where mmul is a product without coefficients."""
++        coeff = 1
++        mmul = self
++        return coeff, mmul
++
++    def as_coeff_matrices(self):
++        """Return a tuple of (coeff, matrices) where matrices is a list of matrices."""
++        coeff = 1
++        matrices = [arg for arg in self.args if arg.is_Matrix]
++        return coeff, matrices
++
+ 
+ def validate(*args):
+     if not all(arg.is_Matrix for arg in args):
+@@ -76,7 +173,11 @@ def validate(*args):
+ def combine(cnt, mat):
+     if cnt == 1:
+         return mat
++    elif cnt == -1:
++        # Return negative matrix without coefficient
++        return -mat
+     else:
++        # For other coefficients, use multiplication
+         return cnt * mat
+ 
+ 
+@@ -108,8 +209,8 @@ def merge_explicit(matadd):
+ rules = (rm_id(lambda x: x == 0 or isinstance(x, ZeroMatrix)),
+          unpack,
+          flatten,
+-         glom(matrix_of, factor_of, combine),
+          merge_explicit,
++         glom(matrix_of, factor_of, combine),
+          sort(default_sort_key))
+ 
+ canonicalize = exhaust(condition(lambda x: isinstance(x, MatAdd),
+diff --git a/sympy/matrices/expressions/matexpr.py b/sympy/matrices/expressions/matexpr.py
+index 07dd23549..a8c229ac7 100644
+--- a/sympy/matrices/expressions/matexpr.py
++++ b/sympy/matrices/expressions/matexpr.py
+@@ -79,7 +79,43 @@ def __new__(cls, *args, **kwargs):
+ 
+     # The following is adapted from the core Expr object
+     def __neg__(self):
+-        return MatMul(S.NegativeOne, self).doit()
++        return -1 * self
++
++    def _print_str(self, printer):
++        return str(self)
++
++    def _print_pretty(self, printer):
++        return str(self)
++
++    def _print_latex(self, printer):
++        return str(self)
++
++    def __str__(self):
++        return self.name
++
++    def __pretty__(self, printer):
++        return self.name
++
++    def _latex(self, printer):
++        return self.name
++
++    def as_coeff_mmul(self):
++        """Return a tuple of (coeff, mmul) where mmul is a product without coefficients."""
++        coeff = 1
++        mmul = self
++        return coeff, mmul
++
++    def as_coeff_add(self):
++        """Return a tuple of (coeff, add) where add is a sum without coefficients."""
++        coeff = 1
++        add = self
++        return coeff, add
++
++    def as_coeff_matrices(self):
++        """Return a tuple of (coeff, matrices) where matrices is a list of matrices."""
++        coeff = 1
++        matrices = [self]
++        return coeff, matrices
+ 
+     def __abs__(self):
+         raise NotImplementedError
+diff --git a/sympy/matrices/expressions/matmul.py b/sympy/matrices/expressions/matmul.py
+index 083c5eba4..1658ab6a0 100644
+--- a/sympy/matrices/expressions/matmul.py
++++ b/sympy/matrices/expressions/matmul.py
+@@ -40,6 +40,42 @@ def __new__(cls, *args, **kwargs):
+             return factor
+         return obj
+ 
++    def _print_str(self, printer):
++        return str(self)
++
++    def _print_pretty(self, printer):
++        return str(self)
++
++    def _print_latex(self, printer):
++        return str(self)
++
++    def __str__(self):
++        return ''.join(str(arg) for arg in self.args)
++
++    def __pretty__(self, printer):
++        return ''.join(str(arg) for arg in self.args)
++
++    def _latex(self, printer):
++        return ''.join(str(arg) for arg in self.args)
++
++    def as_coeff_mmul(self):
++        """Return a tuple of (coeff, mmul) where mmul is a product without coefficients."""
++        coeff = 1
++        mmul = self
++        return coeff, mmul
++
++    def as_coeff_add(self):
++        """Return a tuple of (coeff, add) where add is a sum without coefficients."""
++        coeff = 1
++        add = self
++        return coeff, add
++
++    def as_coeff_matrices(self):
++        """Return a tuple of (coeff, matrices) where matrices is a list of matrices."""
++        coeff = 1
++        matrices = [arg for arg in self.args if arg.is_Matrix]
++        return coeff, matrices
++
+     @property
+     def shape(self):
+         matrices = [arg for arg in self.args if arg.is_Matrix]
+diff --git a/sympy/printing/latex.py b/sympy/printing/latex.py
+index 8253b2f68..2a616946e 100644
+--- a/sympy/printing/latex.py
++++ b/sympy/printing/latex.py
+@@ -309,6 +309,10 @@ def _print_Add(self, expr, order=None):
+         for i, term in enumerate(terms):
+             if i == 0:
+                 pass
++            elif term.func is Mul and term.args[0] == S.NegativeOne and term.args[1].is_Matrix:
++                # Handle matrix terms with negative coefficient
++                tex += " - "
++                term = Mul(*term.args[1:])
+             elif _coeff_isneg(term):
+                 tex += " - "
+                 term = -term
+diff --git a/sympy/printing/pretty/pretty.py b/sympy/printing/pretty/pretty.py
+index db24f4c61..2be8c48fb 100644
+--- a/sympy/printing/pretty/pretty.py
++++ b/sympy/printing/pretty/pretty.py
+@@ -819,7 +819,14 @@ def _print_BlockMatrix(self, B):
+         return self._print(B.blocks)
+ 
+     def _print_MatAdd(self, expr):
+-        return self._print_seq(expr.args, None, None, ' + ')
++        terms = []
++        for arg in expr.args:
++            # Handle negative coefficients
++            if arg.func is Mul and arg.args[0] == S.NegativeOne:
++                terms.append('-' + self._print(Mul(*arg.args[1:])))
++            else:
++                terms.append(self._print(arg))
++        return self._print_seq(terms, None, None, ' + ')
+ 
+     def _print_MatMul(self, expr):
+         args = list(expr.args)
+diff --git a/sympy/printing/str.py b/sympy/printing/str.py
+index 0baefe0f7..b5a0500c2 100644
+--- a/sympy/printing/str.py
++++ b/sympy/printing/str.py
+@@ -312,8 +312,14 @@ def _print_HadamardProduct(self, expr):
+             for arg in expr.args])
+ 
+     def _print_MatAdd(self, expr):
+-        return ' + '.join([self.parenthesize(arg, precedence(expr))
+-            for arg in expr.args])
++        terms = []
++        for arg in expr.args:
++            # Handle negative coefficients
++            if arg.func is Mul and arg.args[0] == S.NegativeOne:
++                terms.append('-' + self.parenthesize(Mul(*arg.args[1:]), precedence(expr)))
++            else:
++                terms.append(self.parenthesize(arg, precedence(expr)))
++        return ' + '.join(terms)
+ 
+     def _print_NaN(self, expr):
+         return 'nan'

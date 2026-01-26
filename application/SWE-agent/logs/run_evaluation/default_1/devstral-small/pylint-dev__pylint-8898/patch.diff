@@ -1,0 +1,75 @@
+diff --git a/pylint/config/argument.py b/pylint/config/argument.py
+index 30a5fd175..49dbaf75e 100644
+--- a/pylint/config/argument.py
++++ b/pylint/config/argument.py
+@@ -112,10 +112,53 @@ def _regex_transformer(value: str) -> Pattern[str]:
+ 
+ 
+ def _regexp_csv_transfomer(value: str) -> Sequence[Pattern[str]]:
+-    """Transforms a comma separated list of regular expressions."""
++    """Transforms a comma separated list of regular expressions.
++    
++    This function handles commas that are part of regular expressions by using a state
++    machine to track whether we're inside a regular expression pattern or not.
++    """
+     patterns: list[Pattern[str]] = []
+-    for pattern in _csv_transformer(value):
+-        patterns.append(_regex_transformer(pattern))
++    
++    # If value is already a list/tuple, use it directly
++    if isinstance(value, (list, tuple)):
++        for pattern in value:
++            patterns.append(_regex_transformer(pattern))
++        return patterns
++    
++    # For a single string, we need to handle commas inside regex patterns
++    # We use a state machine to track whether we're inside a regex pattern
++    in_pattern = False
++    current_pattern = []
++    
++    i = 0
++    while i < len(value):
++        if value[i] == '(':
++            # Starting a new pattern
++            in_pattern = True
++            current_pattern.append(value[i])
++            i += 1
++        elif value[i] == ')' and in_pattern:
++            # Ending a pattern
++            current_pattern.append(value[i])
++            in_pattern = False
++            i += 1
++        elif value[i] == ',' and not in_pattern:
++            # Found a comma outside any pattern - split here
++            pattern_str = ''.join(current_pattern).strip()
++            if pattern_str:
++                patterns.append(_regex_transformer(pattern_str))
++            current_pattern = []
++            i += 1
++        else:
++            # Just a regular character
++            current_pattern.append(value[i])
++            i += 1
++    
++    # Add the last pattern if there is one
++    pattern_str = ''.join(current_pattern).strip()
++    if pattern_str:
++        patterns.append(_regex_transformer(pattern_str))
++    
+     return patterns
+ 
+ 
+diff --git a/pylintrc b/pylintrc
+index 3896d4e35..2719fd05a 100644
+--- a/pylintrc
++++ b/pylintrc
+@@ -242,7 +242,8 @@ bad-names=foo,bar,baz,toto,tutu,tata
+ 
+ # Bad variable names regexes, separated by a comma. If names match any regex,
+ # they will always be refused
+-bad-names-rgxs=
++bad-names-rgxs = "(foo{1,3})"
++
+ 
+ # Colon-delimited sets of names that determine each other's naming style when
+ # the name regexes allow several styles.

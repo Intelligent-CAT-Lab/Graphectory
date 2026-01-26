@@ -1,0 +1,56 @@
+diff --git a/sphinx/ext/napoleon/docstring.py b/sphinx/ext/napoleon/docstring.py
+index b3daa06f1..c4f524305 100644
+--- a/sphinx/ext/napoleon/docstring.py
++++ b/sphinx/ext/napoleon/docstring.py
+@@ -252,10 +252,17 @@ class GoogleDocstring:
+         _name, _type, _desc = before, '', after
+ 
+         if parse_type:
+-            match = _google_typed_arg_regex.match(before)
+-            if match:
+-                _name = match.group(1)
+-                _type = match.group(2)
++            # Handle combined parameters (e.g., "x1, x2 : array_like, optional")
++            if "," in before and ":" in before:
++                parts = [part.strip() for part in before.split(":", 1)]
++                if len(parts) == 2:
++                    _name = parts[0]
++                    _type = parts[1]
++            else:
++                match = _google_typed_arg_regex.match(before)
++                if match:
++                    _name = match.group(1)
++                    _type = match.group(2)
+ 
+         _name = self._escape_args_and_kwargs(_name)
+ 
+@@ -409,10 +416,18 @@ class GoogleDocstring:
+         separator = ' -- ' if has_desc else ''
+         if _name:
+             if _type:
+-                if '`' in _type:
+-                    field = '**%s** (%s)%s' % (_name, _type, separator)
++                if 'optional' in _type.lower():
++                    # Handle optional marker
++                    type_without_optional = _type.replace(', optional', '').replace('optional', '').strip()
++                    if '`' in type_without_optional:
++                        field = '**%s** (`%s`, optional)%s' % (_name, type_without_optional, separator)
++                    else:
++                        field = '**%s** (*%s*, optional)%s' % (_name, type_without_optional, separator)
+                 else:
+-                    field = '**%s** (*%s*)%s' % (_name, _type, separator)
++                    if '`' in _type:
++                        field = '**%s** (%s)%s' % (_name, _type, separator)
++                    else:
++                        field = '**%s** (*%s*)%s' % (_name, _type, separator)
+             else:
+                 field = '**%s**%s' % (_name, separator)
+         elif _type:
+diff --git a/sphinx/ext/napoleon/docstring.py.backup b/sphinx/ext/napoleon/docstring.py.backup
+new file mode 100644
+index 000000000..701124be4
+--- /dev/null
++++ b/sphinx/ext/napoleon/docstring.py.backup
+@@ -0,0 +1 @@
++The original content of the file will be copied here for backup purposes.
+\ No newline at end of file

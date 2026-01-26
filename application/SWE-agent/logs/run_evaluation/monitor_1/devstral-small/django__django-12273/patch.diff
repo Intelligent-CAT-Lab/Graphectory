@@ -1,0 +1,22 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 844c01e95e..a31f2e91b9 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -841,8 +841,15 @@ class Model(metaclass=ModelBase):
+ 
+         pk_val = self._get_pk_val(meta)
+         if pk_val is None:
+-            pk_val = meta.pk.get_pk_value_on_save(self)
+-            setattr(self, meta.pk.attname, pk_val)
++            # If pk_val is None, check if it was explicitly set to None
++            if getattr(self, meta.pk.attname) is None:
++                # Primary key was explicitly set to None, treat as new object
++                pk_val = meta.pk.get_pk_value_on_save(self)
++                setattr(self, meta.pk.attname, pk_val)
++            else:
++                # Primary key is None because it hasn't been set yet
++                pk_val = meta.pk.get_pk_value_on_save(self)
++                setattr(self, meta.pk.attname, pk_val)
+         pk_set = pk_val is not None
+         if not pk_set and (force_update or update_fields):
+             raise ValueError("Cannot force an update in save() with no primary key.")

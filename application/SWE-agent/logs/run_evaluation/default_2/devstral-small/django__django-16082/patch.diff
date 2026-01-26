@@ -1,0 +1,66 @@
+diff --git a/reproduce_mod.py b/reproduce_mod.py
+new file mode 100644
+index 0000000000..3164daa526
+--- /dev/null
++++ b/reproduce_mod.py
+@@ -0,0 +1,59 @@
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++            '__main__',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        }
++    )
++    django.setup()
++
++from django.db import models, connection
++from django.db.models import F, QuerySet
++from django.db.models.expressions import CombinedExpression, Combinable
++from django.db.models.fields import DecimalField, IntegerField
++
++# Create a simple model for testing
++class TestModel(models.Model):
++    decimal_field = models.DecimalField(max_digits=10, decimal_places=2)
++    integer_field = models.IntegerField()
++
++# Create tables
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(TestModel)
++
++# Create a query object to resolve expressions
++qs = TestModel.objects.all()
++
++# Create expressions with different types
++decimal_expr = F('decimal_field')
++int_expr = F('integer_field')
++
++# Create MOD expression
++mod_expr = decimal_expr % int_expr
++
++# Resolve the expression
++mod_expr.resolve_expression(query=qs.query)
++
++# Print the output field type
++print(f"MOD output field type: {mod_expr.output_field.__class__.__name__}")
++
++# For comparison, create ADD expression
++add_expr = decimal_expr + int_expr
++
++# Resolve the expression
++add_expr.resolve_expression(query=qs.query)
++
++# Print the output field type
++print(f"ADD output field type: {add_expr.output_field.__class__.__name__}")
+\ No newline at end of file

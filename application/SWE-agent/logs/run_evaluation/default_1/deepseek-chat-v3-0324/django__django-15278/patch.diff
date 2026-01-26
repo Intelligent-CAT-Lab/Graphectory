@@ -1,0 +1,288 @@
+diff --git a/custom_migration.py b/custom_migration.py
+new file mode 100644
+index 0000000000..a775d61f6c
+--- /dev/null
++++ b/custom_migration.py
+@@ -0,0 +1,54 @@
++from django.db import migrations, models
++from django.db.migrations.operations.base import Operation
++
++class AddUniqueFieldWithSQLiteWorkaround(Operation):
++    """Custom operation to add a UNIQUE field to a SQLite table."""
++
++    def __init__(self, model_name, name, field):
++        self.model_name = model_name
++        self.name = name
++        self.field = field
++
++    def state_forwards(self, app_label, state):
++        state.add_field(
++            app_label,
++            self.model_name,
++            self.name,
++            self.field,
++        )
++
++    def database_forwards(self, app_label, schema_editor, from_state, to_state):
++        model = to_state.apps.get_model(app_label, self.model_name)
++        if schema_editor.connection.vendor == 'sqlite':
++            # Create a new table with the desired schema
++            new_table = f"{model._meta.db_table}_new"
++            schema_editor.deferred_sql.append(
++                f"CREATE TABLE {new_table} AS SELECT * FROM {model._meta.db_table}"
++            )
++            # Add the new field to the new table
++            schema_editor.add_field(model, self.field)
++            # Drop the old table
++            schema_editor.deferred_sql.append(f"DROP TABLE {model._meta.db_table}")
++            # Rename the new table to the original name
++            schema_editor.deferred_sql.append(f"ALTER TABLE {new_table} RENAME TO {model._meta.db_table}")
++        else:
++            # For other databases, use the standard approach
++            schema_editor.add_field(model, self.field)
++
++    def database_backwards(self, app_label, schema_editor, from_state, to_state):
++        model = from_state.apps.get_model(app_label, self.model_name)
++        if schema_editor.connection.vendor == 'sqlite':
++            # Reverse the operation for SQLite
++            new_table = f"{model._meta.db_table}_new"
++            schema_editor.deferred_sql.append(
++                f"CREATE TABLE {new_table} AS SELECT * FROM {model._meta.db_table}"
++            )
++            # Remove the field from the new table
++            schema_editor.remove_field(model, self.field)
++            # Drop the old table
++            schema_editor.deferred_sql.append(f"DROP TABLE {model._meta.db_table}")
++            # Rename the new table to the original name
++            schema_editor.deferred_sql.append(f"ALTER TABLE {new_table} RENAME TO {model._meta.db_table}")
++        else:
++            # For other databases, use the standard approach
++            schema_editor.remove_field(model, self.field)
+\ No newline at end of file
+diff --git a/reproduce_error.py b/reproduce_error.py
+new file mode 100644
+index 0000000000..d7a09c47da
+--- /dev/null
++++ b/reproduce_error.py
+@@ -0,0 +1,47 @@
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
++    django.setup()
++
++from django.db import migrations, models, connection
++from django.db.migrations.executor import MigrationExecutor
++from django.db.migrations.state import ProjectState
++
++# Create a test database
++connection.creation.create_test_db()
++
++# Define the models
++from test_app.models import RefreshToken, AccessToken
++
++class Migration(migrations.Migration):
++    dependencies = []
++    operations = [
++        migrations.CreateModel(
++            name='RefreshToken',
++            fields=[
++                ('id', models.BigAutoField(primary_key=True, serialize=False)),
++            ],
++        ),
++        migrations.CreateModel(
++            name='AccessToken',
++            fields=[
++                ('id', models.BigAutoField(primary_key=True, serialize=False)),
++            ],
++        ),
++        migrations.AddField(
++            model_name='AccessToken',
++            name='source_refresh_token',
++            field=models.OneToOneField(blank=True, null=True, on_delete=models.deletion.SET_NULL, to='test_app.RefreshToken', related_name='refreshed_access_token'),
++        ),
++    ]
++
++# Initialize the migration state
++project_state = ProjectState()
++
++# Apply the migration
++executor = MigrationExecutor(connection)
++executor.apply_migration(project_state, Migration("test_migration", "test_app"))
+diff --git a/reproduce_error_fixed.py b/reproduce_error_fixed.py
+new file mode 100644
+index 0000000000..6baf1d2bd4
+--- /dev/null
++++ b/reproduce_error_fixed.py
+@@ -0,0 +1,44 @@
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
++    django.setup()
++
++from django.db import migrations, models, connection
++from django.db.migrations.executor import MigrationExecutor
++from django.db.migrations.state import ProjectState
++
++# Create a test database
++connection.creation.create_test_db()
++
++class Migration(migrations.Migration):
++    dependencies = []
++    operations = [
++        migrations.CreateModel(
++            name='RefreshToken',
++            fields=[
++                ('id', models.BigAutoField(primary_key=True, serialize=False)),
++            ],
++        ),
++        migrations.CreateModel(
++            name='AccessToken',
++            fields=[
++                ('id', models.BigAutoField(primary_key=True, serialize=False)),
++            ],
++        ),
++        migrations.AddField(
++            model_name='AccessToken',
++            name='source_refresh_token',
++            field=models.OneToOneField(blank=True, null=True, on_delete=models.deletion.SET_NULL, to='test_app.RefreshToken', related_name='refreshed_access_token'),
++        ),
++    ]
++
++# Initialize the migration state
++project_state = ProjectState()
++
++# Apply the migration
++executor = MigrationExecutor(connection)
++executor.apply_migration(project_state, Migration("test_migration", "test_app"))
+\ No newline at end of file
+diff --git a/reproduce_error_simplified.py b/reproduce_error_simplified.py
+new file mode 100644
+index 0000000000..9c991f7c67
+--- /dev/null
++++ b/reproduce_error_simplified.py
+@@ -0,0 +1,50 @@
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings
++if not settings.configured:
++    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
++    django.setup()
++
++from django.db import migrations, models, connection
++from django.db.migrations.executor import MigrationExecutor
++from django.db.migrations.state import ProjectState
++
++# Create a test database
++connection.creation.create_test_db()
++
++# Apply the initial migration
++initial_migration = migrations.Migration("0001_initial", "test_app")
++initial_migration.operations = [
++    migrations.CreateModel(
++        name='RefreshToken',
++        fields=[
++            ('id', models.BigAutoField(primary_key=True, serialize=False)),
++        ],
++    ),
++    migrations.CreateModel(
++        name='AccessToken',
++        fields=[
++            ('id', models.BigAutoField(primary_key=True, serialize=False)),
++        ],
++    ),
++]
++
++executor = MigrationExecutor(connection)
++executor.apply_migration(ProjectState(), initial_migration)
++
++# Now apply the AddField migration
++class AddFieldMigration(migrations.Migration):
++    dependencies = [
++        ('test_app', '0001_initial'),
++    ]
++    operations = [
++        migrations.AddField(
++            model_name='AccessToken',
++            name='source_refresh_token',
++            field=models.OneToOneField(blank=True, null=True, on_delete=models.deletion.SET_NULL, to='test_app.RefreshToken', related_name='refreshed_access_token'),
++        ),
++    ]
++
++executor.apply_migration(ProjectState(), AddFieldMigration("add_field", "test_app"))
+\ No newline at end of file
+diff --git a/settings.py b/settings.py
+new file mode 100644
+index 0000000000..a20a00575d
+--- /dev/null
++++ b/settings.py
+@@ -0,0 +1,14 @@
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'django.contrib.auth',
++    'test_app',
++]
++
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': 'db.sqlite3',
++    }
++}
++
++SECRET_KEY = 'dummy-key'
+diff --git a/test_app/__init__.py b/test_app/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/test_app/migrations/0001_initial.py b/test_app/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..3440f2e65f
+--- /dev/null
++++ b/test_app/migrations/0001_initial.py
+@@ -0,0 +1,19 @@
++from django.db import migrations, models
++
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = []
++    operations = [
++        migrations.CreateModel(
++            name='RefreshToken',
++            fields=[
++                ('id', models.BigAutoField(primary_key=True, serialize=False)),
++            ],
++        ),
++        migrations.CreateModel(
++            name='AccessToken',
++            fields=[
++                ('id', models.BigAutoField(primary_key=True, serialize=False)),
++            ],
++        ),
++    ]
+\ No newline at end of file
+diff --git a/test_app/migrations/__init__.py b/test_app/migrations/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/test_app/models.py b/test_app/models.py
+new file mode 100644
+index 0000000000..60a11bc124
+--- /dev/null
++++ b/test_app/models.py
+@@ -0,0 +1,7 @@
++from django.db import models
++
++class RefreshToken(models.Model):
++    id = models.BigAutoField(primary_key=True)
++
++class AccessToken(models.Model):
++    id = models.BigAutoField(primary_key=True)
+\ No newline at end of file

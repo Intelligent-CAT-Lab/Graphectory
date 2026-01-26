@@ -1,0 +1,124 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..3f77c0945
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,98 @@
++from sympy import S
++from sympy.stats import *
++
++# Test Arcsin
++print("Testing Arcsin...")
++try:
++    result = cdf(Arcsin("x", 0, 3))(1)
++    print(f"Arcsin result: {result}")
++except Exception as e:
++    print(f"Arcsin error: {e}")
++
++# Test Dagum
++print("\nTesting Dagum...")
++try:
++    result = cdf(Dagum("x", S(1)/3, S(1)/5, 2))(3)
++    print(f"Dagum result: {result}")
++except Exception as e:
++    print(f"Dagum error: {e}")
++
++# Test Erlang
++print("\nTesting Erlang...")
++try:
++    result = cdf(Erlang("x", 1, 1))(1)
++    print(f"Erlang result: {result}")
++except Exception as e:
++    print(f"Erlang error: {e}")
++
++# Test Frechet
++print("\nTesting Frechet...")
++try:
++    result = cdf(Frechet("x", S(4)/3, 1, 2))(3)
++    print(f"Frechet result: {result}")
++except Exception as e:
++    print(f"Frechet error: {e}")
++
++# Test Gamma
++print("\nTesting Gamma...")
++try:
++    result = cdf(Gamma("x", 0.1, 2))(3)
++    print(f"Gamma result: {result}")
++except Exception as e:
++    print(f"Gamma error: {e}")
++
++# Test GammaInverse
++print("\nTesting GammaInverse...")
++try:
++    result = cdf(GammaInverse("x", S(5)/7, 2))(3)
++    print(f"GammaInverse result: {result}")
++except Exception as e:
++    print(f"GammaInverse error: {e}")
++
++# Test Kumaraswamy
++print("\nTesting Kumaraswamy...")
++try:
++    result = cdf(Kumaraswamy("x", S(1)/123, 5))(S(1)/3)
++    print(f"Kumaraswamy result: {result}")
++except Exception as e:
++    print(f"Kumaraswamy error: {e}")
++
++# Test Laplace
++print("\nTesting Laplace...")
++try:
++    result = cdf(Laplace("x", 2, 3))(5)
++    print(f"Laplace result: {result}")
++except Exception as e:
++    print(f"Laplace error: {e}")
++
++# Test Logistic
++print("\nTesting Logistic...")
++try:
++    result = cdf(Logistic("x", 1, 0.1))(2)
++    print(f"Logistic result: {result}")
++except Exception as e:
++    print(f"Logistic error: {e}")
++
++# Test Nakagami
++print("\nTesting Nakagami...")
++try:
++    result = cdf(Nakagami("x", S(7)/3, 1))(2)
++    print(f"Nakagami result: {result}")
++except Exception as e:
++    print(f"Nakagami error: {e}")
++
++# Test StudentT
++print("\nTesting StudentT...")
++try:
++    result = cdf(StudentT("x", 10))(2)
++    print(f"StudentT result: {result}")
++except Exception as e:
++    print(f"StudentT error: {e}")
++
++# Test UniformSum
++print("\nTesting UniformSum...")
++try:
++    result = cdf(UniformSum("x", 5))(2)
++    print(f"UniformSum result: {result}")
++except Exception as e:
++    print(f"UniformSum error: {e}")
+\ No newline at end of file
+diff --git a/sympy/stats/crv_types.py b/sympy/stats/crv_types.py
+index fff7da80a..59d155c77 100644
+--- a/sympy/stats/crv_types.py
++++ b/sympy/stats/crv_types.py
+@@ -153,6 +153,14 @@ class ArcsinDistribution(SingleContinuousDistribution):
+     def pdf(self, x):
+         return 1/(pi*sqrt((x - self.a)*(self.b - x)))
+ 
++    def _cdf(self, x):
++        a, b = self.a, self.b
++        return Piecewise(
++            (1/pi * arcsin((2*x - a - b)/(b - a)), x.between(a, b)),
++            (1, x > b),
++            (0, True)
++        )
++
+ def Arcsin(name, a=0, b=1):
+     r"""
+     Create a Continuous Random Variable with an arcsin distribution.

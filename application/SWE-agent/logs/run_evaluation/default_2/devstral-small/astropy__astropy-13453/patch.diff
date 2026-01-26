@@ -1,0 +1,246 @@
+diff --git a/astropy/io/ascii/core.py b/astropy/io/ascii/core.py
+index 1a7785bd2..3a2ed6102 100644
+--- a/astropy/io/ascii/core.py
++++ b/astropy/io/ascii/core.py
+@@ -1469,7 +1469,7 @@ class BaseReader(metaclass=MetaBaseReader):
+         self.header.write_comments(lines, meta)
+         self.header.write(lines)
+ 
+-    def write(self, table):
++    def write(self, table, formats=None):
+         """
+         Write ``table`` as list of strings.
+ 
+@@ -1477,6 +1477,10 @@ class BaseReader(metaclass=MetaBaseReader):
+         ----------
+         table : `~astropy.table.Table`
+             Input table data.
++        formats : dict, optional
++            A dictionary of column name/format string pairs. The format string
++            can be a standard Python format string or a callable that takes a
++            single value and returns a formatted string.
+ 
+         Returns
+         -------
+@@ -1484,6 +1488,7 @@ class BaseReader(metaclass=MetaBaseReader):
+             List of strings corresponding to ASCII table
+ 
+         """
++        self.data.formats = formats or {}
+ 
+         # Check column names before altering
+         self.header.cols = list(table.columns.values())
+diff --git a/astropy/io/ascii/html.py b/astropy/io/ascii/html.py
+index 266cf229c..205926866 100644
+--- a/astropy/io/ascii/html.py
++++ b/astropy/io/ascii/html.py
+@@ -339,10 +339,22 @@ class HTML(core.BaseReader):
+         self.outputter = HTMLOutputter()
+         return super().read(table)
+ 
+-    def write(self, table):
++    def write(self, table, formats=None):
+         """
+         Return data in ``table`` converted to HTML as a list of strings.
++
++        Parameters
++        ----------
++        table : astropy.table.Table
++            The table to write
++        formats : dict, optional
++            A dictionary of column name/format string pairs. The format string
++            can be a standard Python format string or a callable that takes a
++            single value and returns a formatted string.
+         """
++        # Store formats for use in fill_values
++        self.data.formats = formats or {}
++
+         # Check that table has only 1-d or 2-d columns. Above that fails.
+         self._check_multidim_table(table)
+ 
+@@ -455,14 +467,131 @@ class HTML(core.BaseReader):
+         # Fixes XMLWriter's insertion of unwanted line breaks
+         return [''.join(lines)]
+ 
++        cols = list(table.columns.values())
++
++        self.data.header.cols = cols
++
++        if isinstance(self.data.fill_values, tuple):
++            self.data.fill_values = [self.data.fill_values]
++
++        self.data._set_fill_values(cols)
++
++        lines = []
++
++        # Set HTML escaping to False for any column in the raw_html_cols input
++        raw_html_cols = self.html.get('raw_html_cols', [])
++        if isinstance(raw_html_cols, str):
++            raw_html_cols = [raw_html_cols]  # Allow for a single string as input
++        cols_escaped = [col.info.name not in raw_html_cols for col in cols]
++
++        # Kwargs that get passed on to bleach.clean() if that is available.
++        raw_html_clean_kwargs = self.html.get('raw_html_clean_kwargs', {})
++
++        # Use XMLWriter to output HTML to lines
++        w = writer.XMLWriter(ListWriter(lines))
++
++        with w.tag('html'):
++            with w.tag('head'):
++                # Declare encoding and set CSS style for table
++                with w.tag('meta', attrib={'charset': 'utf-8'}):
++                    pass
++                with w.tag('meta', attrib={'http-equiv': 'Content-type',
++                                           'content': 'text/html;charset=UTF-8'}):
++                    pass
++                if 'css' in self.html:
++                    with w.tag('style'):
++                        w.data(self.html['css'])
++                if 'cssfiles' in self.html:
++                    for filename in self.html['cssfiles']:
++                        with w.tag('link', rel="stylesheet", href=filename, type='text/css'):
++                            pass
++                if 'jsfiles' in self.html:
++                    for filename in self.html['jsfiles']:
++                        with w.tag('script', src=filename):
++                            w.data('')  # need this instead of pass to get <script></script>
++            with w.tag('body'):
++                if 'js' in self.html:
++                    with w.xml_cleaning_method('none'):
++                        with w.tag('script'):
++                            w.data(self.html['js'])
++                if isinstance(self.html['table_id'], str):
++                    html_table_id = self.html['table_id']
++                else:
++                    html_table_id = None
++                if 'table_class' in self.html:
++                    html_table_class = self.html['table_class']
++                    attrib = {"class": html_table_class}
++                else:
++                    attrib = {}
++                with w.tag('table', id=html_table_id, attrib=attrib):
++                    with w.tag('thead'):
++                        with w.tag('tr'):
++                            for col in cols:
++                                if len(col.shape) > 1 and self.html['multicol']:
++                                    # Set colspan attribute for multicolumns
++                                    w.start('th', colspan=col.shape[1])
++                                else:
++                                    w.start('th')
++                                w.data(col.info.name.strip())
++                                w.end(indent=False)
++                        col_str_iters = []
++                        new_cols_escaped = []
++
++                        # Make a container to hold any new_col objects created
++                        # below for multicolumn elements.  This is purely to
++                        # maintain a reference for these objects during
++                        # subsequent iteration to format column values.  This
++                        # requires that the weakref info._parent be maintained.
++                        new_cols = []
++
++                        for col, col_escaped in zip(cols, cols_escaped):
++                            if len(col.shape) > 1 and self.html['multicol']:
++                                span = col.shape[1]
++                                for i in range(span):
++                                    # Split up multicolumns into separate columns
++                                    new_col = Column([el[i] for el in col])
++
++                                    new_col_iter_str_vals = self.fill_values(
++                                        col, new_col.info.iter_str_vals())
++                                    col_str_iters.append(new_col_iter_str_vals)
++                                    new_cols_escaped.append(col_escaped)
++                                    new_cols.append(new_col)
++                            else:
++
++                                col_iter_str_vals = self.fill_values(col, col.info.iter_str_vals())
++                                col_str_iters.append(col_iter_str_vals)
++
++                                new_cols_escaped.append(col_escaped)
++
++                    for row in zip(*col_str_iters):
++                        with w.tag('tr'):
++                            for el, col_escaped in zip(row, new_cols_escaped):
++                                # Potentially disable HTML escaping for column
++                                method = ('escape_xml' if col_escaped else 'bleach_clean')
++                                with w.xml_cleaning_method(method, **raw_html_clean_kwargs):
++                                    w.start('td')
++                                    w.data(el.strip())
++                                    w.end(indent=False)
++
++        # Fixes XMLWriter's insertion of unwanted line breaks
++        return [''.join(lines)]
++
+     def fill_values(self, col, col_str_iters):
+         """
+         Return an iterator of the values with replacements based on fill_values
++        and user-specified formats.
+         """
+         # check if the col is a masked column and has fill values
+         is_masked_column = hasattr(col, 'mask')
+         has_fill_values = hasattr(col, 'fill_values')
+ 
++        # Get format for this column if specified
++        col_name = getattr(col, 'info', None)
++        col_name = getattr(col_name, 'name', None)
++        col_format = None
++        if col_name and hasattr(self, 'formats'):
++            col_format = self.formats.get(col_name)
++
+         for idx, col_str in enumerate(col_str_iters):
+             if is_masked_column and has_fill_values:
+                 if col.mask[idx]:
+@@ -474,4 +603,27 @@ class HTML(core.BaseReader):
+                     yield col.fill_values[col_str]
+                     continue
+ 
+-            yield col_str
++            # Apply user-specified format if available
++            if col_format is not None:
++                try:
++                    # Convert string back to number for formatting
++                    if '.' in col_str or 'e' in col_str.lower():
++                        # Handle scientific notation
++                        if 'e' in col_str.lower():
++                            val = float(col_str)
++                        else:
++                            val = float(col_str)
++                        yield col_format(val)
++                    else:
++                        # Try int first, fall back to float
++                        try:
++                            val = int(col_str)
++                            yield col_format(val)
++                        except ValueError:
++                            val = float(col_str)
++                            yield col_format(val)
++                except (ValueError, TypeError):
++                    # If formatting fails, use original string
++                    yield col_str
++            else:
++                yield col_str
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..405059179
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,18 @@
++from astropy.table import Table
++from io import StringIO
++
++# generate table
++t = Table([(1.23875234858e-24, 3.2348748432e-15), (2, 4)], names=('a', 'b'))
++tc = t.copy()  # copy table
++
++# print HTML table with "a" column formatted to show 2 decimal places
++with StringIO() as sp:
++    tc.write(sp, format="html", formats={"a": lambda x: f"{x:.2e}"})
++    print("HTML output:")
++    print(sp.getvalue())
++
++# Compare with CSV output
++with StringIO() as sp:
++    tc.write(sp, format="csv", formats={"a": lambda x: f"{x:.2e}"})
++    print("\nCSV output:")
++    print(sp.getvalue())
+\ No newline at end of file

@@ -1,12 +1,12 @@
-CONFIG="monitor"
-MODEL_NAME="openrouter/mistralai/devstral-small"
+CONFIG="oscillation"
+MODEL_NAME="openrouter/deepseek/deepseek-r1-0528"
 MODEL="${MODEL_NAME##*/}"
 RUN_ID="${1:-1}"
-INSTANCE="django__django-14122"
-OUTPUT_DIR="trajectories/$CONFIG/exp-${RUN_ID}/$MODEL"
+INSTANCE="astropy__astropy-14182"
+OUTPUT_DIR="trajectories/default/$CONFIG/exp-${RUN_ID}/$MODEL"
 
 sweagent run-batch \
-    --config config/$CONFIG.yaml \
+    --config config/default.yaml \
     --agent.model.api_base https://openrouter.ai/api/v1 \
     --agent.model.name "$MODEL_NAME" \
     --agent.model.api_key $OPENROUTER_API_KEY \

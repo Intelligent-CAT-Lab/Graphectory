@@ -1,0 +1,110 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..2336a8deb8
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,72 @@
++import asyncio
++import os
++import django
++from django.conf import settings
++
++# Configure settings
++os.environ['DJANGO_SETTINGS_MODULE'] = 'reproduce_settings'
++django.setup()
++
++from django.core.asgi import get_asgi_application
++from django.middleware.common import MiddlewareMixin
++class DummyMiddleware(MiddlewareMixin):
++    async def __call__(self, request):
++        response = await self.get_response(request)
++        print(f"Request type: {type(request)}")
++        print(f"Response type: {type(response)}")
++        return response
++
++    def process_response(self, request, response):
++        print(f"Request type: {type(request)}")
++        print(f"Response type: {type(response)}")
++        return response
++
++# Create a simple ASGI app
++async def app(scope, receive, send):
++    if scope['type'] != 'http':
++        raise ValueError("Only HTTP is supported")
++    await send({
++        'type': 'http.response.start',
++        'status': 200,
++        'headers': [
++            [b'content-type', b'text/plain'],
++        ],
++    })
++    await send({
++        'type': 'http.response.body',
++        'body': b'Hello, world!',
++    })
++
++# Create the ASGI application
++application = get_asgi_application()
++
++# Run the app
++async def main():
++    from django.core.handlers.asgi import ASGIRequest
++    from django.core.handlers.asgi import ASGIHandler
++    
++    # Create a mock scope and receive function
++    scope = {
++        'type': 'http',
++        'method': 'GET',
++        'path': '/',
++        'headers': [],
++        'query_string': b'',
++        'scheme': 'http',
++        'server': ('testserver', 80),
++        'client': ('127.0.0.1', 50000),
++    }
++    
++    async def receive():
++        return {'type': 'http.request'}
++    
++    async def send(message):
++        print(f"Sent message: {message}")
++    
++    # Create request and handler
++    handler = ASGIHandler()
++    await handler(scope, receive, send)
++
++if __name__ == '__main__':
++    loop = asyncio.get_event_loop()
++    loop.run_until_complete(main())
+\ No newline at end of file
+diff --git a/reproduce_settings.py b/reproduce_settings.py
+new file mode 100644
+index 0000000000..8c4d574d36
+--- /dev/null
++++ b/reproduce_settings.py
+@@ -0,0 +1,8 @@
++DEBUG = True
++MIDDLEWARE = [
++    'reproduce.DummyMiddleware',
++    'django.middleware.security.SecurityMiddleware',
++]
++ROOT_URLCONF = 'urls'
++INSTALLED_APPS = []
++SECRET_KEY = 'dummy'
+\ No newline at end of file
+diff --git a/urls.py b/urls.py
+new file mode 100644
+index 0000000000..b077c4e607
+--- /dev/null
++++ b/urls.py
+@@ -0,0 +1,9 @@
++from django.urls import path
++from django.http import HttpResponse
++
++def index(request):
++    return HttpResponse("Hello, world!")
++
++urlpatterns = [
++    path('', index),
++]
+\ No newline at end of file

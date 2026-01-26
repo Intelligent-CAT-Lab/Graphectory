@@ -1,0 +1,46 @@
+diff --git a/sphinx/extension.py b/sphinx/extension.py
+index 7ec6c8518..1904b1ac5 100644
+--- a/sphinx/extension.py
++++ b/sphinx/extension.py
+@@ -39,6 +39,32 @@ class Extension:
+         self.parallel_write_safe = kwargs.pop('parallel_write_safe', True)
+ 
+ 
++def _compare_versions(v1: str, v2: str) -> int:
++    """Compare two version strings numerically.
++    
++    Returns:
++        -1 if v1 < v2
++         0 if v1 == v2
++         1 if v1 > v2
++    """
++    # Split versions into components and convert to integers
++    v1_parts = list(map(int, v1.split('.')))
++    v2_parts = list(map(int, v2.split('.')))
++    
++    # Make both versions have the same number of components by padding with zeros
++    max_len = max(len(v1_parts), len(v2_parts))
++    v1_parts.extend([0] * (max_len - len(v1_parts)))
++    v2_parts.extend([0] * (max_len - len(v2_parts)))
++    
++    # Compare each component
++    for v1_part, v2_part in zip(v1_parts, v2_parts):
++        if v1_part < v2_part:
++            return -1
++        elif v1_part > v2_part:
++            return 1
++    
++    return 0
++
+ def verify_needs_extensions(app: "Sphinx", config: Config) -> None:
+     """Verify the required Sphinx extensions are loaded."""
+     if config.needs_extensions is None:
+@@ -51,7 +77,7 @@ def verify_needs_extensions(app: "Sphinx", config: Config) -> None:
+                               'but it is not loaded.'), extname)
+             continue
+ 
+-        if extension.version == 'unknown version' or reqversion > extension.version:
++        if extension.version == 'unknown version' or _compare_versions(reqversion, extension.version) > 0:
+             raise VersionRequirementError(__('This project needs the extension %s at least in '
+                                              'version %s and therefore cannot be built with '
+                                              'the loaded version (%s).') %

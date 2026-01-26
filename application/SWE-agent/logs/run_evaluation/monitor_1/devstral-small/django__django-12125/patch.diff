@@ -1,0 +1,32 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index aa21a151bc..cb2f48b18e 100644
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -488,6 +488,7 @@ class Field(RegisterLookupMixin):
+                 if value is not default:
+                     keywords[name] = value
+         # Work out path - we shorten it for known Django core fields
++        # For inner classes, we need to include the full path including the outer class
+         path = "%s.%s" % (self.__class__.__module__, self.__class__.__qualname__)
+         if path.startswith("django.db.models.fields.related"):
+             path = path.replace("django.db.models.fields.related", "django.db.models")
+diff --git a/reproduce_inner_class.py b/reproduce_inner_class.py
+new file mode 100644
+index 0000000000..a68a5d8ae5
+--- /dev/null
++++ b/reproduce_inner_class.py
+@@ -0,0 +1,13 @@
++import os
++import sys
++import django
++from django.db import models
++from django.db.models import Field
++from django.core.management import call_command
++
++# Set up Django
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
++django.setup()
++
++# Create migration
++call_command('makemigrations', 'reproduce_inner_class')
+\ No newline at end of file

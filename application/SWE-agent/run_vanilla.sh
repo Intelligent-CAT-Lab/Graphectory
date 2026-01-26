@@ -2,9 +2,9 @@
 
 # Configuration
 RUN_ID="${1:-1}"
-CONFIG="default"
+CONFIG="oscillation"
 
-CSV_FILE="/home/shuyang/Graphectory/stats/flawed_trajs/starts_with_P.csv"
+CSV_FILE="/home/shuyang/Graphectory/stats/flawed_trajs/oscillation.csv"
 
 # Extract SWE-agent instances and group by model
 declare -A MODEL_INSTANCES
@@ -25,9 +25,12 @@ while IFS=, read -r agent model resolution_status debug_difficulty instance_id p
             "deepseek-v3")
                 openrouter_model="openrouter/deepseek/deepseek-chat-v3-0324"
                 ;;
-            "devstral-small")
-                openrouter_model="openrouter/mistralai/devstral-small"
-                ;;
+            # "devstral-small")
+            #     openrouter_model="openrouter/mistralai/devstral-small"
+            #     ;;
+            # "claude-sonnet-4")
+            #     openrouter_model="openrouter/anthropic/claude-sonnet-4"
+            #     ;;
             *)
                 echo "Unknown model: $model"
                 continue
@@ -49,14 +52,14 @@ for model in "${!MODEL_INSTANCES[@]}"; do
 
     # Extract model name from OpenRouter format: openrouter/provider/model-name -> model-name
     MODEL="${model##*/}"
-    OUTPUT_DIR="trajectories/$CONFIG/exp-${RUN_ID}/$MODEL"
+    OUTPUT_DIR="trajectories/default/$CONFIG/exp-${RUN_ID}/$MODEL"
 
     echo "Running SWE-agent with model: $model"
     echo "Output directory: $OUTPUT_DIR"
     echo "Instances: $instances"
 
     sweagent run-batch \
-        --config config/$CONFIG.yaml \
+        --config config/default.yaml \
         --agent.model.api_base https://openrouter.ai/api/v1 \
         --agent.model.name "$model" \
         --agent.model.api_key $OPENROUTER_API_KEY \
@@ -82,8 +85,8 @@ for model in "${!MODEL_INSTANCES[@]}"; do
         python -m swebench.harness.run_evaluation \
             --dataset_name SWE-bench/SWE-bench_Verified \
             --predictions_path "$PREDICTION_PATH" \
-            --run_id "$RUN_ID" \
-            --report_dir "reports"
+            --run_id "default_$RUN_ID" \
+            --report_dir "reports/default/$CONFIG"
 
         if [[ $? -eq 0 ]]; then
             echo "✓ Evaluation completed for model: $model"

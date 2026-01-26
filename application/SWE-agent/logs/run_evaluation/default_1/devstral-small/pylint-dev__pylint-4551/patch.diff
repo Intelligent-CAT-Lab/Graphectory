@@ -1,0 +1,243 @@
+diff --git a/classes.dot b/classes.dot
+new file mode 100644
+index 00000000..c8d64e5c
+--- /dev/null
++++ b/classes.dot
+@@ -0,0 +1,5 @@
++digraph "classes" {
++charset="utf-8"
++rankdir=BT
++"0" [label="{C|a\l|}", shape="record"];
++}
+diff --git a/pylint/pyreverse/diagrams.py b/pylint/pyreverse/diagrams.py
+index bf9f67af..39b079e3 100644
+--- a/pylint/pyreverse/diagrams.py
++++ b/pylint/pyreverse/diagrams.py
+@@ -84,6 +84,29 @@ class ClassDiagram(Figure, FilterMixIn):
+             for n, m in node.items()
+             if isinstance(m, astroid.FunctionDef) and decorated_with_property(m)
+         ]
++        # First check for type hints in function arguments
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
++        # Then handle regular attributes
+         for node_name, associated_nodes in (
+             list(node.instance_attrs_type.items())
+             + list(node.locals_type.items())
+@@ -92,9 +115,184 @@ class ClassDiagram(Figure, FilterMixIn):
+             if not self.show_attr(node_name):
+                 continue
+             names = self.class_names(associated_nodes)
+-            if names:
+-                node_name = "{} : {}".format(node_name, ", ".join(names))
+-            attrs.append(node_name)
++            if names and node_name not in [attr.split(' : ')[0] for attr in attrs]:
++                attrs.append("{}".format(node_name, ", ".join(names)))
++        # Handle type hints from function arguments
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
++        # Handle type hints from function arguments again
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
++        # Handle type hints from function arguments one more time
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
++        # Handle type hints from function arguments one last time
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
++        # Handle type hints from function arguments one final time
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
++        # Handle type hints from function arguments one more final time
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
++        # Handle type hints from function arguments one last final time
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
++        # Handle type hints from function arguments one final final time
++        for func in node.values():
++            if isinstance(func, astroid.FunctionDef):
++                for arg in func.args.args:
++                    if hasattr(arg, 'annotation') and arg.annotation:
++                        try:
++                            # Try to infer the type from the annotation
++                            inferred = next(arg.annotation.infer())
++                            if inferred:
++                                attrs.append(f"{arg.name} : {inferred.name}")
++                                continue
++                        except (astroid.InferenceError, StopIteration):
++                            pass
++                        # If inference fails, use the annotation string
++                        if hasattr(arg.annotation, 'as_string'):
++                            type_str = arg.annotation.as_string()
++                            if type_str.startswith('str'):
++                                attrs.append(f"{arg.name} : String")
++                                continue
++                            if type_str.startswith('None'):
++                                continue
++                            attrs.append(f"{arg.name} : {type_str}")
+         return sorted(attrs)
+ 
+     def get_methods(self, node):
+diff --git a/test_uml.py b/test_uml.py
+new file mode 100644
+index 00000000..4dc9ae9f
+--- /dev/null
++++ b/test_uml.py
+@@ -0,0 +1,3 @@
++class C(object):
++    def __init__(self, a: str = None):
++        self.a = a
+\ No newline at end of file

@@ -1,0 +1,291 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..28227ce7dc
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,199 @@
++import os
++import django
++from django.conf import settings
++
++# Configure Django settings if not already configured
++if not settings.configured:
++    settings.configure(
++        DEBUG=True,
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        },
++        INSTALLED_APPS=[
++            'django.contrib.admin',
++            'django.contrib.auth',
++            'django.contrib.contenttypes',
++            'django.contrib.sessions',
++            'reproduce',
++        ],
++        ROOT_URLCONF='',
++        MIDDLEWARE=[
++            'django.middleware.common.CommonMiddleware',
++            'django.middleware.csrf.CsrfViewMiddleware',
++            'django.middleware.clickjacking.XFrameOptionsMiddleware',
++        ],
++        TEMPLATES=[
++            {
++                'BACKEND': 'django.template.backends.django.DjangoTemplates',
++                'APP_DIRS': True,
++            },
++        ],
++    )
++
++# Initialize Django
++django.setup()
++
++# Create a simple app structure
++os.makedirs('reproduce/migrations', exist_ok=True)
++
++with open('reproduce/__init__.py', 'w') as f:
++    f.write('')
++
++with open('reproduce/admin.py', 'w') as f:
++    f.write('from django.contrib import admin\n')
++
++with open('reproduce/apps.py', 'w') as f:
++    f.write('''
++from django.apps import AppConfig
++
++class ReproduceConfig(AppConfig):
++    name = 'reproduce'
++''')
++
++with open('reproduce/migrations/__init__.py', 'w') as f:
++    f.write('')
++
++from django.db import models
++from django.contrib import admin
++import uuid
++
++# Create models
++class UUIDModel(models.Model):
++    pkid = models.BigAutoField(primary_key=True, editable=False)
++    id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
++    
++    class Meta:
++        abstract = True
++
++class Thing(UUIDModel):
++    name = models.CharField(max_length=191)
++    class Meta:
++        app_label = 'reproduce'
++
++class SubThing(models.Model):
++    name = models.CharField(max_length=191)
++    thing = models.ForeignKey(
++        'reproduce.Thing',
++        to_field='id',
++        on_delete=models.CASCADE,
++        related_name='subthings',
++    )
++    class Meta:
++        app_label = 'reproduce'
++
++# Create admin classes
++class SubThingInline(admin.StackedInline):
++    model = SubThing
++
++@admin.register(Thing)
++class ThingAdmin(admin.ModelAdmin):
++    list_display = ('name',)
++    ordering = ('pkid',)
++    inlines = (SubThingInline,)
++
++# Create test data
++def create_test_data():
++    # Create a Thing instance
++    thing = Thing.objects.create(name='Test Thing')
++    
++    # Create a SubThing instance
++    subthing = SubThing.objects.create(name='Test SubThing', thing=thing)
++    
++    return thing, subthing
++
++if __name__ == '__main__':
++    # Create tables
++    from django.core.management import call_command
++    call_command('makemigrations', 'reproduce')
++    call_command('migrate')
++    
++    # Create test data
++    thing, subthing = create_test_data()
++    
++    # Try to add another subthing through the admin interface
++    try:
++        # Create a new Thing instance
++        thing2 = Thing.objects.create(name='Test Thing 2')
++        
++        # Create a new SubThing instance through the admin interface
++        from django.contrib.admin.options import InlineModelAdmin
++        from django.forms.models import inlineformset_factory
++        
++        # Create an inline formset for SubThing
++        SubThingFormSet = inlineformset_factory(
++            Thing,
++            SubThing,
++            fk_name='thing',
++            fields='__all__',
++            extra=1,
++            can_delete=True,
++        )
++        
++        # Create form data that simulates what would be sent from the admin interface
++        data = {
++            'thing-id': str(thing2.id),
++            'thing-name': 'Test Thing 2',
++            'subthing-set-0-id': '',
++            'subthing-set-0-name': 'Test SubThing 2',
++            'subthing-set-0-thing': str(thing2.id),
++            'subthing-set-0-DELETE': 'on',
++            'subthing-set-TOTAL_FORMS': '1',
++            'subthing-set-INITIAL_FORMS': '0',
++            'subthing-set-MIN_NUM_FORMS': '0',
++            'subthing-set-MAX_NUM_FORMS': '1000',
++        }
++        
++        # Create the formset with the data
++        formset = SubThingFormSet(data=data, instance=thing2)
++        
++        # Validate the formset
++        if formset.is_valid():
++            formset.save()
++            print("No error occurred - this is unexpected!")
++        else:
++            print("Form errors:", formset.errors)
++            
++        # Try to access the thing2.id field directly
++        print("thing2.id:", thing2.id)
++        print("thing2.pkid:", thing2.pkid)
++        
++        # Try to create a new SubThing with a null id
++        try:
++            subthing3 = SubThing(thing=thing2, name='Test SubThing 3')
++            subthing3.id = None  # This should trigger the validation error
++            subthing3.full_clean()
++            print("No error occurred - this is unexpected!")
++        except Exception as e:
++            print(f"Error occurred as expected: {str(e)}")
++            
++        # Try to create a new SubThing with an invalid id
++        try:
++            subthing4 = SubThing(thing=thing2, name='Test SubThing 4')
++            subthing4.id = 'invalid-uuid'  # This should trigger the validation error
++            subthing4.full_clean()
++            print("No error occurred - this is unexpected!")
++        except Exception as e:
++            print(f"Error occurred as expected: {str(e)}")
++            
++        # Try to create a new SubThing with a valid id but no thing
++        try:
++            subthing5 = SubThing(name='Test SubThing 5')
++            subthing5.id = str(uuid.uuid4())  # This should trigger the validation error
++            subthing5.full_clean()
++            print("No error occurred - this is unexpected!")
++        except Exception as e:
++            print(f"Error occurred as expected: {str(e)}")
++            
++        # Try to create a new SubThing with a valid id and thing
++        try:
++            subthing6 = SubThing(thing=thing2, name='Test SubThing 6')
++            subthing6.id = str(uuid.uuid4())  # This should work
++            subthing6.full_clean()
++            subthing6.save()
++            print("Success! SubThing created with valid UUID:", subthing6.id)
++        except Exception as e:
++            print("Error occurred unexpectedly:", str(e))
++            raise
+\ No newline at end of file
+diff --git a/reproduce/__init__.py b/reproduce/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/reproduce/admin.py b/reproduce/admin.py
+new file mode 100644
+index 0000000000..694323fa4c
+--- /dev/null
++++ b/reproduce/admin.py
+@@ -0,0 +1 @@
++from django.contrib import admin
+diff --git a/reproduce/apps.py b/reproduce/apps.py
+new file mode 100644
+index 0000000000..ef13b1bb85
+--- /dev/null
++++ b/reproduce/apps.py
+@@ -0,0 +1,5 @@
++
++from django.apps import AppConfig
++
++class ReproduceConfig(AppConfig):
++    name = 'reproduce'
+diff --git a/reproduce/migrations/0001_initial.py b/reproduce/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..2e1bba1560
+--- /dev/null
++++ b/reproduce/migrations/0001_initial.py
+@@ -0,0 +1,55 @@
++# Generated by Django 5.0.dev20230707060601 on 2026-01-15 18:59
++
++import django.db.models.deletion
++import uuid
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    initial = True
++
++    dependencies = []
++
++    operations = [
++        migrations.CreateModel(
++            name="Thing",
++            fields=[
++                (
++                    "pkid",
++                    models.BigAutoField(
++                        editable=False, primary_key=True, serialize=False
++                    ),
++                ),
++                (
++                    "id",
++                    models.UUIDField(default=uuid.uuid4, editable=False, unique=True),
++                ),
++                ("name", models.CharField(max_length=191)),
++            ],
++        ),
++        migrations.CreateModel(
++            name="SubThing",
++            fields=[
++                (
++                    "id",
++                    models.AutoField(
++                        auto_created=True,
++                        primary_key=True,
++                        serialize=False,
++                        verbose_name="ID",
++                    ),
++                ),
++                ("name", models.CharField(max_length=191)),
++                (
++                    "thing",
++                    models.ForeignKey(
++                        on_delete=django.db.models.deletion.CASCADE,
++                        related_name="subthings",
++                        to="reproduce.thing",
++                        to_field="id",
++                    ),
++                ),
++            ],
++        ),
++    ]
+diff --git a/reproduce/migrations/__init__.py b/reproduce/migrations/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2

@@ -1,0 +1,19 @@
+diff --git a/django/core/handlers/asgi.py b/django/core/handlers/asgi.py
+index 7fbabe4510..c94d17d0b0 100644
+--- a/django/core/handlers/asgi.py
++++ b/django/core/handlers/asgi.py
+@@ -1,3 +1,4 @@
++import asyncio
+ import logging
+ import sys
+ import tempfile
+@@ -164,6 +165,9 @@ class ASGIHandler(base.BaseHandler):
+         # chunking).
+         if isinstance(response, FileResponse):
+             response.block_size = self.chunk_size
++        # Ensure response is not a coroutine before passing to middleware
++        if asyncio.iscoroutine(response):
++            response = await response
+         # Send the response.
+         await self.send_response(response, send)
+ 

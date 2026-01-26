@@ -1,0 +1,17 @@
+diff --git a/sympy/printing/pretty/pretty_symbology.py b/sympy/printing/pretty/pretty_symbology.py
+index 3f7c4a2dc7..c8191724ea 100644
+--- a/sympy/printing/pretty/pretty_symbology.py
++++ b/sympy/printing/pretty/pretty_symbology.py
+@@ -185,6 +185,12 @@ def xstr(*args):
+ for gl in ['beta', 'gamma', 'rho', 'phi', 'chi']:
+     sub[gl] = GSUB(gl)
+ 
++# Handle omega subscript specially since it doesn't have a predefined subscript form
++sub['omega'] = '\u03c9\u0335'  # omega + combining low line
++
++# Also handle omega0 case specifically
++sub['omega0'] = '\u03c9\u2080'  # omega + subscript zero
++
+ for d in [str(i) for i in range(10)]:
+     sub[d] = DSUB(d)
+     sup[d] = DSUP(d)

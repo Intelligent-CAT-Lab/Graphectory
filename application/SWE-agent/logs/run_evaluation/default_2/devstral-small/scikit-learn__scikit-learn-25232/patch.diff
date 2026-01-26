@@ -1,0 +1,44 @@
+diff --git a/sklearn/impute/_iterative.py b/sklearn/impute/_iterative.py
+index 1d918bc0c..c87d74afe 100644
+--- a/sklearn/impute/_iterative.py
++++ b/sklearn/impute/_iterative.py
+@@ -1,6 +1,6 @@
+ from time import time
+ from collections import namedtuple
+-from numbers import Integral, Real
++from numbers import Integral, Real, Number
+ import warnings
+ 
+ from scipy import stats
+@@ -289,6 +289,7 @@ class IterativeImputer(_BaseImputer):
+         "max_value": [None, Interval(Real, None, None, closed="both"), "array-like"],
+         "verbose": ["verbose"],
+         "random_state": ["random_state"],
++        "fill_value": [None, Number, str]
+     }
+ 
+     def __init__(
+@@ -309,6 +310,7 @@ class IterativeImputer(_BaseImputer):
+         random_state=None,
+         add_indicator=False,
+         keep_empty_features=False,
++        fill_value=None,
+     ):
+         super().__init__(
+             missing_values=missing_values,
+@@ -328,6 +330,7 @@ class IterativeImputer(_BaseImputer):
+         self.max_value = max_value
+         self.verbose = verbose
+         self.random_state = random_state
++        self.fill_value = fill_value
+ 
+     def _impute_one_feature(
+         self,
+@@ -614,6 +617,7 @@ class IterativeImputer(_BaseImputer):
+                 missing_values=self.missing_values,
+                 strategy=self.initial_strategy,
+                 keep_empty_features=self.keep_empty_features,
++                fill_value=self.fill_value if self.initial_strategy == "constant" else None,
+             )
+             X_filled = self.initial_imputer_.fit_transform(X)
+         else:

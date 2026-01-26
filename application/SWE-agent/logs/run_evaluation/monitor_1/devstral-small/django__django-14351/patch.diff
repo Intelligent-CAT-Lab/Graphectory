@@ -1,0 +1,235 @@
+diff --git a/django/db/models/query_utils.py b/django/db/models/query_utils.py
+index 188b640850..6c68e7dfa4 100644
+--- a/django/db/models/query_utils.py
++++ b/django/db/models/query_utils.py
+@@ -71,6 +71,20 @@ class Q(tree.Node):
+     def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False, for_save=False):
+         # We must promote any new joins to left outer joins so that when Q is
+         # used as an expression, rows aren't filtered due to joins.
++        # Check if we're using __in in a Q object
++        if any('__in' in str(child) for child in self.children):
++            # Create a new query for the subquery
++            subquery = query.clone()
++            subquery.subquery = True
++            # Add the subquery to the query
++            query.combined_queries.append(subquery)
++            # Set the subquery flag
++            query._in_subquery = True
++            # Modify the subquery to only select the id field
++            subquery.default_cols = False
++            subquery.select = [subquery.model._meta.pk.get_col(subquery.get_initial_alias())]
++            # Set the subquery flag on the query
++            query.subquery = True
+         clause, joins = query._add_q(
+             self, reuse, allow_joins=allow_joins, split_subq=False,
+             check_filterable=False,
+diff --git a/django/db/models/sql/compiler.py b/django/db/models/sql/compiler.py
+index 7264929da8..a626376cc4 100644
+--- a/django/db/models/sql/compiler.py
++++ b/django/db/models/sql/compiler.py
+@@ -694,6 +694,10 @@ class SQLCompiler:
+         # be used by local fields.
+         seen_models = {None: start_alias}
+ 
++        # Check if we're in a subquery or if we're using __in in a Q object
++        is_subquery = getattr(self.query, 'subquery', False)
++        is_in_subquery = getattr(self.query, '_in_subquery', False)
++
+         for field in opts.concrete_fields:
+             model = field.model._meta.concrete_model
+             # A proxy model will have a different model and concrete_model. We
+@@ -712,8 +716,13 @@ class SQLCompiler:
+                 continue
+             alias = self.query.join_parent_model(opts, model, start_alias,
+                                                  seen_models)
+-            column = field.get_col(alias)
+-            result.append(column)
++            # If we're in a subquery or using __in in a Q object, only select the id field
++            if (is_subquery or is_in_subquery) and field.name == 'id':
++                column = field.get_col(alias)
++                result.append(column)
++            elif not (is_subquery or is_in_subquery):
++                column = field.get_col(alias)
++                result.append(column)
+         return result
+ 
+     def get_distinct(self):
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..4dfe348c71
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,59 @@
++import os
++import django
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'testapp',
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': 'test.db',
++            }
++        }
++    )
++    django.setup()
++
++from django.db.models import Q, Count, F
++from django.db import models
++from django.core.management import call_command
++from testapp.models import *
++
++# Create tables
++call_command('makemigrations', 'testapp')
++call_command('migrate')
++
++# Create test data
++management_agent = ManagementAgent.objects.create()
++property_group1 = PropertyGroup.objects.create(name="Group 1")
++property_group2 = PropertyGroup.objects.create(name="Group 2")
++management_agent.property_groups.add(property_group1, property_group2)
++ticket = TicketRatingCumulativeMovingAverage.objects.create(
++    agent=management_agent,
++    count=2
++)
++
++# Test the problematic query
++property_groups = PropertyGroup.objects.filter(id__in=[property_group1.id, property_group2.id])
++qs = TicketRatingCumulativeMovingAverage.objects
++queryset = qs.annotate(property_groups_count=F('agent__property_groups__count'))
++
++# This works
++print("Working query:")
++working_query = queryset.filter(
++    Q(agent__property_groups__id__in=property_groups.values_list("id", flat=True)) |
++    Q(property_groups_count=0)
++).distinct()
++print(working_query.query)
++
++# This fails
++print("\nFailing query:")
++failing_query = queryset.filter(
++    Q(agent__property_groups__in=property_groups) |
++    Q(property_groups_count=0)
++).distinct()
++print(failing_query.query)
+\ No newline at end of file
+diff --git a/test.db b/test.db
+new file mode 100644
+index 0000000000..2affc2c2e8
+Binary files /dev/null and b/test.db differ
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testapp/admin.py b/testapp/admin.py
+new file mode 100644
+index 0000000000..8c38f3f3da
+--- /dev/null
++++ b/testapp/admin.py
+@@ -0,0 +1,3 @@
++from django.contrib import admin
++
++# Register your models here.
+diff --git a/testapp/apps.py b/testapp/apps.py
+new file mode 100644
+index 0000000000..8adcb9de0a
+--- /dev/null
++++ b/testapp/apps.py
+@@ -0,0 +1,6 @@
++from django.apps import AppConfig
++
++
++class TestappConfig(AppConfig):
++    default_auto_field = 'django.db.models.BigAutoField'
++    name = 'testapp'
+diff --git a/testapp/migrations/0001_initial.py b/testapp/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..aa043a06e2
+--- /dev/null
++++ b/testapp/migrations/0001_initial.py
+@@ -0,0 +1,41 @@
++# Generated by Django 4.0.dev20210505073754 on 2026-01-06 14:29
++
++from django.db import migrations, models
++import django.db.models.deletion
++
++
++class Migration(migrations.Migration):
++
++    initial = True
++
++    dependencies = [
++    ]
++
++    operations = [
++        migrations.CreateModel(
++            name='ManagementAgent',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++            ],
++        ),
++        migrations.CreateModel(
++            name='PropertyGroup',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('name', models.CharField(max_length=100)),
++            ],
++        ),
++        migrations.CreateModel(
++            name='TicketRatingCumulativeMovingAverage',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('count', models.PositiveIntegerField()),
++                ('agent', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='testapp.managementagent')),
++            ],
++        ),
++        migrations.AddField(
++            model_name='managementagent',
++            name='property_groups',
++            field=models.ManyToManyField(to='testapp.PropertyGroup'),
++        ),
++    ]
+diff --git a/testapp/migrations/__init__.py b/testapp/migrations/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..0f5fc7504c
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,11 @@
++from django.db import models
++
++class PropertyGroup(models.Model):
++    name = models.CharField(max_length=100)
++
++class ManagementAgent(models.Model):
++    property_groups = models.ManyToManyField(PropertyGroup)
++
++class TicketRatingCumulativeMovingAverage(models.Model):
++    agent = models.ForeignKey(ManagementAgent, on_delete=models.CASCADE)
++    property_groups_count = models.PositiveIntegerField()
+diff --git a/testapp/tests.py b/testapp/tests.py
+new file mode 100644
+index 0000000000..7ce503c2dd
+--- /dev/null
++++ b/testapp/tests.py
+@@ -0,0 +1,3 @@
++from django.test import TestCase
++
++# Create your tests here.
+diff --git a/testapp/views.py b/testapp/views.py
+new file mode 100644
+index 0000000000..91ea44a218
+--- /dev/null
++++ b/testapp/views.py
+@@ -0,0 +1,3 @@
++from django.shortcuts import render
++
++# Create your views here.

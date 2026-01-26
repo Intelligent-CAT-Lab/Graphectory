@@ -1,0 +1,26 @@
+diff --git a/django/utils/dateparse.py b/django/utils/dateparse.py
+index 8d08b7d1d3..9a64b33327 100644
+--- a/django/utils/dateparse.py
++++ b/django/utils/dateparse.py
+@@ -29,7 +29,7 @@ datetime_re = re.compile(
+ standard_duration_re = re.compile(
+     r'^'
+     r'(?:(?P<days>-?\d+) (days?, )?)?'
+-    r'((?:(?P<hours>-?\d+):)(?=\d+:\d+))?'
++    r'((?:(?P<hours>-?\d+):)(?=-?\d+:-?\d+))?'
+     r'(?:(?P<minutes>-?\d+):)?'
+     r'(?P<seconds>-?\d+)'
+     r'(?:\.(?P<microseconds>\d{1,6})\d{0,6})?'
+@@ -143,4 +143,12 @@ def parse_duration(value):
+         if kw.get('seconds') and kw.get('microseconds') and kw['seconds'].startswith('-'):
+             kw['microseconds'] = '-' + kw['microseconds']
+         kw = {k: float(v) for k, v in kw.items() if v is not None}
++        if any(v < 0 for v in kw.values()):
++            # Ensure negative durations are represented correctly
++            if 'hours' in kw and kw['hours'] < 0:
++                kw['hours'] = -abs(kw['hours'])
++            if 'minutes' in kw and kw['minutes'] < 0:
++                kw['minutes'] = -abs(kw['minutes'])
++            if 'seconds' in kw and kw['seconds'] < 0:
++                kw['seconds'] = -abs(kw['seconds'])
+         return days + sign * datetime.timedelta(**kw)

@@ -1,0 +1,37 @@
+diff --git a/django/db/backends/sqlite3/schema.py b/django/db/backends/sqlite3/schema.py
+index 6752a8e3c0..5fe0e88612 100644
+--- a/django/db/backends/sqlite3/schema.py
++++ b/django/db/backends/sqlite3/schema.py
+@@ -330,7 +330,31 @@ class DatabaseSchemaEditor(BaseDatabaseSchemaEditor):
+         if not field.null or self.effective_default(field) is not None:
+             self._remake_table(model, create_field=field)
+         else:
+-            super().add_field(model, field)
++            # For OneToOneField, we need to add the column first without the UNIQUE constraint
++            # then add the constraint separately, because SQLite doesn't allow adding a
++            # UNIQUE constraint to a column that already has data
++            if field.unique and field.is_relation and field.one_to_one:
++                # Get the column's definition without the UNIQUE constraint
++                definition, params = self.column_sql(model, field, include_default=True)
++                # Remove any UNIQUE constraint from the definition
++                definition = definition.replace(' UNIQUE', '')
++                # Build and execute the SQL to add the column without UNIQUE
++                sql = self.sql_create_column % {
++                    "table": self.quote_name(model._meta.db_table),
++                    "column": self.quote_name(field.column),
++                    "definition": definition,
++                }
++                self.execute(sql, params)
++                # Add the UNIQUE constraint separately
++                sql = self.sql_create_unique % {
++                    "name": self._create_index_name(model._meta.db_table, [field.column], suffix='_uniq'),
++                    "table": model._meta.db_table,
++                    "columns": field.column,
++                    "deferrable": self.connection.ops.deferrable_sql(),
++                }
++                self.execute(sql)
++            else:
++                super().add_field(model, field)
+ 
+     def remove_field(self, model, field):
+         """

@@ -1,0 +1,43 @@
+diff --git a/astropy/io/ascii/rst.py b/astropy/io/ascii/rst.py
+index abdeba8ef..75cb036fa 100644
+--- a/astropy/io/ascii/rst.py
++++ b/astropy/io/ascii/rst.py
+@@ -57,10 +57,35 @@ class RST(FixedWidth):
+     data_class = SimpleRSTData
+     header_class = SimpleRSTHeader
+ 
+-    def __init__(self):
++    def __init__(self, header_rows=None):
++        self.header_rows = header_rows
+         super().__init__(delimiter_pad=None, bookend=False)
+ 
+-    def write(self, lines):
+-        lines = super().write(lines)
++    def write(self, table):
++        lines = super().write(table)
++        if self.header_rows is not None:
++            # Add header rows before the column names
++            header_lines = []
++            for row in self.header_rows:
++                # Create a line with the same column structure but with header row values
++                header_line = []
++                for col in table.columns:
++                    if isinstance(col, str):
++                        name = col
++                        unit = None
++                    else:
++                        name = col.name
++                        unit = col.unit if hasattr(col, "unit") else None
++                    if row == "name":
++                        header_line.append(str(name))
++                    elif row == "unit":
++                        header_line.append(str(unit) if unit is not None else "")
++                    else:
++                        header_line.append("")
++                # Format the header line using the same column widths as the data
++                header_str = "".join([val.ljust(len(lines[2])) for val in header_line])
++                header_lines.append(header_str)
++            # Insert header lines before the column names
++            lines = header_lines + [lines[1]] + lines[2:]
+         lines = [lines[1]] + lines + [lines[1]]
+         return lines

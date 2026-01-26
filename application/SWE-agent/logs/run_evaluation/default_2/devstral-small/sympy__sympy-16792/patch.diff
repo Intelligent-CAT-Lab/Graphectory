@@ -1,0 +1,88 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..cf123c983
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,16 @@
++from sympy.utilities.autowrap import autowrap
++from sympy import MatrixSymbol
++import numpy as np
++import tempfile
++
++# Create a temporary directory for the build files
++build_dir = tempfile.mkdtemp()
++print("Build directory:", build_dir)
++
++x = MatrixSymbol('x', 2, 1)
++expr = 1.0
++f = autowrap(expr, args=(x,), backend='cython', tempdir=build_dir)
++
++print("Calling function with array argument...")
++result = f(np.array([[1.0, 2.0]]))
++print("Result:", result)
+\ No newline at end of file
+diff --git a/sympy/utilities/autowrap.py b/sympy/utilities/autowrap.py
+index bd6afb12d..bbac75d5d 100644
+--- a/sympy/utilities/autowrap.py
++++ b/sympy/utilities/autowrap.py
+@@ -396,6 +396,15 @@ def dump_pyx(self, routines, f, prefix):
+                 body = '    %s(%s)\n' % (routine.name, args_c)
+                 body = body + '    return ' + rets
+ 
++            # Check if we need numpy for array arguments
++            has_arrays = any(hasattr(arg, 'dimensions') or hasattr(arg, '_dimensions') for arg in routine.arguments)
++            if has_arrays:
++                self._need_numpy = True
++                # For array arguments, we need to pass the data pointer
++                arg_string = ", ".join(self._prototype_arg(arg) for arg in py_args)
++                # Function body needs to pass array data
++                args_c = ", ".join([self._call_arg(a) for a in routine.arguments])
++
+             functions.append(self.pyx_func.format(name=name, arg_string=arg_string,
+                     declarations=declarations, body=body))
+ 
+@@ -441,12 +450,15 @@ def _prototype_arg(self, arg):
+         np_types = {'double': 'np.double_t',
+                     'int': 'np.int_t'}
+         t = arg.get_datatype('c')
+-        if arg.dimensions:
++        if arg.dimensions or hasattr(arg, '_dimensions'):
+             self._need_numpy = True
+-            ndim = len(arg.dimensions)
++            ndim = len(arg.dimensions) if arg.dimensions else 1
+             mtype = np_types[t]
+             return mat_dec.format(mtype=mtype, ndim=ndim, name=self._string_var(arg.name))
+         else:
++            # For non-array arguments, if they are ResultBase (output args), they need to be pointers
++            if isinstance(arg, ResultBase):
++                return "%s *%s" % (t, self._string_var(arg.name))
+             return "%s %s" % (t, self._string_var(arg.name))
+ 
+     def _declare_arg(self, arg):
+@@ -458,9 +470,10 @@ def _declare_arg(self, arg):
+             return proto + " = 0"
+ 
+     def _call_arg(self, arg):
+-        if arg.dimensions:
++        if arg.dimensions or hasattr(arg, '_dimensions'):
+             t = arg.get_datatype('c')
+-            return "<{0}*> {1}.data".format(t, self._string_var(arg.name))
++            # For array arguments, we need to pass the first element
++            return "{0}.flat[0]".format(self._string_var(arg.name))
+         elif isinstance(arg, ResultBase):
+             return "&{0}".format(self._string_var(arg.name))
+         else:
+diff --git a/sympy/utilities/codegen.py b/sympy/utilities/codegen.py
+index f0befb2bd..b29687313 100644
+--- a/sympy/utilities/codegen.py
++++ b/sympy/utilities/codegen.py
+@@ -910,7 +910,8 @@ def get_prototype(self, routine):
+         type_args = []
+         for arg in routine.arguments:
+             name = self.printer.doprint(arg.name)
+-            if arg.dimensions or isinstance(arg, ResultBase):
++            if arg.dimensions or isinstance(arg, ResultBase) or hasattr(arg, '_dimensions'):
++                # For array arguments, we need to pass a pointer to the data
+                 type_args.append((arg.get_datatype('C'), "*%s" % name))
+             else:
+                 type_args.append((arg.get_datatype('C'), name))

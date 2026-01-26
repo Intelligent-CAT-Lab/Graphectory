@@ -1,0 +1,527 @@
+diff --git a/django/core/serializers/base.py b/django/core/serializers/base.py
+index da85cb4b92..1cb27b3fc9 100644
+--- a/django/core/serializers/base.py
++++ b/django/core/serializers/base.py
+@@ -269,10 +269,13 @@ class DeserializedObject:
+     (and not touch the many-to-many stuff.)
+     """
+ 
+-    def __init__(self, obj, m2m_data=None, deferred_fields=None):
++    def __init__(self, obj, m2m_data=None, deferred_fields=None, objects_by_natural_key=None, objects_by_pk=None, objects_by_model=None):
+         self.object = obj
+         self.m2m_data = m2m_data
+         self.deferred_fields = deferred_fields
++        self.objects_by_natural_key = objects_by_natural_key
++        self.objects_by_pk = objects_by_pk
++        self.objects_by_model = objects_by_model
+ 
+     def __repr__(self):
+         return "<%s: %s(pk=%s)>" % (
+@@ -288,7 +291,47 @@ class DeserializedObject:
+         models.Model.save_base(self.object, using=using, raw=True, **kwargs)
+         if self.m2m_data and save_m2m:
+             for accessor_name, object_list in self.m2m_data.items():
+-                getattr(self.object, accessor_name).set(object_list)
++                # Get the field to check if it's a natural key field
++                field = self.object._meta.get_field(accessor_name)
++                if field.remote_field and hasattr(field.remote_field.model, "natural_key"):
++                    # For natural key fields, we need to get the related objects
++                    # from the same database
++                    related_objects = []
++                    for pk in object_list:
++                        # First try to get the object from the cache
++                        if self.objects_by_pk and field.remote_field.model in self.objects_by_pk:
++                            try:
++                                obj = self.objects_by_pk[field.remote_field.model][pk]
++                                if obj is not None:
++                                    related_objects.append(obj)
++                                    continue
++                            except KeyError:
++                                pass
++                        # Then try to get it from the target database
++                        try:
++                            obj = field.remote_field.model._default_manager.db_manager(using).get(pk=pk)
++                            related_objects.append(obj)
++                            # Cache the object for future use
++                            if self.objects_by_pk is not None:
++                                if field.remote_field.model not in self.objects_by_pk:
++                                    self.objects_by_pk[field.remote_field.model] = {}
++                                self.objects_by_pk[field.remote_field.model][obj.pk] = obj
++                        except field.remote_field.model.DoesNotExist:
++                            # If object doesn't exist in target database, try default database
++                            try:
++                                obj = field.remote_field.model._default_manager.get(pk=pk)
++                                related_objects.append(obj)
++                                # Cache the object for future use
++                                if self.objects_by_pk is not None:
++                                    if field.remote_field.model not in self.objects_by_pk:
++                                        self.objects_by_pk[field.remote_field.model] = {}
++                                    self.objects_by_pk[field.remote_field.model][obj.pk] = obj
++                            except field.remote_field.model.DoesNotExist:
++                                continue
++                    getattr(self.object, accessor_name).set(related_objects, using=using)
++                else:
++                    # For non-natural key fields, just use the PKs
++                    getattr(self.object, accessor_name).set(object_list, using=using)
+ 
+         # prevent a second (possibly accidental) call to save() from saving
+         # the m2m data twice.
+@@ -302,7 +345,9 @@ class DeserializedObject:
+             if isinstance(field.remote_field, models.ManyToManyRel):
+                 try:
+                     values = deserialize_m2m_values(
+-                        field, field_value, using, handle_forward_references=False
++                        field, field_value, using, handle_forward_references=False,
++                        objects_by_natural_key=self.objects_by_natural_key,
++                        objects_by_pk=self.objects_by_pk
+                     )
+                 except M2MDeserializationError as e:
+                     raise DeserializationError.WithData(
+@@ -312,7 +357,9 @@ class DeserializedObject:
+             elif isinstance(field.remote_field, models.ManyToOneRel):
+                 try:
+                     value = deserialize_fk_value(
+-                        field, field_value, using, handle_forward_references=False
++                        field, field_value, using, handle_forward_references=False,
++                        objects_by_natural_key=self.objects_by_natural_key,
++                        objects_by_pk=self.objects_by_pk
+                     )
+                 except Exception as e:
+                     raise DeserializationError.WithData(
+@@ -322,12 +369,12 @@ class DeserializedObject:
+         self.save()
+ 
+ 
+-def build_instance(Model, data, db):
++def build_instance(Model, data, db, objects_by_natural_key=None, objects_by_pk=None):
+     """
+     Build a model instance.
+ 
+     If the model instance doesn't have a primary key and the model supports
+-    natural keys, try to retrieve it from the database.
++    natural keys, try to retrieve it from the database or from the cache.
+     """
+     default_manager = Model._meta.default_manager
+     pk = data.get(Model._meta.pk.attname)
+@@ -337,26 +384,104 @@ def build_instance(Model, data, db):
+         and hasattr(Model, "natural_key")
+     ):
+         natural_key = Model(**data).natural_key()
+-        try:
+-            data[Model._meta.pk.attname] = Model._meta.pk.to_python(
+-                default_manager.db_manager(db).get_by_natural_key(*natural_key).pk
+-            )
+-        except Model.DoesNotExist:
+-            pass
++        # First try to get the object from the cache
++        if objects_by_natural_key and natural_key in objects_by_natural_key:
++            data[Model._meta.pk.attname] = objects_by_natural_key[natural_key].pk
++        else:
++            try:
++                # Then try to get the object from the target database
++                obj = default_manager.db_manager(db).get_by_natural_key(*natural_key)
++                data[Model._meta.pk.attname] = Model._meta.pk.to_python(obj.pk)
++                # Cache the object by both natural key and PK
++                if objects_by_natural_key is not None:
++                    objects_by_natural_key[natural_key] = obj
++                if objects_by_pk is not None and Model not in objects_by_pk:
++                    objects_by_pk[Model] = {}
++                objects_by_pk[Model][obj.pk] = obj
++            except Model.DoesNotExist:
++                # If not found in target database, try default database
++                try:
++                    obj = default_manager.get_by_natural_key(*natural_key)
++                    data[Model._meta.pk.attname] = Model._meta.pk.to_python(obj.pk)
++                    # Cache the object by both natural key and PK
++                    if objects_by_natural_key is not None:
++                        objects_by_natural_key[natural_key] = obj
++                    if objects_by_pk is not None and Model not in objects_by_pk:
++                        objects_by_pk[Model] = {}
++                    objects_by_pk[Model][obj.pk] = obj
++                except Model.DoesNotExist:
++                    pass
+     return Model(**data)
+ 
+ 
+-def deserialize_m2m_values(field, field_value, using, handle_forward_references):
++def deserialize_m2m_values(field, field_value, using, handle_forward_references, objects_by_natural_key=None, objects_by_pk=None):
+     model = field.remote_field.model
+     if hasattr(model._default_manager, "get_by_natural_key"):
+ 
+         def m2m_convert(value):
+             if hasattr(value, "__iter__") and not isinstance(value, str):
+-                return (
+-                    model._default_manager.db_manager(using)
+-                    .get_by_natural_key(*value)
+-                    .pk
+-                )
++                # First try to get the object from the cache
++                if objects_by_natural_key and value in objects_by_natural_key:
++                    return objects_by_natural_key[value].pk
++                elif objects_by_pk and model in objects_by_pk:
++                    # Try to get the object by PK from the cache
++                    try:
++                        obj = objects_by_pk[model][value]
++                        if obj is None:
++                            raise ObjectDoesNotExist
++                        return obj.pk
++                    except (KeyError, ObjectDoesNotExist):
++                        # Object not found in cache, continue with database lookup
++                        try:
++                            # Then try to get the object from the target database
++                            obj = model._default_manager.db_manager(using).get_by_natural_key(*value)
++                            # Cache the object by both natural key and PK
++                            if objects_by_natural_key is not None:
++                                objects_by_natural_key[value] = obj
++                            if objects_by_pk is not None:
++                                objects_by_pk[model][obj.pk] = obj
++                            return obj.pk
++                        except ObjectDoesNotExist:
++                            # If not found in target database, try default database
++                            try:
++                                obj = model._default_manager.get_by_natural_key(*value)
++                                # Cache the object by both natural key and PK
++                                if objects_by_natural_key is not None:
++                                    objects_by_natural_key[value] = obj
++                                if objects_by_pk is not None:
++                                    objects_by_pk[model][obj.pk] = obj
++                                return obj.pk
++                            except ObjectDoesNotExist:
++                                if handle_forward_references:
++                                    return DEFER_FIELD
++                                else:
++                                    raise
++                else:
++                    # No caches available, try databases directly
++                    try:
++                        # First try to get the object from the target database
++                        obj = model._default_manager.db_manager(using).get_by_natural_key(*value)
++                        # Cache the object by both natural key and PK if caches are available
++                        if objects_by_natural_key is not None:
++                            objects_by_natural_key[value] = obj
++                        if objects_by_pk is not None:
++                            objects_by_pk[model][obj.pk] = obj
++                        return obj.pk
++                    except ObjectDoesNotExist:
++                        # If not found in target database, try default database
++                        try:
++                            obj = model._default_manager.get_by_natural_key(*value)
++                            # Cache the object by both natural key and PK if caches are available
++                            if objects_by_natural_key is not None:
++                                objects_by_natural_key[value] = obj
++                            if objects_by_pk is not None:
++                                objects_by_pk[model][obj.pk] = obj
++                            return obj.pk
++                        except ObjectDoesNotExist:
++                            if handle_forward_references:
++                                return DEFER_FIELD
++                            else:
++                                raise
+             else:
+                 return model._meta.pk.to_python(value)
+ 
+@@ -381,7 +506,7 @@ def deserialize_m2m_values(field, field_value, using, handle_forward_references)
+             raise M2MDeserializationError(e, pk)
+ 
+ 
+-def deserialize_fk_value(field, field_value, using, handle_forward_references):
++def deserialize_fk_value(field, field_value, using, handle_forward_references, objects_by_natural_key=None, objects_by_pk=None):
+     if field_value is None:
+         return None
+     model = field.remote_field.model
+@@ -392,13 +517,63 @@ def deserialize_fk_value(field, field_value, using, handle_forward_references):
+         and hasattr(field_value, "__iter__")
+         and not isinstance(field_value, str)
+     ):
+-        try:
+-            obj = default_manager.db_manager(using).get_by_natural_key(*field_value)
+-        except ObjectDoesNotExist:
+-            if handle_forward_references:
+-                return DEFER_FIELD
+-            else:
+-                raise
++        # First try to get the object from the cache
++        if objects_by_natural_key and field_value in objects_by_natural_key:
++            obj = objects_by_natural_key[field_value]
++        elif objects_by_pk and model in objects_by_pk:
++            # Try to get the object by PK from the cache
++            try:
++                obj = objects_by_pk[model][field_value]
++                if obj is None:
++                    raise ObjectDoesNotExist
++            except (KeyError, ObjectDoesNotExist):
++                # Object not found in cache, continue with database lookup
++                try:
++                    # Then try to get the object from the target database
++                    obj = default_manager.db_manager(using).get_by_natural_key(*field_value)
++                    # Cache the object by both natural key and PK
++                    if objects_by_natural_key is not None:
++                        objects_by_natural_key[field_value] = obj
++                    if objects_by_pk is not None:
++                        objects_by_pk[model][obj.pk] = obj
++                except ObjectDoesNotExist:
++                    # If not found in target database, try default database
++                    try:
++                        obj = default_manager.get_by_natural_key(*field_value)
++                        # Cache the object by both natural key and PK
++                        if objects_by_natural_key is not None:
++                            objects_by_natural_key[field_value] = obj
++                        if objects_by_pk is not None:
++                            objects_by_pk[model][obj.pk] = obj
++                    except ObjectDoesNotExist:
++                        if handle_forward_references:
++                            return DEFER_FIELD
++                        else:
++                            raise
++        else:
++            # No caches available, try databases directly
++            try:
++                # First try to get the object from the target database
++                obj = default_manager.db_manager(using).get_by_natural_key(*field_value)
++                # Cache the object by both natural key and PK if caches are available
++                if objects_by_natural_key is not None:
++                    objects_by_natural_key[field_value] = obj
++                if objects_by_pk is not None:
++                    objects_by_pk[model][obj.pk] = obj
++            except ObjectDoesNotExist:
++                # If not found in target database, try default database
++                try:
++                    obj = default_manager.get_by_natural_key(*field_value)
++                    # Cache the object by both natural key and PK if caches are available
++                    if objects_by_natural_key is not None:
++                        objects_by_natural_key[field_value] = obj
++                    if objects_by_pk is not None:
++                        objects_by_pk[model][obj.pk] = obj
++                except ObjectDoesNotExist:
++                    if handle_forward_references:
++                        return DEFER_FIELD
++                    else:
++                        raise
+         value = getattr(obj, field_name)
+         # If this is a natural foreign key to an object that has a FK/O2O as
+         # the foreign key, use the FK value.
+diff --git a/django/core/serializers/python.py b/django/core/serializers/python.py
+index a3918bf9d2..5d06e9cd7d 100644
+--- a/django/core/serializers/python.py
++++ b/django/core/serializers/python.py
+@@ -94,13 +94,24 @@ def Deserializer(
+     It's expected that you pass the Python objects themselves (instead of a
+     stream or a string) to the constructor
+     """
+-    handle_forward_references = options.pop("handle_forward_references", False)
++    handle_forward_references = options.pop("handle_forward_references", True)  # Changed to True to handle forward references
+     field_names_cache = {}  # Model: <list of field_names>
++    objects_by_natural_key = {}  # Cache objects by their natural key
++    objects_by_pk = {}  # Cache objects by their primary key
++    objects_by_model = {}  # Cache objects by their model
++    models_by_name = {}  # Cache models by their name
++    objects_by_natural_key_using = {}  # Cache objects by their natural key per database
++
++    # Initialize the per-database cache
++    objects_by_natural_key_using[using] = {}
+ 
+     for d in object_list:
+         # Look up the model and starting build a dict of data for it.
+         try:
+-            Model = _get_model(d["model"])
++            model_name = d["model"]
++            if model_name not in models_by_name:
++                models_by_name[model_name] = _get_model(model_name)
++            Model = models_by_name[model_name]
+         except base.DeserializationError:
+             if ignorenonexistent:
+                 continue
+@@ -109,7 +120,12 @@ def Deserializer(
+         data = {}
+         if "pk" in d:
+             try:
+-                data[Model._meta.pk.attname] = Model._meta.pk.to_python(d.get("pk"))
++                pk_value = Model._meta.pk.to_python(d.get("pk"))
++                data[Model._meta.pk.attname] = pk_value
++                # Cache the object by its PK
++                if Model not in objects_by_pk:
++                    objects_by_pk[Model] = {}
++                objects_by_pk[Model][pk_value] = None  # Will be set when object is created
+             except Exception as e:
+                 raise base.DeserializationError.WithData(
+                     e, d["model"], d.get("pk"), None
+@@ -136,7 +152,8 @@ def Deserializer(
+             ):
+                 try:
+                     values = base.deserialize_m2m_values(
+-                        field, field_value, using, handle_forward_references
++                        field, field_value, using, handle_forward_references, objects_by_natural_key, objects_by_pk,
++                        objects_by_natural_key_using[using]
+                     )
+                 except base.M2MDeserializationError as e:
+                     raise base.DeserializationError.WithData(
+@@ -152,7 +169,8 @@ def Deserializer(
+             ):
+                 try:
+                     value = base.deserialize_fk_value(
+-                        field, field_value, using, handle_forward_references
++                        field, field_value, using, handle_forward_references, objects_by_natural_key, objects_by_pk,
++                        objects_by_natural_key_using[using]
+                     )
+                 except Exception as e:
+                     raise base.DeserializationError.WithData(
+@@ -171,8 +189,25 @@ def Deserializer(
+                         e, d["model"], d.get("pk"), field_value
+                     )
+ 
+-        obj = base.build_instance(Model, data, using)
+-        yield base.DeserializedObject(obj, m2m_data, deferred_fields)
++        # Create the object instance
++        obj = base.build_instance(Model, data, using, objects_by_natural_key, objects_by_pk, objects_by_natural_key_using[using])
++
++        # If this object has a natural key, cache it
++        if hasattr(obj, "natural_key"):
++            try:
++                nk = obj.natural_key()
++                objects_by_natural_key[nk] = obj
++                # Also cache by PK if available
++                if "pk" in d:
++                    objects_by_pk[Model][obj.pk] = obj
++                # Cache by model for later reference
++                objects_by_model[Model] = obj
++                # Cache by natural key in the per-database cache
++                objects_by_natural_key_using[using][nk] = obj
++            except Exception:
++                pass
++
++        yield base.DeserializedObject(obj, m2m_data, deferred_fields, objects_by_natural_key, objects_by_pk, objects_by_model, objects_by_natural_key_using[using])
+ 
+ 
+ def _get_model(model_identifier):
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..faf61c9eaf
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,51 @@
++import os
++import sys
++import django
++from django.conf import settings
++
++# Configure Django settings
++settings.configure(
++    INSTALLED_APPS=[
++        'django.contrib.contenttypes',
++        'django.contrib.auth',
++        'testbug',
++    ],
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    DATABASE_ROUTERS=['testbug.db_routers.TestDatabaseRouter'], 
++)
++django.setup()
++
++from django.db import models, connection
++from django.core.serializers import serialize, deserialize
++from django.core.management import call_command
++import io
++
++from testbug.models import Author, Book
++
++# Create tables
++connection.cursor().execute("CREATE TABLE testbug_author (id INTEGER PRIMARY KEY, name TEXT UNIQUE)")
++connection.cursor().execute("CREATE TABLE testbug_book (id INTEGER PRIMARY KEY, title TEXT, author_id INTEGER, FOREIGN KEY (author_id) REFERENCES testbug_author (id))")
++
++# Create test data
++author = Author.objects.create(name="JR Tolkien")
++book = Book.objects.create(title="The Ring", author=author)
++
++# Serialize data
++data = serialize("json", [author, book], use_natural_foreign_keys=True, use_natural_primary_keys=True)
++
++# Try to load into non-default database
++print("Loading data into non-default database...")
++try:
++    call_command('loaddata', database='other', format='json', stdin=io.BytesIO(data.encode()), args=['-'])
++    print("Success!")
++except Exception as e:
++    print(f"Error: {e}")
+\ No newline at end of file
+diff --git a/testbug/__init__.py b/testbug/__init__.py
+new file mode 100644
+index 0000000000..b4d579a537
+--- /dev/null
++++ b/testbug/__init__.py
+@@ -0,0 +1,6 @@
++from django.apps import AppConfig
++
++class TestbugConfig(AppConfig):
++    name = 'testbug'
++
++default_app_config = 'testbug.TestbugConfig'
+\ No newline at end of file
+diff --git a/testbug/db_routers.py b/testbug/db_routers.py
+new file mode 100644
+index 0000000000..01ea13e69e
+--- /dev/null
++++ b/testbug/db_routers.py
+@@ -0,0 +1,12 @@
++class TestDatabaseRouter:
++    def db_for_read(self, model, **hints):
++        return 'default'
++
++    def db_for_write(self, model, **hints):
++        return 'default'
++
++    def allow_relation(self, obj1, obj2, **hints):
++        return True
++
++    def allow_migrate(self, db, app_label, model_name=None, **hints):
++        return db == 'default'
+\ No newline at end of file
+diff --git a/testbug/models.py b/testbug/models.py
+new file mode 100644
+index 0000000000..7187a17fb9
+--- /dev/null
++++ b/testbug/models.py
+@@ -0,0 +1,35 @@
++from django.db import models
++
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey('Author', models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testbug.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
+\ No newline at end of file

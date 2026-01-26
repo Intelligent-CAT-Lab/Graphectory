@@ -1,0 +1,167 @@
+diff --git a/edge_cases.py b/edge_cases.py
+new file mode 100644
+index 0000000000..c8479080d6
+--- /dev/null
++++ b/edge_cases.py
+@@ -0,0 +1,37 @@
++from sympy.parsing.sympy_parser import parse_expr
++
++# Test various relational operators
++print("Testing relational operators:")
++print(parse_expr('1 < 2', evaluate=False))  # Should be Lt(1, 2, evaluate=False)
++print(parse_expr('1 > 2', evaluate=False))  # Should be Gt(1, 2, evaluate=False)
++print(parse_expr('1 <= 2', evaluate=False))  # Should be Le(1, 2, evaluate=False)
++print(parse_expr('1 >= 2', evaluate=False))  # Should be Ge(1, 2, evaluate=False)
++print(parse_expr('1 == 2', evaluate=False))  # Should be Eq(1, 2, evaluate=False)
++print(parse_expr('1 != 2', evaluate=False))  # Should be Ne(1, 2, evaluate=False)
++
++# Test with variables
++print("\nTesting with variables:")
++print(parse_expr('x < y', evaluate=False))  # Should be Lt(x, y, evaluate=False)
++print(parse_expr('x > y', evaluate=False))  # Should be Gt(x, y, evaluate=False)
++print(parse_expr('x <= y', evaluate=False))  # Should be Le(x, y, evaluate=False)
++print(parse_expr('x >= y', evaluate=False))  # Should be Ge(x, y, evaluate=False)
++print(parse_expr('x == y', evaluate=False))  # Should be Eq(x, y, evaluate=False)
++print(parse_expr('x != y', evaluate=False))  # Should be Ne(x, y, evaluate=False)
++
++# Test with expressions
++print("\nTesting with expressions:")
++print(parse_expr('x + 1 < y * 2', evaluate=False))  # Should be Lt(x + 1, y * 2, evaluate=False)
++print(parse_expr('x**2 > y/2', evaluate=False))  # Should be Gt(x**2, y/2, evaluate=False)
++print(parse_expr('abs(x) <= y', evaluate=False))  # Should be Le(abs(x), y, evaluate=False)
++print(parse_expr('sin(x) >= y', evaluate=False))  # Should be Ge(sin(x), y, evaluate=False)
++print(parse_expr('log(x) == y', evaluate=False))  # Should be Eq(log(x), y, evaluate=False)
++print(parse_expr('exp(x) != y', evaluate=False))  # Should be Ne(exp(x), y, evaluate=False)
++
++# Test with parentheses
++print("\nTesting with parentheses:")
++print(parse_expr('(x + 1) < (y - 1)', evaluate=False))  # Should be Lt(x + 1, y - 1, evaluate=False)
++print(parse_expr('(x * 2) > (y / 2)', evaluate=False))  # Should be Gt(x * 2, y / 2, evaluate=False)
++print(parse_expr('(x + y) <= (x - y)', evaluate=False))  # Should be Le(x + y, x - y, evaluate=False)
++print(parse_expr('(x - y) >= (y - x)', evaluate=False))  # Should be Ge(x - y, y - x, evaluate=False)
++print(parse_expr('(x + y) == (y + x)', evaluate=False))  # Should be Eq(x + y, y + x, evaluate=False)
++print(parse_expr('(x - y) != (y - x)', evaluate=False))  # Should be Ne(x - y, y - x, evaluate=False)
+\ No newline at end of file
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..0f46cfe4cc
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,6 @@
++from sympy.parsing.sympy_parser import parse_expr
++
++# This should return the expression "1 < 2" unevaluated
++result = parse_expr('1 < 2', evaluate=False)
++print(f"Result: {result}")
++print(f"Type: {type(result)}")
+\ No newline at end of file
+diff --git a/sympy/parsing/sympy_parser.py b/sympy/parsing/sympy_parser.py
+index 52711d1324..df780768a9 100644
+--- a/sympy/parsing/sympy_parser.py
++++ b/sympy/parsing/sympy_parser.py
+@@ -1036,6 +1036,35 @@ def parse_expr(s: str, local_dict: Optional[DICT] = None,
+     implicit_multiplication_application
+ 
+     """
++    # Special handling for relational operators when evaluate=False
++    if not evaluate:
++        for op in ['<', '>', '<=', '>=', '==', '!=']:
++            if op in s:
++                left, right = s.split(op)
++                left = left.strip()
++                right = right.strip()
++                # Parse the left and right sides with evaluate=True to handle any expressions
++                left_expr = parse_expr(left, local_dict, transformations, global_dict, evaluate=True)
++                right_expr = parse_expr(right, local_dict, transformations, global_dict, evaluate=True)
++                # Create the appropriate relational expression with evaluate=False
++                if op == '<':
++                    from sympy.core.relational import Lt
++                    return Lt(left_expr, right_expr, evaluate=False)
++                elif op == '>':
++                    from sympy.core.relational import Gt
++                    return Gt(left_expr, right_expr, evaluate=False)
++                elif op == '<=':
++                    from sympy.core.relational import Le
++                    return Le(left_expr, right_expr, evaluate=False)
++                elif op == '>=':
++                    from sympy.core.relational import Ge
++                    return Ge(left_expr, right_expr, evaluate=False)
++                elif op == '==':
++                    from sympy.core.relational import Eq
++                    return Eq(left_expr, right_expr, evaluate=False)
++                elif op == '!=':
++                    from sympy.core.relational import Ne
++                    return Ne(left_expr, right_expr, evaluate=False)
+ 
+     if local_dict is None:
+         local_dict = {}
+@@ -1091,11 +1120,33 @@ def evaluateFalse(s: str):
+     """
+     Replaces operators with the SymPy equivalent and sets evaluate=False.
+     """
++    # Special handling for relational operators
++    for op in ['<', '>', '<=', '>=', '==', '!=']:
++        if op in s:
++            left, right = s.split(op)
++            left = left.strip()
++            right = right.strip()
++            # Create the appropriate relational expression
++            if op == '<':
++                return ast.parse(f"Lt({left}, {right}, evaluate=False)")
++            elif op == '>':
++                return ast.parse(f"Gt({left}, {right}, evaluate=False)")
++            elif op == '<=':
++                return ast.parse(f"Le({left}, {right}, evaluate=False)")
++            elif op == '>=':
++                return ast.parse(f"Ge({left}, {right}, evaluate=False)")
++            elif op == '==':
++                return ast.parse(f"Eq({left}, {right}, evaluate=False)")
++            elif op == '!=':
++                return ast.parse(f"Ne({left}, {right}, evaluate=False)")
++
++    # For non-relational operators, use the original approach
+     node = ast.parse(s)
+     transformed_node = EvaluateFalseTransformer().visit(node)
+     # node is a Module, we want an Expression
+-    transformed_node = ast.Expression(transformed_node.body[0].value)
+-
++    if isinstance(transformed_node.body[0], ast.Expr):
++        transformed_node = ast.Expression(transformed_node.body[0].value)
++    
+     return ast.fix_missing_locations(transformed_node)
+ 
+ 
+@@ -1109,6 +1160,12 @@ class EvaluateFalseTransformer(ast.NodeTransformer):
+         ast.BitOr: 'Or',
+         ast.BitAnd: 'And',
+         ast.BitXor: 'Not',
++        ast.Lt: 'Lt',
++        ast.Gt: 'Gt',
++        ast.LtE: 'Le',
++        ast.GtE: 'Ge',
++        ast.Eq: 'Eq',
++        ast.NotEq: 'Ne',
+     }
+     functions = (
+         'Abs', 'im', 're', 'sign', 'arg', 'conjugate',
+@@ -1140,6 +1197,20 @@ def visit_BinOp(self, node):
+             right = self.visit(node.right)
+             left = self.visit(node.left)
+ 
++            # For relational operators, we want to create a call to the appropriate
++            # relational class (Lt, Gt, etc.) with evaluate=False
++            if sympy_class in ('Lt', 'Gt', 'Le', 'Ge', 'Eq', 'Ne'):
++                # For relational operators, we want to return a call to the appropriate
++                # relational class with evaluate=False
++                new_node = ast.Call(
++                    func=ast.Name(id=sympy_class, ctx=ast.Load()),
++                    args=[left, right],
++                    keywords=[ast.keyword(arg='evaluate', value=ast.NameConstant(value=False, ctx=ast.Load()))],
++                    starargs=None,
++                    kwargs=None
++                )
++                return new_node
++
+             rev = False
+             if isinstance(node.op, ast.Sub):
+                 right = ast.Call(

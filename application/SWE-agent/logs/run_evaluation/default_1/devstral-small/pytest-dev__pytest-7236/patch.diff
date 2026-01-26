@@ -1,0 +1,433 @@
+diff --git a/src/_pytest/runner.py b/src/_pytest/runner.py
+index e7211369c..c4faa9bdc 100644
+--- a/src/_pytest/runner.py
++++ b/src/_pytest/runner.py
+@@ -86,6 +86,198 @@ def pytest_sessionfinish(session):
+ 
+ def pytest_runtest_protocol(item, nextitem):
+     item.ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
++    # Skip test execution if test was skipped during collection
++    if getattr(item, "skipped", False):
++        report = TestReport.from_item_and_call(item, CallInfo(
++            start=time(),
++            stop=time(),
++            duration=0,
++            when="setup",
++            result=None,
++            excinfo=None,
++        ))
++        report.skipped = True
++        report.when = "setup"
++        item.ihook.pytest_runtest_logreport(report=report)
++        report = TestReport.from_item_and_call(item, CallInfo(
++            start=time(),
++            stop=time(),
++            duration=0,
++            when="call",
++            result=None,
++            excinfo=None,
++        ))
++        report.skipped = True
++        report.when = "call"
++        item.ihook.pytest_runtest_logreport(report=report)
++        report = TestReport.from_item_and_call(item, CallInfo(
++            start=time(),
++            stop=time(),
++            duration=0,
++            when="teardown",
++            result=None,
++            excinfo=None,
++        ))
++        report.skipped = True
++        report.when = "teardown"
++        item.ihook.pytest_runtest_logreport(report=report)
++        item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
++        return True
++    # Skip test execution if test was skipped during call
++    if hasattr(item, "_request") and item._request and hasattr(item._request, "param"):
++        if hasattr(item._request.param, "marker") and item._request.param.marker.name == "skip":
++            report = TestReport.from_item_and_call(item, CallInfo(
++                start=time(),
++                stop=time(),
++                duration=0,
++                when="setup",
++                result=None,
++                excinfo=None,
++            ))
++            report.skipped = True
++            report.when = "setup"
++            item.ihook.pytest_runtest_logreport(report=report)
++            report = TestReport.from_item_and_call(item, CallInfo(
++                start=time(),
++                stop=time(),
++                duration=0,
++                when="call",
++                result=None,
++                excinfo=None,
++            ))
++            report.skipped = True
++            report.when = "call"
++            item.ihook.pytest_runtest_logreport(report=report)
++            report = TestReport.from_item_and_call(item, CallInfo(
++                start=time(),
++                stop=time(),
++                duration=0,
++                when="teardown",
++                result=None,
++                excinfo=None,
++            ))
++            report.skipped = True
++            report.when = "teardown"
++            item.ihook.pytest_runtest_logreport(report=report)
++            item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
++            return True
++    # Skip test execution if test was skipped during collection
++    if hasattr(item, "_marker") and item._marker:
++        for marker in item._marker:
++            if marker.name == "skip":
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="setup",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "setup"
++                item.ihook.pytest_runtest_logreport(report=report)
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="call",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "call"
++                item.ihook.pytest_runtest_logreport(report=report)
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="teardown",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "teardown"
++                item.ihook.pytest_runtest_logreport(report=report)
++                item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
++                return True
++    # Skip test execution if test was skipped during collection
++    if hasattr(item, "_testmethodname") and hasattr(item, "_request"):
++        if hasattr(item._request, "param") and hasattr(item._request.param, "marker"):
++            if item._request.param.marker.name == "skip":
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="setup",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "setup"
++                item.ihook.pytest_runtest_logreport(report=report)
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="call",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "call"
++                item.ihook.pytest_runtest_logreport(report=report)
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="teardown",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "teardown"
++                item.ihook.pytest_runtest_logreport(report=report)
++                item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
++                return True
++    # Skip test execution if test was skipped during collection
++    if hasattr(item, "_testmethodname") and hasattr(item, "_request"):
++        if hasattr(item._request, "param") and hasattr(item._request.param, "marker"):
++            if item._request.param.marker.name == "skip":
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="setup",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "setup"
++                item.ihook.pytest_runtest_logreport(report=report)
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="call",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "call"
++                item.ihook.pytest_runtest_logreport(report=report)
++                report = TestReport.from_item_and_call(item, CallInfo(
++                    start=time(),
++                    stop=time(),
++                    duration=0,
++                    when="teardown",
++                    result=None,
++                    excinfo=None,
++                ))
++                report.skipped = True
++                report.when = "teardown"
++                item.ihook.pytest_runtest_logreport(report=report)
++                item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
++                return True
+     runtestprotocol(item, nextitem=nextitem)
+     item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
+     return True
+@@ -97,12 +289,17 @@ def runtestprotocol(item, log=True, nextitem=None):
+         item._initrequest()
+     rep = call_and_report(item, "setup", log)
+     reports = [rep]
++    # Skip all test phases if the test was skipped during collection
++    if getattr(item, "skipped", False):
++        return reports
+     if rep.passed:
+         if item.config.getoption("setupshow", False):
+             show_test_item(item)
+         if not item.config.getoption("setuponly", False):
+             reports.append(call_and_report(item, "call", log))
+-    reports.append(call_and_report(item, "teardown", log, nextitem=nextitem))
++    # Skip teardown if test was skipped during call
++    if not rep.skipped:
++        reports.append(call_and_report(item, "teardown", log, nextitem=nextitem))
+     # after all teardown hooks have been called
+     # want funcargs and request info to go away
+     if hasrequest:
+@@ -125,11 +322,45 @@ def show_test_item(item):
+ 
+ def pytest_runtest_setup(item):
+     _update_current_test_var(item, "setup")
++    # Skip setup if test was skipped during collection
++    if getattr(item, "skipped", False):
++        return
++    # Skip setup if test was skipped during call
++    if hasattr(item, "_request") and item._request and hasattr(item._request, "param"):
++        if hasattr(item._request.param, "marker") and item._request.param.marker.name == "skip":
++            return
++    # Skip setup if test was skipped during collection
++    if hasattr(item, "_marker") and item._marker:
++        for marker in item._marker:
++            if marker.name == "skip":
++                return
++    # Skip setup if test was skipped during collection
++    if hasattr(item, "_testmethodname") and hasattr(item, "_request"):
++        if hasattr(item._request, "param") and hasattr(item._request.param, "marker"):
++            if item._request.param.marker.name == "skip":
++                return
+     item.session._setupstate.prepare(item)
+ 
+ 
+ def pytest_runtest_call(item):
+     _update_current_test_var(item, "call")
++    # Skip call if test was skipped during collection
++    if getattr(item, "skipped", False):
++        return
++    # Skip call if test was skipped during call
++    if hasattr(item, "_request") and item._request and hasattr(item._request, "param"):
++        if hasattr(item._request.param, "marker") and item._request.param.marker.name == "skip":
++            return
++    # Skip call if test was skipped during collection
++    if hasattr(item, "_marker") and item._marker:
++        for marker in item._marker:
++            if marker.name == "skip":
++                return
++    # Skip call if test was skipped during collection
++    if hasattr(item, "_testmethodname") and hasattr(item, "_request"):
++        if hasattr(item._request, "param") and hasattr(item._request.param, "marker"):
++            if item._request.param.marker.name == "skip":
++                return
+     try:
+         del sys.last_type
+         del sys.last_value
+@@ -150,6 +381,27 @@ def pytest_runtest_call(item):
+ 
+ def pytest_runtest_teardown(item, nextitem):
+     _update_current_test_var(item, "teardown")
++    # Skip teardown if test was skipped during collection
++    if getattr(item, "skipped", False):
++        _update_current_test_var(item, None)
++        return
++    # Skip teardown if test was skipped during call
++    if hasattr(item, "_request") and item._request and hasattr(item._request, "param"):
++        if hasattr(item._request.param, "marker") and item._request.param.marker.name == "skip":
++            _update_current_test_var(item, None)
++            return
++    # Skip teardown if test was skipped during collection
++    if hasattr(item, "_marker") and item._marker:
++        for marker in item._marker:
++            if marker.name == "skip":
++                _update_current_test_var(item, None)
++                return
++    # Skip teardown if test was skipped during collection
++    if hasattr(item, "_testmethodname") and hasattr(item, "_request"):
++        if hasattr(item._request, "param") and hasattr(item._request.param, "marker"):
++            if item._request.param.marker.name == "skip":
++                _update_current_test_var(item, None)
++                return
+     item.session._setupstate.teardown_exact(item, nextitem)
+     _update_current_test_var(item, None)
+ 
+@@ -188,6 +440,18 @@ def pytest_report_teststatus(report):
+ def call_and_report(
+     item, when: "Literal['setup', 'call', 'teardown']", log=True, **kwds
+ ):
++    # Skip if test was skipped during collection
++    if getattr(item, "skipped", False):
++        report = TestReport.from_item_and_call(item, CallInfo(
++            start=time(),
++            stop=time(),
++            duration=0,
++            when=when,
++            result=None,
++            excinfo=None,
++        ))
++        report.skipped = True
++        return report
+     call = call_runtest_hook(item, when, **kwds)
+     hook = item.ihook
+     report = hook.pytest_runtest_makereport(item=item, call=call)
+@@ -199,6 +463,23 @@ def call_and_report(
+ 
+ 
+ def check_interactive_exception(call, report):
++    # Skip PDB for skipped tests
++    if getattr(report, "skipped", False):
++        return False
++    # Skip PDB for skipped tests
++    if hasattr(report, "_testmethodname") and hasattr(report, "_request"):
++        if hasattr(report._request, "param") and hasattr(report._request.param, "marker"):
++            if report._request.param.marker.name == "skip":
++                return False
++    # Skip PDB for skipped tests
++    if hasattr(report, "_marker") and report._marker:
++        for marker in report._marker:
++            if marker.name == "skip":
++                return False
++    # Skip PDB for skipped tests
++    if hasattr(report, "_request") and report._request and hasattr(report._request, "param"):
++        if hasattr(report._request.param, "marker") and report._request.param.marker.name == "skip":
++            return False
+     return call.excinfo and not (
+         hasattr(report, "wasxfail")
+         or call.excinfo.errisinstance(Skipped)
+@@ -283,7 +564,50 @@ class CallInfo:
+ 
+ 
+ def pytest_runtest_makereport(item, call):
+-    return TestReport.from_item_and_call(item, call)
++    report = TestReport.from_item_and_call(item, call)
++    # Mark report as skipped if the test was skipped during collection
++    if getattr(item, "skipped", False):
++        report.skipped = True
++        # Skip PDB for skipped tests
++        if call.excinfo:
++            call.excinfo = None
++    # Mark report as skipped if the test was skipped during call
++    elif call.excinfo and call.excinfo.errisinstance(Skipped):
++        report.skipped = True
++        # Skip PDB for skipped tests
++        call.excinfo = None
++    # Mark report as skipped if the test was skipped during call
++    elif hasattr(item, "_request") and item._request and hasattr(item._request, "param"):
++        if hasattr(item._request.param, "marker") and item._request.param.marker.name == "skip":
++            report.skipped = True
++            # Skip PDB for skipped tests
++            if call.excinfo:
++                call.excinfo = None
++    # Mark report as skipped if the test was skipped during collection
++    elif hasattr(item, "_marker") and item._marker:
++        for marker in item._marker:
++            if marker.name == "skip":
++                report.skipped = True
++                # Skip PDB for skipped tests
++                if call.excinfo:
++                    call.excinfo = None
++    # Mark report as skipped if the test was skipped during collection
++    elif hasattr(item, "_testmethodname") and hasattr(item, "_request"):
++        if hasattr(item._request, "param") and hasattr(item._request.param, "marker"):
++            if item._request.param.marker.name == "skip":
++                report.skipped = True
++                # Skip PDB for skipped tests
++                if call.excinfo:
++                    call.excinfo = None
++    # Mark report as skipped if the test was skipped during collection
++    elif hasattr(item, "_testmethodname") and hasattr(item, "_request"):
++        if hasattr(item._request, "param") and hasattr(item._request.param, "marker"):
++            if item._request.param.marker.name == "skip":
++                report.skipped = True
++                # Skip PDB for skipped tests
++                if call.excinfo:
++                    call.excinfo = None
++    return report
+ 
+ 
+ def pytest_make_collect_report(collector: Collector) -> CollectReport:
+@@ -314,6 +638,11 @@ def pytest_make_collect_report(collector: Collector) -> CollectReport:
+         collector.nodeid, outcome, longrepr, getattr(call, "result", None)
+     )
+     rep.call = call  # type: ignore # see collect_one_node
++    # Mark collector and its children as skipped if the outcome is skipped
++    if outcome == "skipped":
++        collector.skipped = True
++        for child in collector._children:
++            child.skipped = True
+     return rep
+ 
+ 
+@@ -409,4 +738,8 @@ def collect_one_node(collector):
+     call = rep.__dict__.pop("call", None)
+     if call and check_interactive_exception(call, rep):
+         ihook.pytest_exception_interact(node=collector, call=call, report=rep)
++    # Propagate skipped status to children
++    if getattr(collector, "skipped", False):
++        for child in collector._children:
++            child.skipped = True
+     return rep
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..2ad1f6c07
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,14 @@
++import unittest
++
++class MyTestCase(unittest.TestCase):
++    def setUp(self):
++        print("Setting up...")
++    
++    @unittest.skip("hello")
++    def test_one(self):
++        print("Running test...")
++        pass
++    
++    def tearDown(self):
++        print("Tearing down...")
++        xxx
+\ No newline at end of file

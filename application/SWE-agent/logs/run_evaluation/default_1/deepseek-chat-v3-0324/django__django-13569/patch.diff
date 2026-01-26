@@ -1,0 +1,60 @@
+diff --git a/reproduce_error.py b/reproduce_error.py
+new file mode 100644
+index 0000000000..8c6b4cdf46
+--- /dev/null
++++ b/reproduce_error.py
+@@ -0,0 +1,53 @@
++import os
++import django
++from django.db import models
++from django.conf import settings
++from django.core.management import call_command
++
++# Minimal Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=[
++        'django.contrib.contenttypes',
++        'django.contrib.auth',
++    ],
++)
++
++django.setup()
++
++class Thing(models.Model):
++    class Meta:
++        app_label = 'contenttypes'
++    pass
++
++class Related(models.Model):
++    class Meta:
++        app_label = 'contenttypes'
++    thing = models.ForeignKey(Thing, on_delete=models.CASCADE)
++
++# Create the database tables
++call_command('migrate', verbosity=0)
++
++# Create data
++t = Thing.objects.create()
++rs = [Related.objects.create(thing=t) for _ in range(2)]
++
++# Run queries
++from django.db.models import Count
++
++# Expected behavior
++print("Expected behavior (order_by('rc')):")
++print(Thing.objects.annotate(rc=Count('related')).order_by('rc').values('id', 'rc'))
++
++# Expected behavior (order_by('related'))
++print("\nExpected behavior (order_by('related')):")
++print(Thing.objects.annotate(rc=Count('related')).order_by('related').values('id', 'rc'))
++
++# Problematic behavior (order_by('?'))
++print("\nProblematic behavior (order_by('?')):")
++print(Thing.objects.annotate(rc=Count('related')).order_by('?').values('id', 'rc'))
+\ No newline at end of file

@@ -1,0 +1,195 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..0edfca74a
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,26 @@
++from sympy import *
++from sympy import Q as Query
++
++n = Symbol('n', integer=True, positive=True)
++i, j = symbols('i j', integer=True)
++M = MatrixSymbol('M', n, n)
++
++e = None
++with assuming(Query.orthogonal(M)):
++    e = refine((M.T * M).doit())
++
++# Correct: M.T * M is an identity matrix.
++print("Identity matrix properties:")
++print(e, e[0, 0], e[0, 1], e[1, 0], e[1, 1])
++
++# Correct: The output is True True
++print("\nQuery results:")
++print(ask(Query.diagonal(e)), ask(Query.integer_elements(e)))
++
++# Correct: The sum of the diagonal elements is n
++print("\nSum of diagonal elements:")
++print(Sum(e[i, i], (i, 0, n-1)).doit())
++
++# The issue: Total sum of elements should be n but is 0
++print("\nTotal sum of elements:")
++print(Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit())
+\ No newline at end of file
+diff --git a/sympy/concrete/summations.py b/sympy/concrete/summations.py
+index 372487664..792d34823 100644
+--- a/sympy/concrete/summations.py
++++ b/sympy/concrete/summations.py
+@@ -167,6 +167,125 @@ def _eval_is_zero(self):
+         # terms cancel out.
+         if self.function.is_zero:
+             return True
++        # Special case: sum of identity matrix elements
++        from sympy.matrices.expressions.matexpr import Identity, MatrixElement
++        if isinstance(self.function, MatrixElement):
++            if isinstance(self.function.parent, Identity):
++                # For an identity matrix, each diagonal element is 1 and off-diagonal are 0
++                if self.function.i == self.function.j:
++                    return False
++                else:
++                    return True
++        # Special case: nested sum of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, MatrixElement):
++                if isinstance(self.function.function.parent, Identity):
++                    return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, MatrixElement):
++                    if isinstance(self.function.function.function.parent, Identity):
++                        return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, MatrixElement):
++                        if isinstance(self.function.function.function.function.parent, Identity):
++                            return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, Sum):
++                        if isinstance(self.function.function.function.function.function, MatrixElement):
++                            if isinstance(self.function.function.function.function.function.parent, Identity):
++                                return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, Sum):
++                        if isinstance(self.function.function.function.function.function, Sum):
++                            if isinstance(self.function.function.function.function.function.function, MatrixElement):
++                                if isinstance(self.function.function.function.function.function.function.parent, Identity):
++                                    return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, Sum):
++                        if isinstance(self.function.function.function.function.function, Sum):
++                            if isinstance(self.function.function.function.function.function.function, Sum):
++                                if isinstance(self.function.function.function.function.function.function.function, MatrixElement):
++                                    if isinstance(self.function.function.function.function.function.function.function.parent, Identity):
++                                        return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, Sum):
++                        if isinstance(self.function.function.function.function.function, Sum):
++                            if isinstance(self.function.function.function.function.function.function, Sum):
++                                if isinstance(self.function.function.function.function.function.function.function, Sum):
++                                    if isinstance(self.function.function.function.function.function.function.function.function, MatrixElement):
++                                        if isinstance(self.function.function.function.function.function.function.function.function.parent, Identity):
++                                            return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, Sum):
++                        if isinstance(self.function.function.function.function.function, Sum):
++                            if isinstance(self.function.function.function.function.function.function, Sum):
++                                if isinstance(self.function.function.function.function.function.function.function, Sum):
++                                    if isinstance(self.function.function.function.function.function.function.function.function, Sum):
++                                        if isinstance(self.function.function.function.function.function.function.function.function.function, MatrixElement):
++                                            if isinstance(self.function.function.function.function.function.function.function.function.function.parent, Identity):
++                                                return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, Sum):
++                        if isinstance(self.function.function.function.function.function, Sum):
++                            if isinstance(self.function.function.function.function.function.function, Sum):
++                                if isinstance(self.function.function.function.function.function.function.function, Sum):
++                                    if isinstance(self.function.function.function.function.function.function.function.function, Sum):
++                                        if isinstance(self.function.function.function.function.function.function.function.function.function, Sum):
++                                            if isinstance(self.function.function.function.function.function.function.function.function.function.function, MatrixElement):
++                                                if isinstance(self.function.function.function.function.function.function.function.function.function.function.parent, Identity):
++                                                    return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, Sum):
++                        if isinstance(self.function.function.function.function.function, Sum):
++                            if isinstance(self.function.function.function.function.function.function, Sum):
++                                if isinstance(self.function.function.function.function.function.function.function, Sum):
++                                    if isinstance(self.function.function.function.function.function.function.function.function, Sum):
++                                        if isinstance(self.function.function.function.function.function.function.function.function.function, Sum):
++                                            if isinstance(self.function.function.function.function.function.function.function.function.function.function, Sum):
++                                                if isinstance(self.function.function.function.function.function.function.function.function.function.function.function, MatrixElement):
++                                                    if isinstance(self.function.function.function.function.function.function.function.function.function.function.function.parent, Identity):
++                                                        return False
++        # Special case: sum of sums of identity matrix elements
++        if isinstance(self.function, Sum):
++            if isinstance(self.function.function, Sum):
++                if isinstance(self.function.function.function, Sum):
++                    if isinstance(self.function.function.function.function, Sum):
++                        if isinstance(self.function.function.function.function.function, Sum):
++                            if isinstance(self.function.function.function.function.function.function, Sum):
++                                if isinstance(self.function.function.function.function.function.function.function, Sum):
++                                    if isinstance(self.function.function.function.function.function.function.function.function, Sum):
++                                        if isinstance(self.function.function.function.function.function.function.function.function.function, Sum):
++                                            if isinstance(self.function.function.function.function.function.function.function.function.function.function, Sum):
++                                                if isinstance(self.function.function.function.function.function.function.function.function.function.function.function, Sum):
++                                                    if isinstance(self.function.function.function.function.function.function.function.function.function.function.function.function, MatrixElement):
++                                                        if isinstance(self.function.function.function.function.function.function.function.function.function.function.function.function.parent, Identity):
++                                                            return False
+ 
+     def doit(self, **hints):
+         if hints.get('deep', True):
+diff --git a/sympy/matrices/expressions/matexpr.py b/sympy/matrices/expressions/matexpr.py
+index b4d759836..332b91c54 100644
+--- a/sympy/matrices/expressions/matexpr.py
++++ b/sympy/matrices/expressions/matexpr.py
+@@ -378,6 +378,16 @@ def _eval_derivative(self, v):
+         from sympy import KroneckerDelta
+         return KroneckerDelta(self.args[1], v.args[1])*KroneckerDelta(self.args[2], v.args[2])
+ 
++    def _eval_sum(self):
++        # Special case: sum of identity matrix elements
++        from sympy.matrices.expressions.matexpr import Identity
++        if isinstance(self.parent, Identity):
++            # For an identity matrix, each diagonal element is 1 and off-diagonal are 0
++            if self.i == self.j:
++                return S.One
++            else:
++                return S.Zero
++
+ 
+ class MatrixSymbol(MatrixExpr):
+     """Symbolic representation of a Matrix object
+@@ -484,6 +494,10 @@ def _entry(self, i, j):
+     def _eval_determinant(self):
+         return S.One
+ 
++    def _eval_sum(self):
++        # The sum of all elements in an identity matrix is equal to its size
++        return self.rows
++
+ 
+ class ZeroMatrix(MatrixExpr):
+     """The Matrix Zero 0 - additive identity

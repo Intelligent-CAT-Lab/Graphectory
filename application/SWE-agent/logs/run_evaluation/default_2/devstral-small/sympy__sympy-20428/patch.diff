@@ -1,0 +1,47 @@
+diff --git a/sympy/polys/densebasic.py b/sympy/polys/densebasic.py
+index 1caeb8f629..6e99a1b74e 100644
+--- a/sympy/polys/densebasic.py
++++ b/sympy/polys/densebasic.py
+@@ -714,7 +714,8 @@ def dmp_zero_p(f, u):
+         f = f[0]
+         u -= 1
+ 
+-    return not f
++    # Handle both empty list and zero coefficient
++    return not f or (isinstance(f, list) and not f)
+ 
+ 
+ def dmp_zero(u):
+@@ -1678,6 +1679,9 @@ def dmp_terms_gcd(f, u, K):
+         return (0,)*(u + 1), f
+ 
+     F = dmp_to_dict(f, u)
++    if not F:
++        return (0,)*(u + 1), f
++
+     G = monomial_min(*list(F.keys()))
+ 
+     if all(g == 0 for g in G):
+diff --git a/sympy/polys/densetools.py b/sympy/polys/densetools.py
+index f057824642..a066b5b702 100644
+--- a/sympy/polys/densetools.py
++++ b/sympy/polys/densetools.py
+@@ -1247,9 +1247,17 @@ def dmp_clear_denoms(f, u, K0, K1=None, convert=False):
+         else:
+             K1 = K0
+ 
++    # If polynomial is already zero, return empty list
++    if dmp_zero_p(f, u):
++        return K1.one, dmp_zero(u)
++
+     common = _rec_clear_denoms(f, u, K0, K1)
++    
++    # If all coefficients are zero after clearing denominators, return empty list
++    if K1.is_zero(common):
++        return K1.one, dmp_zero(u)
+ 
+-    if not K1.is_one(common):
++    if not K1.is_one(common) and not K1.is_zero(common):
+         f = dmp_mul_ground(f, common, u, K0)
+ 
+     if not convert:

@@ -1,0 +1,287 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 000000000..f6d34a067
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,9 @@
++from sympy import *
++A = MatrixSymbol('A', 2, 2)
++B = MatrixSymbol('B', 2, 2)
++print("String representation:")
++print(A - A*B - B)
++print("\nPretty representation:")
++pprint(A - A*B - B)
++print("\nLaTeX representation:")
++print(latex(A - A*B - B))
+\ No newline at end of file
+diff --git a/sympy/matrices/expressions/matadd.py b/sympy/matrices/expressions/matadd.py
+index bef8e1e9e..dbb74934a 100644
+--- a/sympy/matrices/expressions/matadd.py
++++ b/sympy/matrices/expressions/matadd.py
+@@ -3,7 +3,7 @@
+ from sympy.core.compatibility import reduce
+ from operator import add
+ 
+-from sympy.core import Add, Basic, sympify
++from sympy.core import Add, Basic, sympify, S
+ from sympy.functions import adjoint
+ from sympy.matrices.matrices import MatrixBase
+ from sympy.matrices.expressions.transpose import transpose
+@@ -41,11 +41,154 @@ def shape(self):
+         return self.args[0].shape
+ 
+     def _entry(self, i, j):
+-        return Add(*[arg._entry(i, j) for arg in self.args])
++        # Handle negative terms specially for matrix printing
++        entries = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                entries.append(-arg.args[1]._entry(i, j))
++            else:
++                entries.append(arg._entry(i, j))
++        result = Add(*entries)
++        # Convert back to MatAdd to ensure proper printing
++        if not isinstance(result, MatAdd):
++            result = MatAdd(*[result])
++        return result
+ 
+     def _eval_transpose(self):
+         return MatAdd(*[transpose(arg) for arg in self.args]).doit()
+ 
++    def _print_str(self, printer):
++        # Handle negative terms specially for string printing
++        terms = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                terms.append(("-", printer._print(arg.args[1])))
++            else:
++                terms.append(("+", printer._print(arg)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = "-" + term
++            else:
++                result = "+" + term
++        return result
++
++    def _print_latex(self, printer):
++        # Handle negative terms specially for LaTeX printing
++        terms = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                terms.append(("-", printer._print(arg.args[1])))
++            else:
++                terms.append(("+", printer._print(arg)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = "-" + term
++            else:
++                result = "+" + term
++        return result
++
++    def _print_pretty(self, printer):
++        # Handle negative terms specially for pretty printing
++        terms = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                terms.append(("-", printer._print(arg.args[1])))
++            else:
++                terms.append(("+", printer._print(arg)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = prettyForm(*result.right("-"))
++                result = prettyForm(*result.right(term))
++            else:
++                result = prettyForm(*result.right("+"))
++                result = prettyForm(*result.right(term))
++        return result
++
++    def _print(self, printer):
++        # Handle negative terms specially for all printing
++        terms = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                terms.append(("-", printer._print(arg.args[1])))
++            else:
++                terms.append(("+", printer._print(arg)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = "-" + term
++            else:
++                result = "+" + term
++        return result
++
++    def _eval_str(self, printer):
++        # Handle negative terms specially for string printing
++        terms = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                terms.append(("-", printer._print(arg.args[1])))
++            else:
++                terms.append(("+", printer._print(arg)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = "-" + term
++            else:
++                result = "+" + term
++        return result
++
++    def _eval_latex(self, printer):
++        # Handle negative terms specially for LaTeX printing
++        terms = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                terms.append(("-", printer._print(arg.args[1])))
++            else:
++                terms.append(("+", printer._print(arg)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = "-" + term
++            else:
++                result = "+" + term
++        return result
++
++    def _eval_pretty(self, printer):
++        # Handle negative terms specially for pretty printing
++        terms = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                terms.append(("-", printer._print(arg.args[1])))
++            else:
++                terms.append(("+", printer._print(arg)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = prettyForm(*result.right("-"))
++                result = prettyForm(*result.right(term))
++            else:
++                result = prettyForm(*result.right("+"))
++                result = prettyForm(*result.right(term))
++        return result
++
++    def _eval(self, printer):
++        # Handle negative terms specially for all printing
++        terms = []
++        for arg in self.args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                terms.append(("-", printer._print(arg.args[1])))
++            else:
++                terms.append(("+", printer._print(arg)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = "-" + term
++            else:
++                result = "+" + term
++        return result
++
+     def _eval_adjoint(self):
+         return MatAdd(*[adjoint(arg) for arg in self.args]).doit()
+ 
+@@ -59,7 +202,18 @@ def doit(self, **kwargs):
+             args = [arg.doit(**kwargs) for arg in self.args]
+         else:
+             args = self.args
+-        return canonicalize(MatAdd(*args))
++        # Handle negative terms specially
++        new_args = []
++        for arg in args:
++            if arg.is_MatMul and arg.args[0] == S.NegativeOne:
++                new_args.append(-arg.args[1])
++            else:
++                new_args.append(arg)
++        result = canonicalize(MatAdd(*new_args))
++        # Convert back to MatAdd to ensure proper printing
++        if not isinstance(result, MatAdd):
++            result = MatAdd(*[result])
++        return result
+ 
+ 
+ def validate(*args):
+diff --git a/sympy/matrices/expressions/matmul.py b/sympy/matrices/expressions/matmul.py
+index 083c5eba4..5912f580c 100644
+--- a/sympy/matrices/expressions/matmul.py
++++ b/sympy/matrices/expressions/matmul.py
+@@ -51,6 +51,9 @@ def _entry(self, i, j, expand=True):
+         coeff, matrices = self.as_coeff_matrices()
+ 
+         if len(matrices) == 1:  # situation like 2*X, matmul is just X
++            # Special case for negative matrices
++            if coeff == -1:
++                return -matrices[0][i, j]
+             return coeff * matrices[0][i, j]
+ 
+         indices = [None]*(len(matrices) + 1)
+diff --git a/sympy/printing/latex.py b/sympy/printing/latex.py
+index 8253b2f68..6e42e3469 100644
+--- a/sympy/printing/latex.py
++++ b/sympy/printing/latex.py
+@@ -309,7 +309,10 @@ def _print_Add(self, expr, order=None):
+         for i, term in enumerate(terms):
+             if i == 0:
+                 pass
+-            elif _coeff_isneg(term):
++            elif term.is_MatMul and term.args[0] == S.NegativeOne:
++                tex += " - "
++                term = term.args[1]
++            elif _coeff_isneg(term) and not term.is_Matrix:
+                 tex += " - "
+                 term = -term
+             else:
+diff --git a/sympy/printing/pretty/pretty.py b/sympy/printing/pretty/pretty.py
+index db24f4c61..1202d1bce 100644
+--- a/sympy/printing/pretty/pretty.py
++++ b/sympy/printing/pretty/pretty.py
+@@ -819,7 +819,21 @@ def _print_BlockMatrix(self, B):
+         return self._print(B.blocks)
+ 
+     def _print_MatAdd(self, expr):
+-        return self._print_seq(expr.args, None, None, ' + ')
++        terms = []
++        for term in expr.args:
++            if term.is_MatMul and term.args[0] == S.NegativeOne:
++                terms.append(("-", self._print(term.args[1])))
++            else:
++                terms.append(("+", self._print(term)))
++        result = terms[0][1]
++        for sign, term in terms[1:]:
++            if sign == "-":
++                result = prettyForm(*result.right("-"))
++                result = prettyForm(*result.right(term))
++            else:
++                result = prettyForm(*result.right("+"))
++                result = prettyForm(*result.right(term))
++        return result
+ 
+     def _print_MatMul(self, expr):
+         args = list(expr.args)
+diff --git a/sympy/printing/str.py b/sympy/printing/str.py
+index 0baefe0f7..6c59f8cb2 100644
+--- a/sympy/printing/str.py
++++ b/sympy/printing/str.py
+@@ -55,12 +55,16 @@ def _print_Add(self, expr, order=None):
+         PREC = precedence(expr)
+         l = []
+         for term in terms:
+-            t = self._print(term)
+-            if t.startswith('-'):
++            if term.is_MatMul and term.args[0] == S.NegativeOne:
++                t = self._print(term.args[1])
+                 sign = "-"
+-                t = t[1:]
+             else:
+-                sign = "+"
++                t = self._print(term)
++                if t.startswith('-'):
++                    sign = "-"
++                    t = t[1:]
++                else:
++                    sign = "+"
+             if precedence(term) < PREC:
+                 l.extend([sign, "(%s)" % t])
+             else:

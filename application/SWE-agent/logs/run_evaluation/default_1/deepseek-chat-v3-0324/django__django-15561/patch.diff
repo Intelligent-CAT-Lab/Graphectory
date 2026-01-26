@@ -1,0 +1,14 @@
+diff --git a/django/db/backends/base/schema.py b/django/db/backends/base/schema.py
+index 9d6952df21..4f6e9c34b2 100644
+--- a/django/db/backends/base/schema.py
++++ b/django/db/backends/base/schema.py
+@@ -1390,6 +1390,9 @@ class BaseDatabaseSchemaEditor:
+             "validators",
+             "verbose_name",
+         ]
++        # For SQLite, exclude 'choices' as it doesn't affect the schema.
++        if self.connection.vendor == "sqlite":
++            non_database_attrs.append("choices")
+         for attr in non_database_attrs:
+             old_kwargs.pop(attr, None)
+             new_kwargs.pop(attr, None)

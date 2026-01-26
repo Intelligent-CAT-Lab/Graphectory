@@ -1,0 +1,26 @@
+diff --git a/src/_pytest/mark/expression.py b/src/_pytest/mark/expression.py
+index 04c73411a..32e60d6ff 100644
+--- a/src/_pytest/mark/expression.py
++++ b/src/_pytest/mark/expression.py
+@@ -129,7 +129,7 @@ class Scanner:
+ 
+ def expression(s: Scanner) -> ast.Expression:
+     if s.accept(TokenType.EOF):
+-        ret = ast.NameConstant(False)  # type: ast.expr
++        ret = ast.Constant(False)  # type: ast.expr
+     else:
+         ret = expr(s)
+         s.accept(TokenType.EOF, reject=True)
+@@ -161,8 +161,10 @@ def not_expr(s: Scanner) -> ast.expr:
+         return ret
+     ident = s.accept(TokenType.IDENT)
+     if ident:
+-        return ast.Name(ident.value, ast.Load())
+-    s.reject((TokenType.NOT, TokenType.LPAREN, TokenType.IDENT))
++        value = ident.value
++        if value in ("True", "False", "None"):
++            return ast.Constant(value == "True")
++        return ast.Name(value, ast.Load())
+ 
+ 
+ class MatcherAdapter(Mapping[str, bool]):

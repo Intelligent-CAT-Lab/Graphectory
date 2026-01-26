@@ -1,0 +1,115 @@
+diff --git a/django/db/models/expressions.py b/django/db/models/expressions.py
+index 822968ef56..62c72948b7 100644
+--- a/django/db/models/expressions.py
++++ b/django/db/models/expressions.py
+@@ -1258,7 +1258,7 @@ class When(Expression):
+                 "When() supports a Q object, a boolean expression, or lookups "
+                 "as a condition."
+             )
+-        if isinstance(condition, Q) and not condition:
++        if isinstance(condition, Q) and not condition and not condition.negated:
+             raise ValueError("An empty Q() can't be used as a When() condition.")
+         super().__init__(output_field=None)
+         self.condition = condition
+@@ -1298,13 +1298,19 @@ class When(Expression):
+         connection.ops.check_expression_support(self)
+         template_params = extra_context
+         sql_params = []
+-        condition_sql, condition_params = compiler.compile(self.condition)
+-        template_params["condition"] = condition_sql
+-        sql_params.extend(condition_params)
+-        result_sql, result_params = compiler.compile(self.result)
+-        template_params["result"] = result_sql
+-        sql_params.extend(result_params)
+-        template = template or self.template
++        # If the condition is a negated empty Q, we should skip the WHEN clause
++        if isinstance(self.condition, Q) and not self.condition and self.condition.negated:
++            # For a negated empty Q, we want to match all rows
++            template = "1=1"
++            template_params = {}
++        else:
++            condition_sql, condition_params = compiler.compile(self.condition)
++            template_params["condition"] = condition_sql
++            sql_params.extend(condition_params)
++            result_sql, result_params = compiler.compile(self.result)
++            template_params["result"] = result_sql
++            sql_params.extend(result_params)
++            template = template or self.template
+         return template % template_params, sql_params
+ 
+     def get_group_by_cols(self, alias=None):
+@@ -1386,6 +1392,11 @@ class Case(SQLiteNumericMixin, Expression):
+         for case in self.cases:
+             try:
+                 case_sql, case_params = compiler.compile(case)
++                # Skip empty negated Q conditions
++                if isinstance(case.condition, Q) and not case.condition and case.condition.negated:
++                    # For a negated empty Q, we want to match all rows
++                    case_sql = "1=1"
++                    case_params = []
+             except EmptyResultSet:
+                 continue
+             case_parts.append(case_sql)
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..6bf485cfe0
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,56 @@
++import os
++import django
++from django.conf import settings
++from django.db import models, connection
++from django.db.models import Case, When, Q, Value, BooleanField
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        }
++    )
++    django.setup()
++
++from django.core.management import call_command
++
++# Create tables
++call_command('migrate', verbosity=0)
++
++class User(models.Model):
++    name = models.CharField(max_length=100)
++    age = models.IntegerField()
++    
++    class Meta:
++        app_label = 'reproduce'
++
++# Create the User table
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(User)
++
++# Create some test data
++User.objects.bulk_create([
++    User(name="John", age=25),
++    User(name="Jane", age=30),
++    User(name="Bob", age=35),
++])
++
++# Try the problematic query
++query = User.objects.annotate(
++    _a=Case(
++        When(~Q(pk__in=[]), then=Value(True)),
++        default=Value(False),
++        output_field=BooleanField(),
++    )
++).order_by("-_a").values("pk")
++
++print("Query:", query.query)
++print("SQL:", query.query.sql_with_params())
++print("Results:", list(query))
+\ No newline at end of file

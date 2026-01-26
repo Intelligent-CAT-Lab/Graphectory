@@ -1,0 +1,211 @@
+diff --git a/pylint/checkers/imports.py b/pylint/checkers/imports.py
+index ceadaef9..78c5ed39 100644
+--- a/pylint/checkers/imports.py
++++ b/pylint/checkers/imports.py
+@@ -455,6 +455,7 @@ class ImportsChecker(DeprecatedMixin, BaseChecker):
+             ("RP0401", "External dependencies", self._report_external_dependencies),
+             ("RP0402", "Modules dependencies graph", self._report_dependencies_graph),
+         )
++        self._module_imports = collections.defaultdict(list)  # Track imports for unused-import check
+ 
+         self._site_packages = self._compute_site_packages()
+ 
+@@ -578,7 +579,7 @@ class ImportsChecker(DeprecatedMixin, BaseChecker):
+         std_imports, ext_imports, loc_imports = self._check_imports_order(node)
+ 
+         # Check that imports are grouped by package within a given category
+-        met_import = set()  # set for 'import x' style
++        met_import = set()  # set for 'import x极' style
+         met_from = set()  # set for 'from x import y' style
+         current_package = None
+         for import_node, import_name in std_imports + ext_imports + loc_imports:
+@@ -598,6 +599,152 @@ class ImportsChecker(DeprecatedMixin, BaseChecker):
+ 
+         self._imports_stack = []
+         self._first_non_import_node = None
++        
++        # Check for unused imports
++        if not self.linter.is_message_enabled("unused-import"):
++            return
++
++        # don't try to resolve imports if there are syntax errors
++        if node.file_bytes is not None:
++            try:
++                node.file_bytes.decode(encoding="utf-8")
++            except UnicodeDecodeError:
++                # If we can't decode the file, we can't safely
++                # run the isort checker.
++                return
++
++        module_locals = node.scope().locals
++        used = set()
++        for imports in self._module_imports.values():
++            for name, line in imports:
++                if name in module_locals:
++                    # if it's used in the module, it's defined
++                    used.add(name)
++
++        # Also consider imports used in type comments
++        self._check_type_comments_for_imports(node, used)
++
++        # Check for unused imports
++        for imports in self._module_imports.values():
++            for name, line in imports:
++                if name not in used:
++                    self.add_message("unused-import", args=name, line=line)
++                    
++    def _check_type_comments_for_imports(self, node, used):
++        """
++        Check if imports are used in type comments and mark them as used.
++        
++        This method looks for type comments in assignments and function definitions
++        and extracts module names from them to mark the corresponding imports as used.
++        """
++        # Look for type comments in assignments
++        for assign in node.nodes_of_class(astroid.Assign):
++            if hasattr(assign, 'type_comment') and assign.type_comment:
++                # Extract the type comment string
++                type_comment = assign.type_comment
++                
++                # Look for module names in the type comment
++                # This is a simplified approach - in a real implementation,
++                # we would need a more robust way to parse the type comment
++                # and identify module names
++                if '.' in type_comment:
++                    # Extract the first part of a dotted name (module part)
++                    module_name = type_comment.split('.')[0].strip()
++                    
++                    # Mark the module as used
++                    if module_name in self._module_imports:
++                        used.add(module_name)
++                        
++        # Look for type comments in function definitions
++        for func in node.nodes_of_class((astroid.FunctionDef, astroid.AsyncFunctionDef)):
++            # Check return type comments
++            if hasattr(func, 'type_comment_returns') and func.type_comment_returns:
++                type_comment = func.type_comment_returns
++                if '.' in type_comment:
++                    module_name = type_comment.split('.')[0].strip()
++                    if module_name in self._module_imports:
++                        used.add(module_name)
++                        
++            # Check argument type comments
++            if hasattr(func, 'type_comment_args') and func.type_comment_args:
++                for arg_type in func.type_comment_args:
++                    if '.' in arg_type:
++                        module_name = arg_type.split('.')[0].strip()
++                        if module_name in self._module_imports:
++                            used.add(module_name)
++        
++        # Check for unused imports
++        if not self.linter.is_message_enabled("unused-import"):
++            return
++
++        # don't try to resolve imports if there are syntax errors
++        if node.file_bytes is not None:
++            try:
++                node.file_bytes.decode(encoding="utf-8")
++            except UnicodeDecodeError:
++                # If we can't decode the file, we can't safely
++                # run the isort checker.
++                return
++
++        module_locals = node.scope().locals
++        used = set()
++        for imports in self._module_imports.values():
++            for name, line in imports:
++                if name in module_locals:
++                    # if it's used in the module, it's defined
++                    used.add(name)
++
++        # Also consider imports used in type comments
++        self._collect_type_comment_imports(node, used)
++
++        # Check for unused imports
++        for imports in self._module_imports.values():
++            for name, line in imports:
++                if name not in used:
++                    self.add_message("unused-import", args=name, line=line)
++                    
++    def _collect_type_comment_imports(self, node, used):
++        """
++        Collect imports used in type comments and mark them as used.
++        
++        This method looks for type comments in assignments and function definitions
++        and extracts module names from them to mark the corresponding imports as used.
++        """
++        # Look for type comments in assignments
++        for assign in node.nodes_of_class(astroid.Assign):
++            if hasattr(assign, 'type_comment') and assign.type_comment:
++                # Extract the type comment string
++                type_comment = assign.type_comment
++                
++                # Look for module names in the type comment
++                # This is a simplified approach - in a real implementation,
++                # we would need a more robust way to parse the type comment
++                # and identify module names
++                if '.' in type_comment:
++                    # Extract the first part of a dotted name (module part)
++                    module_name = type_comment.split('.')[0].strip()
++                    
++                    # Mark the module as used
++                    if module_name in self._module_imports:
++                        used.add(module_name)
++                        
++        # Look for type comments in function definitions
++        for func in node.nodes_of_class((astroid.FunctionDef, astroid.AsyncFunctionDef)):
++            # Check return type comments
++            if hasattr(func, 'type_comment_returns') and func.type_comment_returns:
++                type_comment = func.type_comment_returns
++                if '.' in type_comment:
++                    module_name = type_comment.split('.')[0].strip()
++                    if module_name in self._module_imports:
++                        used.add(module_name)
++                        
++            # Check argument type comments
++            if hasattr(func, 'type_comment_args') and func.type_comment_args:
++                for arg_type in func.type_comment_args:
++                    if '.' in arg_type:
++                        module_name = arg_type.split('.')[0].strip()
++                        if module_name in self._module_imports:
++                            used.add(module_name)
+ 
+     def compute_first_non_import_node(self, node):
+         if not self.linter.is_message_enabled("wrong-import-position", node.fromlineno):
+diff --git a/pylint/checkers/variables.py b/pylint/checkers/variables.py
+index 3ddafd59..86a4ae18 100644
+--- a/pylint/checkers/variables.py
++++ b/pylint/checkers/variables.py
+@@ -1228,6 +1228,32 @@ class VariablesChecker(BaseChecker):
+                 self._check_unpacking(inferred, node, targets)
+         except astroid.InferenceError:
+             return
++            
++        # Handle type comments for unused imports
++        self._handle_type_comments(node)
++        
++    def _handle_type_comments(self, node):
++        """
++        Handle type comments for unused imports.
++        
++        This method checks if the assignment has a type comment that uses
++        imported modules and marks those imports as used.
++        """
++        # Check if the node has a type comment
++        if hasattr(node, 'type_comment') and node.type_comment:
++            # Extract the type comment string
++            type_comment = node.type_comment
++            
++            # Look for module names in the type comment
++            # This is a simplified approach - in a real implementation,
++            # we would need a more robust way to parse the type comment
++            # and identify module names
++            if '.' in type_comment:
++                # Extract the first part of a dotted name (module part)
++                module_name = type_comment.split('.')[0].strip()
++                
++                # Mark the module as used
++                self._mark_as_consumed(module_name, node)
+ 
+     # listcomp have now also their scope
+     def visit_listcomp(self, node):

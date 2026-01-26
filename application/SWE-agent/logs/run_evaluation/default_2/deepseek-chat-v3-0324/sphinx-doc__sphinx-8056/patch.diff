@@ -1,0 +1,61 @@
+diff --git a/doc/conf.py b/doc/conf.py
+index f62e02a34..0847a35ca 100644
+--- a/doc/conf.py
++++ b/doc/conf.py
+@@ -13,6 +13,22 @@ extensions = ['sphinx.ext.autodoc', 'sphinx.ext.doctest', 'sphinx.ext.todo',
+ master_doc = 'contents'
+ templates_path = ['_templates']
+ exclude_patterns = ['_build']
++import os
++import sys
++sys.path.insert(0, os.path.abspath('../'))
++
++# Add example.py to the source files
++napoleon_include_special_with_doc = True
++napoleon_include_private_with_doc = True
++napoleon_include_init_with_doc = True
++napoleon_use_param = True
++napoleon_use_rtype = True
++
++# Add example.py to the source files
++rst_prolog = """
++.. include:: /../example.py
++   :parser: python
++"""
+ 
+ project = 'Sphinx'
+ copyright = '2007-2020, Georg Brandl and the Sphinx team'
+diff --git a/doc/example.rst b/doc/example.rst
+new file mode 100644
+index 000000000..7d399f637
+--- /dev/null
++++ b/doc/example.rst
+@@ -0,0 +1,4 @@
++.. automodule:: example
++   :members:
++   :undoc-members:
++   :show-inheritance:
+\ No newline at end of file
+diff --git a/sphinx/ext/napoleon/docstring.py b/sphinx/ext/napoleon/docstring.py
+index b3daa06f1..19ea14861 100644
+--- a/sphinx/ext/napoleon/docstring.py
++++ b/sphinx/ext/napoleon/docstring.py
+@@ -256,6 +256,18 @@ class GoogleDocstring:
+             if match:
+                 _name = match.group(1)
+                 _type = match.group(2)
++            else:
++                # Handle numpydoc style: x1, x2 : array_like, optional
++                if "," in before and ":" not in before:
++                    # Split multiple parameter names
++                    param_names = [name.strip() for name in before.split(",")]
++                    _name = ", ".join(param_names)
++                    # Extract type and optional from after
++                    parts = [part.strip() for part in after.split(",")]
++                    if parts:
++                        _type = parts[0]
++                        if "optional" in parts:
++                            _type += ", optional"
+ 
+         _name = self._escape_args_and_kwargs(_name)
+ 

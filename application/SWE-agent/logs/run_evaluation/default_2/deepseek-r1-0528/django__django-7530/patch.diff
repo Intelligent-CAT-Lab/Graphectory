@@ -1,0 +1,183 @@
+diff --git a/django/core/management/commands/makemigrations.py b/django/core/management/commands/makemigrations.py
+index 0b39536f5b..8725e1ee49 100644
+--- a/django/core/management/commands/makemigrations.py
++++ b/django/core/management/commands/makemigrations.py
+@@ -103,7 +103,7 @@ class Command(BaseCommand):
+             connection = connections[alias]
+             if (connection.settings_dict['ENGINE'] != 'django.db.backends.dummy' and any(
+                     # At least one model must be migrated to the database.
+-                    router.allow_migrate(connection.alias, app_label, model_name=model._meta.object_name)
++                    router.allow_migrate(connection.alias, model._meta.app_label, model_name=model._meta.object_name)
+                     for app_label in consistency_check_labels
+                     for model in apps.get_models(app_label)
+             )):
+diff --git a/final_fix.patch b/final_fix.patch
+new file mode 100644
+index 0000000000..9298bb9331
+--- /dev/null
++++ b/final_fix.patch
+@@ -0,0 +1,18 @@
++--- a/django/core/management/commands/makemigrations.py
+++++ b/django/core/management/commands/makemigrations.py
++@@ -102,12 +102,12 @@
++         for alias in sorted(aliases_to_check):
++             connection = connections[alias]
++             if (connection.settings_dict['ENGINE'] != 'django.db.backends.dummy' and any(
++-                    # At least one model must be migrated to the database.
++-                    router.allow_migrate(connection.alias, app_label, model_name=model._meta.object_name)
++-                    for app_label in consistency_check_labels
++-                    for model in apps.get_models(app_label)
++-            )):
+++                # At least one model must be migrated to the database.
+++                router.allow_migrate(connection.alias, model._meta.app_label, model_name=model._meta.object_name)
+++                for model in apps.get_models()
+++            ):
++                 loader.check_consistent_history(connection)
++ 
++         # Before anything else, see if there's conflicting apps and drop out
+diff --git a/fix.patch b/fix.patch
+new file mode 100644
+index 0000000000..9298bb9331
+--- /dev/null
++++ b/fix.patch
+@@ -0,0 +1,18 @@
++--- a/django/core/management/commands/makemigrations.py
+++++ b/django/core/management/commands/makemigrations.py
++@@ -102,12 +102,12 @@
++         for alias in sorted(aliases_to_check):
++             connection = connections[alias]
++             if (connection.settings_dict['ENGINE'] != 'django.db.backends.dummy' and any(
++-                    # At least one model must be migrated to the database.
++-                    router.allow_migrate(connection.alias, app_label, model_name=model._meta.object_name)
++-                    for app_label in consistency_check_labels
++-                    for model in apps.get_models(app_label)
++-            )):
+++                # At least one model must be migrated to the database.
+++                router.allow_migrate(connection.alias, model._meta.app_label, model_name=model._meta.object_name)
+++                for model in apps.get_models()
+++            ):
++                 loader.check_consistent_history(connection)
++ 
++         # Before anything else, see if there's conflicting apps and drop out
+diff --git a/fix_makemigrations.patch b/fix_makemigrations.patch
+new file mode 100644
+index 0000000000..9904f65514
+--- /dev/null
++++ b/fix_makemigrations.patch
+@@ -0,0 +1,19 @@
++--- /testbed/django/core/management/commands/makemigrations.py
+++++ /testbed/django/core/management/commands/makemigrations.py
++@@ -102,12 +102,12 @@
++         for alias in sorted(aliases_to_check):
++             connection = connections[alias]
++             if (connection.settings_dict['ENGINE'] != 'django.db.backends.dummy' and any(
++-                    # At least one model must be migrated to the database.
++-                    router.allow_migrate(connection.alias, app_label, model_name=model._meta.object_name)
++-                    for app_label in consistency_check_labels
++-                    for model in apps.get_models(app_label)
++-            )):
+++                # At least one model must be migrated to the database.
+++                router.allow_migrate(connection.alias, app_label, model_name=model._meta.object_name)
+++                for app_label in consistency_check_labels
+++                for model in apps.get_models(app_label)
+++            ):
++                 loader.check_consistent_history(connection)
++ 
++         # Before anything else, see if there's conflicting apps and drop out
+diff --git a/test_fix.py b/test_fix.py
+new file mode 100644
+index 0000000000..bbb1e68901
+--- /dev/null
++++ b/test_fix.py
+@@ -0,0 +1,74 @@
++from django.apps import apps
++from django.db import connections
++from django.db.migrations.loader import MigrationLoader
++
++# Mock minimal Django setup
++class Settings:
++    DATABASE_ROUTERS = []
++
++settings = Settings()
++connections = {
++    'default': {
++        'settings_dict': {'ENGINE': 'django.db.backends.sqlite3'}
++    }
++}
++
++# Mock apps registry
++class AppConfig:
++    def __init__(self, label):
++        self.label = label
++
++class Model:
++    class _meta:
++        def __init__(self, app_label, object_name):
++            self.app_label = app_label
++            self.object_name = object_name
++
++class Apps:
++    def get_app_configs(self):
++        return [AppConfig('app1'), AppConfig('app2')]
++    
++    def get_models(self, app_label=None):
++        if app_label == 'app1':
++            return [Model('app1', 'ModelA'), Model('app1', 'ModelB')]
++        elif app_label == 'app2':
++            return [Model('app2', 'ModelC')]
++        return [Model('app1', 'ModelA'), Model('app1', 'ModelB'), Model('app2', 'ModelC')]
++
++apps = Apps()
++
++# Test Router
++class TestRouter:
++    def __init__(self):
++        self.calls = []
++    
++    def allow_migrate(self, db, app_label, **hints):
++        self.calls.append((app_label, hints.get('model_name')))
++        return True
++
++# Test the fix
++router = TestRouter()
++loader = MigrationLoader(None, ignore_no_migrations=True)
++consistency_check_labels = set(config.label for config in apps.get_app_configs())
++aliases_to_check = ['default']
++
++for alias in sorted(aliases_to_check):
++    connection = connections[alias]
++    if (connection['settings_dict']['ENGINE'] != 'django.db.backends.dummy' and any(
++        router.allow_migrate(connection.alias, model._meta.app_label, model_name=model._meta.object_name)
++        for model in apps.get_models()
++    )):
++        pass
++
++# Verify calls
++print("Router calls:")
++for app_label, model_name in router.calls:
++    print("- %s: %s" % (app_label, model_name))
++
++# Check that each call used the model's actual app_label
++for app_label, model_name in router.calls:
++    model = next(m for m in apps.get_models() if m._meta.object_name == model_name)
++    assert app_label == model._meta.app_label, \
++        "%s called with app %s but belongs to %s" % (model_name, app_label, model._meta.app_label)
++
++print("Test passed! All calls used the model's actual app_label.")
+diff --git a/test_settings.py b/test_settings.py
+new file mode 100644
+index 0000000000..070f3fbec0
+--- /dev/null
++++ b/test_settings.py
+@@ -0,0 +1,11 @@
++SECRET_KEY = 'test'
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
++    }
++}
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'django.contrib.auth',
++]

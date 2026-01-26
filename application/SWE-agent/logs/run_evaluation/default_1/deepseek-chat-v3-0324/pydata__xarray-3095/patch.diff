@@ -1,0 +1,69 @@
+diff --git a/xarray/core/dataset.py b/xarray/core/dataset.py
+index b00dad96..79d79754 100644
+--- a/xarray/core/dataset.py
++++ b/xarray/core/dataset.py
+@@ -933,8 +933,20 @@ class Dataset(Mapping, ImplementsDatasetReduce, DataWithCoords):
+         pandas.DataFrame.copy
+         """  # noqa
+         if data is None:
+-            variables = OrderedDict((k, v.copy(deep=deep))
+-                                    for k, v in self._variables.items())
++            variables = OrderedDict()
++            for k, v in self._variables.items():
++                # Special handling for IndexVariables to preserve Unicode dtypes
++                if isinstance(v, IndexVariable) and v.dtype.kind == 'U':
++                    original_dtype = v.dtype
++                    copied_var = v.copy(deep=deep)
++                    if copied_var.dtype != original_dtype:
++                        copied_var = IndexVariable(copied_var.dims, 
++                                                 copied_var.data.astype(original_dtype),
++                                                 copied_var.attrs,
++                                                 copied_var.encoding)
++                    variables[k] = copied_var
++                else:
++                    variables[k] = v.copy(deep=deep)
+         elif not utils.is_dict_like(data):
+             raise ValueError('Data must be dict-like')
+         else:
+@@ -952,8 +964,23 @@ class Dataset(Mapping, ImplementsDatasetReduce, DataWithCoords):
+                     'Data must contain all variables in original '
+                     'dataset. Data is missing {}'
+                     .format(keys_missing_from_data))
+-            variables = OrderedDict((k, v.copy(deep=deep, data=data.get(k)))
+-                                    for k, v in self._variables.items())
++            variables = OrderedDict()
++            for k, v in self._variables.items():
++                if k in data:
++                    variables[k] = v.copy(deep=deep, data=data.get(k))
++                else:
++                    # Special handling for IndexVariables to preserve Unicode dtypes
++                    if isinstance(v, IndexVariable) and v.dtype.kind == 'U':
++                        original_dtype = v.dtype
++                        copied_var = v.copy(deep=deep)
++                        if copied_var.dtype != original_dtype:
++                            copied_var = IndexVariable(copied_var.dims, 
++                                                     copied_var.data.astype(original_dtype),
++                                                     copied_var.attrs,
++                                                     copied_var.encoding)
++                        variables[k] = copied_var
++                    else:
++                        variables[k] = v.copy(deep=deep)
+ 
+         attrs = copy.deepcopy(self._attrs) if deep else copy.copy(self._attrs)
+ 
+diff --git a/xarray/core/variable.py b/xarray/core/variable.py
+index 379be8f5..af77e0ae 100644
+--- a/xarray/core/variable.py
++++ b/xarray/core/variable.py
+@@ -1947,7 +1947,11 @@ class IndexVariable(Variable):
+                 # point, which doesn't have a copy method, so make a deep copy
+                 # of the underlying `pandas.MultiIndex` and create a new
+                 # `PandasIndexAdapter` instance with it.
++                original_dtype = self._data.array.dtype
+                 data = PandasIndexAdapter(self._data.array.copy(deep=True))
++                # Ensure the dtype is preserved, especially for Unicode strings
++                if original_dtype.kind == 'U':
++                    data.array = data.array.astype(original_dtype)
+             else:
+                 data = self._data
+         else:

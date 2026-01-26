@@ -1,0 +1,45 @@
+diff --git a/sympy/matrices/expressions/blockmatrix.py b/sympy/matrices/expressions/blockmatrix.py
+index 95302a05ca..65cf05767b 100644
+--- a/sympy/matrices/expressions/blockmatrix.py
++++ b/sympy/matrices/expressions/blockmatrix.py
+@@ -148,11 +148,13 @@ def blocks(self):
+ 
+     @property
+     def rowblocksizes(self):
+-        return [self.blocks[i, 0].rows for i in range(self.blockshape[0])]
++        return [self.blocks[i, 0].rows if hasattr(self.blocks[i, 0], 'rows') else 0
++                for i in range(self.blockshape[0])]
+ 
+     @property
+     def colblocksizes(self):
+-        return [self.blocks[0, i].cols for i in range(self.blockshape[1])]
++        return [self.blocks[0, i].cols if hasattr(self.blocks[0, i], 'cols') else 0
++                for i in range(self.blockshape[1])]
+ 
+     def structurally_equal(self, other):
+         return (isinstance(other, BlockMatrix)
+@@ -164,8 +166,22 @@ def structurally_equal(self, other):
+     def _blockmul(self, other):
+         if (isinstance(other, BlockMatrix) and
+                 self.colblocksizes == other.rowblocksizes):
+-            return BlockMatrix(self.blocks*other.blocks)
+-
++            # Create mutable matrices from the immutable ones
++            from sympy import ZeroMatrix, ImmutableMatrix, Matrix
++            mutable_self = Matrix(self.blocks)
++            mutable_other = Matrix(other.blocks)
++            result_blocks = mutable_self * mutable_other
++            # Convert Zero objects back to ZeroMatrix
++            for i in range(result_blocks.shape[0]):
++                for j in range(result_blocks.shape[1]):
++                    if result_blocks[i, j] == 0:
++                        result_blocks[i, j] = ZeroMatrix(
++                            self.blocks[i, 0].rows, 
++                            other.blocks[0, j].cols
++                        )
++            # Convert back to immutable matrix
++            result_blocks = ImmutableMatrix(result_blocks)
++            return BlockMatrix(result_blocks)
+         return self * other
+ 
+     def _blockadd(self, other):

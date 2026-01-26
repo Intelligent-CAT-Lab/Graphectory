@@ -1,0 +1,777 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..2c120abfb4
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,770 @@
++import os
++import django
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++            '__main__',
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        }
++    )
++    django.setup()
++
++from django.db import models, connection
++from django.db.models import Q, Count
++from django.db.utils import ConnectionHandler
++
++# Create tables
++cursor = connection.cursor()
++cursor.execute('''
++CREATE TABLE __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++class PropertyGroup(models.Model):
++    id = models.AutoField(primary_key=True)
++    name = models.CharField(max_length=100)
++    created = models.DateTimeField(auto_now_add=True)
++    updated = models.DateTimeField(auto_now=True)
++    create_by = models.CharField(max_length=100)
++    update_by = models.CharField(max_length=100)
++    tenant_objs = models.TextField()  # Simplified for SQLite
++
++    class Meta:
++        db_table = '__main___propertygroup'
++        app_label = '__main__'
++        managed = False  # Use existing tables
++
++class ManagementAgent(models.Model):
++    id = models.AutoField(primary_key=True)
++    name = models.CharField(max_length=100)
++    property_groups = models.ManyToManyField(PropertyGroup, through='ManagementAgentPropertyGroup')
++
++    class Meta:
++        db_table = '__main___managementagent'
++        app_label = '__main__'
++        managed = False
++
++class ManagementAgentPropertyGroup(models.Model):
++    id = models.AutoField(primary_key=True)
++    management_agent = models.ForeignKey(ManagementAgent, on_delete=models.CASCADE)
++    property_group = models.ForeignKey(PropertyGroup, on_delete=models.CASCADE)
++
++    class Meta:
++        db_table = '__main___managementagentpropertygroup'
++        app_label = '__main__'
++        managed = False
++
++class ManagerTicketRatingCumulativeMovingAverage(models.Model):
++    id = models.AutoField(primary_key=True)
++    agent = models.ForeignKey(ManagementAgent, on_delete=models.CASCADE)
++    created = models.DateTimeField(auto_now_add=True)
++    updated = models.DateTimeField(auto_now=True)
++    create_by = models.CharField(max_length=100)
++    update_by = models.CharField(max_length=100)
++    tenant_objs = models.TextField()  # Simplified for SQLite
++    date = models.DateField()
++    average = models.FloatField()
++    data_points = models.IntegerField()
++
++    class Meta:
++        db_table = '__main___managerticketratingcumulativemovingaverage'
++        app_label = '__main__'
++        managed = False
++
++# Create tables if they don't exist
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++# Create the models with the correct app_label
++from django.apps import apps
++from django.core.management.color import no_style
++
++style = no_style()
++connection.schema_editor(style).execute("""
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_management_agent_id ON __main___managementagentpropertygroup (management_agent_id);
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_property_group_id ON __main___managementagentpropertygroup (property_group_id);
++CREATE INDEX IF NOT EXISTS __main___managerticketratingcumulativemovingaverage_agent_id ON __main___managerticketratingcumulativemovingaverage (agent_id);
++""")
++
++# Create test data
++agent = ManagementAgent.objects.create(name="Test Agent")
++pg1 = PropertyGroup.objects.create(name="PG1")
++pg2 = PropertyGroup.objects.create(name="PG2")
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg1)
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg2)
++ticket = ManagerTicketRatingCumulativeMovingAverage.objects.create(
++    agent=agent,
++    date="2023-01-01",
++    average=4.5,
++    data_points=10
++)
++
++# This works
++property_groups = PropertyGroup.objects.filter(name__in=["PG1", "PG2"])
++qs = ManagerTicketRatingCumulativeMovingAverage.objects.annotate(
++    property_groups_count=Count("agent__property_groups")
++)
++results1 = qs.filter(
++    Q(agent__property_groups__id__in=property_groups.values_list("id", flat=True)) |
++    Q(agent__property_groups_count=0)
++).distinct()
++print("Working query results:", results1.count())
++
++# This fails
++try:
++    results2 = qs.filter(
++        Q(agent__property_groups__in=property_groups) |
++        Q(agent__property_groups_count=0)
++    ).distinct()
++    print("Failing query results:", results2.count())
++except Exception as e:
++    print("Error:", str(e))
++
++# Create tables if they don't exist
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++# Create the models with the correct app_label
++from django.apps import apps
++from django.core.management.color import no_style
++
++style = no_style()
++connection.schema_editor(style).execute("""
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_management_agent_id ON __main___managementagentpropertygroup (management_agent_id);
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_property_group_id ON __main___managementagentpropertygroup (property_group_id);
++CREATE INDEX IF NOT EXISTS __main___managerticketratingcumulativemovingaverage_agent_id ON __main___managerticketratingcumulativemovingaverage (agent_id);
++""")
++
++# Create test data
++agent = ManagementAgent.objects.create(name="Test Agent")
++pg1 = PropertyGroup.objects.create(name="PG1")
++pg2 = PropertyGroup.objects.create(name="PG2")
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg1)
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg2)
++ticket = ManagerTicketRatingCumulativeMovingAverage.objects.create(
++    agent=agent,
++    date="2023-01-01",
++    average=4.5,
++    data_points=10
++)
++
++# This works
++property_groups = PropertyGroup.objects.filter(name__in=["PG1", "PG2"])
++qs = ManagerTicketRatingCumulativeMovingAverage.objects.annotate(
++    property_groups_count=Count("agent__property_groups")
++)
++results1 = qs.filter(
++    Q(agent__property_groups__id__in=property_groups.values_list("id", flat=True)) |
++    Q(agent__property_groups_count=0)
++).distinct()
++print("Working query results:", results1.count())
++
++# This fails
++try:
++    results2 = qs.filter(
++        Q(agent__property_groups__in=property_groups) |
++        Q(agent__property_groups_count=0)
++    ).distinct()
++    print("Failing query results:", results2.count())
++except Exception as e:
++    print("Error:", str(e))
++
++# Create tables if they don't exist
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++# Create the models with the correct app_label
++from django.apps import apps
++from django.core.management.color import no_style
++
++style = no_style()
++connection.schema_editor(style).execute("""
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_management_agent_id ON __main___managementagentpropertygroup (management_agent_id);
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_property_group_id ON __main___managementagentpropertygroup (property_group_id);
++CREATE INDEX IF NOT EXISTS __main___managerticketratingcumulativemovingaverage_agent_id ON __main___managerticketratingcumulativemovingaverage (agent_id);
++""")
++
++# Create test data
++agent = ManagementAgent.objects.create(name="Test Agent")
++pg1 = PropertyGroup.objects.create(name="PG1")
++pg2 = PropertyGroup.objects.create(name="PG2")
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg1)
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg2)
++ticket = ManagerTicketRatingCumulativeMovingAverage.objects.create(
++    agent=agent,
++    date="2023-01-01",
++    average=4.5,
++    data_points=10
++)
++
++# This works
++property_groups = PropertyGroup.objects.filter(name__in=["PG1", "PG2"])
++qs = ManagerTicketRatingCumulativeMovingAverage.objects.annotate(
++    property_groups_count=Count("agent__property_groups")
++)
++results1 = qs.filter(
++    Q(agent__property_groups__id__in=property_groups.values_list("id", flat=True)) |
++    Q(agent__property_groups_count=0)
++).distinct()
++print("Working query results:", results1.count())
++
++# This fails
++try:
++    results2 = qs.filter(
++        Q(agent__property_groups__in=property_groups) |
++        Q(agent__property_groups_count=0)
++    ).distinct()
++    print("Failing query results:", results2.count())
++except Exception as e:
++    print("Error:", str(e))
++
++# Create tables if they don't exist
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++# Create the models with the correct app_label
++from django.apps import apps
++from django.core.management.color import no_style
++
++style = no_style()
++connection.schema_editor(style).execute("""
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_management_agent_id ON __main___managementagentpropertygroup (management_agent_id);
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_property_group_id ON __main___managementagentpropertygroup (property_group_id);
++CREATE INDEX IF NOT EXISTS __main___managerticketratingcumulativemovingaverage_agent_id ON __main___managerticketratingcumulativemovingaverage (agent_id);
++""")
++
++# Create test data
++agent = ManagementAgent.objects.create(name="Test Agent")
++pg1 = PropertyGroup.objects.create(name="PG1")
++pg2 = PropertyGroup.objects.create(name="PG2")
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg1)
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg2)
++ticket = ManagerTicketRatingCumulativeMovingAverage.objects.create(
++    agent=agent,
++    date="2023-01-01",
++    average=4.5,
++    data_points=10
++)
++
++# This works
++property_groups = PropertyGroup.objects.filter(name__in=["PG1", "PG2"])
++qs = ManagerTicketRatingCumulativeMovingAverage.objects.annotate(
++    property_groups_count=Count("agent__property_groups")
++)
++results1 = qs.filter(
++    Q(agent__property_groups__id__in=property_groups.values_list("id", flat=True)) |
++    Q(agent__property_groups_count=0)
++).distinct()
++print("Working query results:", results1.count())
++
++# This fails
++try:
++    results2 = qs.filter(
++        Q(agent__property_groups__in=property_groups) |
++        Q(agent__property_groups_count=0)
++    ).distinct()
++    print("Failing query results:", results2.count())
++except Exception as e:
++    print("Error:", str(e))
++
++# Create tables if they don't exist
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++# Create the models with the correct app_label
++from django.apps import apps
++from django.core.management.color import no_style
++
++style = no_style()
++connection.schema_editor(style).execute("""
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_management_agent_id ON __main___managementagentpropertygroup (management_agent_id);
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_property_group_id ON __main___managementagentpropertygroup (property_group_id);
++CREATE INDEX IF NOT EXISTS __main___managerticketratingcumulativemovingaverage_agent_id ON __main___managerticketratingcumulativemovingaverage (agent_id);
++""")
++
++# Create test data
++agent = ManagementAgent.objects.create(name="Test Agent")
++pg1 = PropertyGroup.objects.create(name="PG1")
++pg2 = PropertyGroup.objects.create(name="PG2")
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg1)
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg2)
++ticket = ManagerTicketRatingCumulativeMovingAverage.objects.create(
++    agent=agent,
++    date="2023-01-01",
++    average=4.5,
++    data_points=10
++)
++
++# This works
++property_groups = PropertyGroup.objects.filter(name__in=["PG1", "PG2"])
++qs = ManagerTicketRatingCumulativeMovingAverage.objects.annotate(
++    property_groups_count=Count("agent__property_groups")
++)
++results1 = qs.filter(
++    Q(agent__property_groups__id__in=property_groups.values_list("id", flat=True)) |
++    Q(agent__property_groups_count=0)
++).distinct()
++print("Working query results:", results1.count())
++
++# This fails
++try:
++    results2 = qs.filter(
++        Q(agent__property_groups__in=property_groups) |
++        Q(agent__property_groups_count=0)
++    ).distinct()
++    print("Failing query results:", results2.count())
++except Exception as e:
++    print("Error:", str(e))
++
++# Create tables if they don't exist
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++# Create the models with the correct app_label
++from django.apps import apps
++from django.core.management.color import no_style
++
++style = no_style()
++connection.schema_editor(style).execute("""
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_management_agent_id ON __main___managementagentpropertygroup (management_agent_id);
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_property_group_id ON __main___managementagentpropertygroup (property_group_id);
++CREATE INDEX IF NOT EXISTS __main___managerticketratingcumulativemovingaverage_agent_id ON __main___managerticketratingcumulativemovingaverage (agent_id);
++""")
++
++# Create tables if they don't exist
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++# Create the models with the correct app_label
++from django.apps import apps
++from django.core.management.color import no_style
++
++style = no_style()
++connection.schema_editor(style).execute("""
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_management_agent_id ON __main___managementagentpropertygroup (management_agent_id);
++CREATE INDEX IF NOT EXISTS __main___managementagentpropertygroup_property_group_id ON __main___managementagentpropertygroup (property_group_id);
++CREATE INDEX IF NOT EXISTS __main___managerticketratingcumulativemovingaverage_agent_id ON __main___managerticketratingcumulativemovingaverage (agent_id);
++""")
++
++# Create tables if they don't exist
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___propertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100),
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagent (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    name VARCHAR(100)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managementagentpropertygroup (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    management_agent_id INTEGER,
++    property_group_id INTEGER,
++    FOREIGN KEY (management_agent_id) REFERENCES __main___managementagent(id),
++    FOREIGN KEY (property_group_id) REFERENCES __main___propertygroup(id)
++)
++''')
++
++cursor.execute('''
++CREATE TABLE IF NOT EXISTS __main___managerticketratingcumulativemovingaverage (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    agent_id INTEGER,
++    created DATETIME,
++    updated DATETIME,
++    create_by VARCHAR(100),
++    update_by VARCHAR(100),
++    tenant_objs TEXT,
++    date DATE,
++    average REAL,
++    data_points INTEGER,
++    FOREIGN KEY (agent_id) REFERENCES __main___managementagent(id)
++)
++''')
++
++# Create some test data
++agent = ManagementAgent.objects.create(name="Test Agent")
++pg1 = PropertyGroup.objects.create(name="PG1")
++pg2 = PropertyGroup.objects.create(name="PG2")
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg1)
++ManagementAgentPropertyGroup.objects.create(management_agent=agent, property_group=pg2)
++ticket = ManagerTicketRatingCumulativeMovingAverage.objects.create(
++    agent=agent,
++    date="2023-01-01",
++    average=4.5,
++    data_points=10
++)
++
++# This works
++property_groups = PropertyGroup.objects.filter(name__in=["PG1", "PG2"])
++qs = ManagerTicketRatingCumulativeMovingAverage.objects.annotate(
++    property_groups_count=Count("agent__property_groups")
++)
++results1 = qs.filter(
++    Q(agent__property_groups__id__in=property_groups.values_list("id", flat=True)) |
++    Q(agent__property_groups_count=0)
++).distinct()
++print("Working query results:", results1.count())
++
++# This fails
++try:
++    results2 = qs.filter(
++        Q(agent__property_groups__in=property_groups) |
++        Q(agent__property_groups_count=0)
++    ).distinct()
++    print("Failing query results:", results2.count())
++except Exception as e:
++    print("Error:", str(e))
+\ No newline at end of file

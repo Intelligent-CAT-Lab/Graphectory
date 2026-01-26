@@ -1,0 +1,25 @@
+diff --git a/django/db/models/sql/compiler.py b/django/db/models/sql/compiler.py
+index 7264929da8..249c86e0f4 100644
+--- a/django/db/models/sql/compiler.py
++++ b/django/db/models/sql/compiler.py
+@@ -694,7 +694,20 @@ class SQLCompiler:
+         # be used by local fields.
+         seen_models = {None: start_alias}
+ 
++        # Check if this is an __in lookup in a Q object OR operation
++        is_in_lookup = hasattr(self.query, 'where') and any(
++            isinstance(child, Q) and any(
++                lookup.endswith('__in') for lookup, _ in child.children
++                if isinstance(lookup, str)
++            )
++            for child in self.query.where.children
++        )
++
+         for field in opts.concrete_fields:
++            # For __in lookups in Q object OR operations, only select the primary key
++            if is_in_lookup and not field.primary_key:
++                continue
++                
+             model = field.model._meta.concrete_model
+             # A proxy model will have a different model and concrete_model. We
+             # will assign None if the field belongs to this model.

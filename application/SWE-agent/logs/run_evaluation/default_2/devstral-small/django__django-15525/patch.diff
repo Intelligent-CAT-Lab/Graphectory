@@ -1,0 +1,1198 @@
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000000..12886b23a3
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,71 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++from testapp.models import Author, Book
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue10.py b/reproduce_issue10.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue10.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue11.py b/reproduce_issue11.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue11.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue2.py b/reproduce_issue2.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue2.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue3.py b/reproduce_issue3.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue3.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue4.py b/reproduce_issue4.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue4.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue5.py b/reproduce_issue5.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue5.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue6.py b/reproduce_issue6.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue6.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue7.py b/reproduce_issue7.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue7.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue8.py b/reproduce_issue8.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue8.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/reproduce_issue9.py b/reproduce_issue9.py
+new file mode 100644
+index 0000000000..e8b666b600
+--- /dev/null
++++ b/reproduce_issue9.py
+@@ -0,0 +1,100 @@
++import os
++import json
++import django
++from django.conf import settings
++from django.core.management import call_command
++from django.db import connections, models
++from django.apps import apps
++from django.apps.config import AppConfig
++
++# Configure Django settings
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        },
++        'other': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=['testapp'],
++)
++
++# Create a simple app config
++class TestAppConfig(AppConfig):
++    name = 'testapp'
++    verbose_name = 'Test App'
++    label = 'testapp'
++    path = os.path.dirname(__file__)
++
++apps.app_configs['testapp'] = TestAppConfig('testapp', None)
++apps.ready = True
++django.setup()
++
++# Create models
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
++
++# Create tables
++connections['default'].creation.create_model(Author)
++connections['default'].creation.create_model(Book)
++connections['other'].creation.create_model(Author)
++connections['other'].creation.create_model(Book)
++
++# Create test data
++author_data = [
++    {"model": "testapp.author", "fields": {"name": "JR Tolkien"}}
++]
++book_data = [
++    {
++        "model": "testapp.book",
++        "fields": {
++            "title": "The Ring",
++            "author": ["JR Tolkien"]
++        }
++    }
++]
++
++# Load data into default database
++call_command('loaddata', *author_data, database='default', format='json')
++call_command('loaddata', *book_data, database='default', format='json')
++
++# Try to load data into other database
++try:
++    call_command('loaddata', *author_data, database='other', format='json')
++    call_command('loaddata', *book_data, database='other', format='json')
++except Exception as e:
++    print(f"Error: {str(e)}")
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..29cf00d496
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++from .models import Author, Book
+\ No newline at end of file
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..46c4f3b3ac
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,35 @@
++from django.db import models
++
++class AuthorManager(models.Manager):
++    def get_by_natural_key(self, name):
++        return self.get(name=name)
++
++class Author(models.Model):
++    name = models.CharField(max_length=255, unique=True)
++    objects = AuthorManager()
++
++    def natural_key(self):
++        return (self.name,)
++
++    def __str__(self):
++        return f"{self.id} {self.name}"
++
++class BookManager(models.Manager):
++    def get_by_natural_key(self, title, author):
++        return self.get(title=title, author__name=author)
++
++class Book(models.Model):
++    title = models.CharField(max_length=255)
++    author = models.ForeignKey(Author, models.DO_NOTHING, related_name="books")
++    objects = BookManager()
++
++    def natural_key(self):
++        return (self.title,) + self.author.natural_key()
++
++    natural_key.dependencies = ["testapp.Author"]
++
++    class Meta:
++        unique_together = [["title", "author"]]
++
++    def __str__(self):
++        return f"{self.id}: '{self.title}' by {self.author}"
+\ No newline at end of file

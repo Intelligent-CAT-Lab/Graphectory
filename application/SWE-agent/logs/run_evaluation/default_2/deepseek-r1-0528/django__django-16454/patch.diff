@@ -1,0 +1,37 @@
+diff --git a/django/core/management/base.py b/django/core/management/base.py
+index abc6f79a15..ca436b09ef 100644
+--- a/django/core/management/base.py
++++ b/django/core/management/base.py
+@@ -70,6 +70,32 @@ class CommandParser(ArgumentParser):
+             super().error(message)
+         else:
+             raise CommandError("Error: %s" % message)
++            
++    def add_subparsers(self, **kwargs):
++        # Ensure subparsers are created as CommandParser instances
++        # so they inherit the custom error handling
++        kwargs.setdefault("parser_class", type(self))
++        
++        # Pass our custom parameters to subparsers
++        subparsers_action = super().add_subparsers(**kwargs)
++        orig_parser_class = subparsers_action._parser_class
++        
++        # Capture parent's attributes for closure
++        parent_called_from_command_line = self.called_from_command_line
++        parent_missing_args_message = self.missing_args_message
++        
++        # Create a wrapper that passes our custom parameters
++        class SubparserWrapper(orig_parser_class):
++            def __init__(self, *args, **kwargs):
++                # Pass our custom parameters to subparsers
++                kwargs.update(
++                    called_from_command_line=parent_called_from_command_line,
++                    missing_args_message=parent_missing_args_message
++                )
++                super().__init__(*args, **kwargs)
++        
++        subparsers_action._parser_class = SubparserWrapper
++        return subparsers_action
+ 
+ 
+ def handle_default_options(options):

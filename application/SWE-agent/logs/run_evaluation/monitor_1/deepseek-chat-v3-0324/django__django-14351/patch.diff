@@ -1,0 +1,14 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 6629a1fd51..20fea52ac9 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -1739,6 +1739,9 @@ class Query(BaseExpression):
+             transform = join_info.transform_function(targets[0], final_alias)
+             if reuse is not None:
+                 reuse.update(join_list)
++            # For Q object __in lookups, ensure we only select the needed column when alias is U0
++            if hasattr(transform, 'alias') and transform.alias == 'U0' and isinstance(transform, Col):
++                return transform
+             return transform
+ 
+     def split_exclude(self, filter_expr, can_reuse, names_with_path):

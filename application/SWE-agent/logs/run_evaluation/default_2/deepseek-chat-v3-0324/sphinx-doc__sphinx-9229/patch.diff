@@ -1,0 +1,134 @@
+diff --git a/api/file.rst b/api/file.rst
+new file mode 100644
+index 000000000..c595b806a
+--- /dev/null
++++ b/api/file.rst
+@@ -0,0 +1,7 @@
++file module
++===========
++
++.. automodule:: file
++   :members:
++   :undoc-members:
++   :show-inheritance:
+\ No newline at end of file
+diff --git a/conf.py b/conf.py
+new file mode 100644
+index 000000000..cd26de591
+--- /dev/null
++++ b/conf.py
+@@ -0,0 +1,31 @@
++# Configuration file for the Sphinx documentation builder.
++#
++# For the full list of built-in configuration values, see the documentation:
++# https://www.sphinx-doc.org/en/master/usage/configuration.html
++
++# -- Project information -----------------------------------------------------
++# https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
++
++project = 'testbed'
++copyright = '2023, testbed'
++author = 'testbed'
++
++# -- General configuration ---------------------------------------------------
++# https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
++
++extensions = ['sphinx.ext.autodoc']
++
++templates_path = ['_templates']
++exclude_patterns = []
++
++
++# -- Options for HTML output -------------------------------------------------
++# https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
++
++html_theme = 'alabaster'
++html_static_path = ['_static']
++
++# Adjust the path to include the current directory
++import os
++import sys
++sys.path.insert(0, os.path.abspath('.'))
+\ No newline at end of file
+diff --git a/file.py b/file.py
+new file mode 100644
+index 000000000..e787a2b51
+--- /dev/null
++++ b/file.py
+@@ -0,0 +1,47 @@
++# file.py
++from pathlib import Path
++from typing import Any, Callable, Dict, Union
++
++# Signatures for the documentation purposes
++
++ScaffoldOpts = Dict[str, Any]
++"""Dictionary with PyScaffold's options, see ``pyscaffold.api.create_project``.
++Should be treated as immutable (if required, copy before changing).
++
++Please notice some behaviours given by the options **SHOULD** be observed. For example,
++files should be overwritten when the **force** option is ``True``. Similarly when
++**pretend** is ``True``, no operation should be really performed, but any action should
++be logged as if realized.
++
++:noindex:
++"""
++
++FileContents = Union[str, None]
++"""When the file content is ``None``, the file should not be written to
++disk (empty files are represented by an empty string ``""`` as content).
++
++:noindex:
++"""
++
++FileOp = Callable[[Path, FileContents, ScaffoldOpts], Union[Path, None]]
++"""Signature of functions considered file operations::
++
++    Callable[[Path, FileContents, ScaffoldOpts], Union[Path, None]]
++
++- **path** (:obj:`pathlib.Path`): file path potentially to be written to/changed
++  in the disk.
++- **contents** (:obj:`FileContents`): usually a string that represents a text content
++  of the file. :obj:`None` indicates the file should not be written.
++- **opts** (:obj:`ScaffoldOpts`): a dict with PyScaffold's options.
++
++If the file is written (or more generally changed, such as new access permissions),
++by convention they should return the :obj:`file path <pathlib.Path>`.
++If no file was touched, :obj:`None` should be returned. Please notice a **FileOp**
++might return :obj:`None` if a pre-existing file in the disk is not modified.
++
++.. note::
++    A **FileOp** usually has side effects (e.g. write a file to the disk), see
++    :obj:`FileFileContents` and :obj:`ScaffoldOpts` for other conventions.
++
++:noindex:
++"""
+\ No newline at end of file
+diff --git a/index.rst b/index.rst
+new file mode 100644
+index 000000000..bc5c11229
+--- /dev/null
++++ b/index.rst
+@@ -0,0 +1,21 @@
++.. testbed documentation master file, created by
++   sphinx-quickstart on Tue Oct 10 00:00:00 2023.
++   You can adapt this file completely to your liking, but it should at least
++   contain the root `toctree` directive.
++
++Welcome to testbed's documentation!
++==================================
++
++.. toctree::
++   :maxdepth: 2
++   :caption: Contents:
++
++   api/file
++
++
++Indices and tables
++==================
++
++* :ref:`genindex`
++* :ref:`modindex`
++* :ref:`search`
+\ No newline at end of file

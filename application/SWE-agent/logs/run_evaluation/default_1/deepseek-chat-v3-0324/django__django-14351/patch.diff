@@ -1,0 +1,78 @@
+diff --git a/reproduce_error.py b/reproduce_error.py
+new file mode 100644
+index 0000000000..b56ab03dfb
+--- /dev/null
++++ b/reproduce_error.py
+@@ -0,0 +1,55 @@
++import os
++import sys
++import django
++from django.db import models
++
++# Add /testbed/tests to the Python path (absolute path)
++sys.path.append('/testbed/tests')
++
++# Set up Django environment
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'test_sqlite')
++django.setup()
++
++# Mock the PropertyGroup model
++class PropertyGroup(models.Model):
++    class Meta:
++        app_label = 'property'
++
++    def agent_groups(self, management_agent):
++        return PropertyGroup.objects.none()
++
++# Mock the ManagerTicketRatingCumulativeMovingAverage model
++class ManagerTicketRatingCumulativeMovingAverage(models.Model):
++    agent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
++    property_groups = models.ManyToManyField(PropertyGroup, related_name='agent_property_groups')
++
++    class Meta:
++        app_label = 'thing'
++
++# Create the database tables
++from django.db import connection
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(PropertyGroup)
++    schema_editor.create_model(ManagerTicketRatingCumulativeMovingAverage)
++
++# Create a management_agent
++management_agent = ManagerTicketRatingCumulativeMovingAverage.objects.create(agent=None)
++property_group = PropertyGroup.objects.create()
++management_agent.property_groups.add(property_group)
++
++# Simulate the queryset and property_groups
++queryset = ManagerTicketRatingCumulativeMovingAverage.objects.annotate(models.Count("agent__property_groups"))
++
++# Fetch the first management_agent (skip creation for now)
++management_agent = ManagerTicketRatingCumulativeMovingAverage.objects.first()
++if not management_agent:
++    raise ValueError("No management_agent found in the database. Please ensure the database is populated.")
++
++# Call agent_groups on the property_group instance
++property_groups = property_group.agent_groups(management_agent)
++
++# This should raise the error
++queryset.filter(
++    models.Q(agent__property_groups__in=property_groups)
++    | models.Q(agent__property_groups__count=0)
++).distinct()
+\ No newline at end of file
+diff --git a/tests/test_sqlite.py b/tests/test_sqlite.py
+index 099f37e56d..01c037c292 100644
+--- a/tests/test_sqlite.py
++++ b/tests/test_sqlite.py
+@@ -15,9 +15,11 @@
+ DATABASES = {
+     'default': {
+         'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
+     },
+     'other': {
+         'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': ':memory:',
+     }
+ }
+ 

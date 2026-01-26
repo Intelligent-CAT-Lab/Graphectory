@@ -1,0 +1,65 @@
+diff --git a/sympy/polys/densebasic.py b/sympy/polys/densebasic.py
+index 1caeb8f629..733914d246 100644
+--- a/sympy/polys/densebasic.py
++++ b/sympy/polys/densebasic.py
+@@ -714,6 +714,10 @@ def dmp_zero_p(f, u):
+         f = f[0]
+         u -= 1
+ 
++    # Handle the case where f is a list with a single zero element
++    if isinstance(f, list) and len(f) == 1 and not f[0]:
++        return True
++
+     return not f
+ 
+ 
+diff --git a/sympy/polys/densetools.py b/sympy/polys/densetools.py
+index f057824642..893712c2a7 100644
+--- a/sympy/polys/densetools.py
++++ b/sympy/polys/densetools.py
+@@ -1252,10 +1252,29 @@ def dmp_clear_denoms(f, u, K0, K1=None, convert=False):
+     if not K1.is_one(common):
+         f = dmp_mul_ground(f, common, u, K0)
+ 
++    # Convert to target domain first to ensure proper zero checking
++    if convert:
++        f = dmp_convert(f, u, K0, K1)
++        # Strip leading zeros after converting
++        if not dmp_zero_p(f, u):
++            i, v = 0, u - 1
++            for c in f:
++                if not dmp_zero_p(c, v):
++                    break
++                else:
++                    i += 1
++            if i == len(f):
++                f = dmp_zero(u)
++            else:
++                f = f[i:]
++            # If the polynomial is zero, return an empty list
++            if dmp_zero_p(f, u):
++                f = dmp_zero(u)
++
+     if not convert:
+         return common, f
+     else:
+-        return common, dmp_convert(f, u, K0, K1)
++        return common, f
+ 
+ 
+ def dup_revert(f, n, K):
+diff --git a/sympy/polys/polytools.py b/sympy/polys/polytools.py
+index 70112de3b6..79d9339909 100644
+--- a/sympy/polys/polytools.py
++++ b/sympy/polys/polytools.py
+@@ -2250,6 +2250,10 @@ def clear_denoms(self, convert=False):
+ 
+         coeff, f = dom.to_sympy(coeff), f.per(result)
+ 
++        # If the polynomial is zero, return the zero polynomial with the correct domain
++        if f.is_zero:
++            return coeff, f.zero
++
+         if not convert or not dom.has_assoc_Ring:
+             return coeff, f
+         else:

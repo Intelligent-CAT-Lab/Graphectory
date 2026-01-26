@@ -85,7 +85,7 @@ for model in "${!MODEL_INSTANCES[@]}"; do
         python -m swebench.harness.run_evaluation \
             --dataset_name SWE-bench/SWE-bench_Verified \
             --predictions_path "$PREDICTION_PATH" \
-            --run_id "$RUN_ID" \
+            --run_id "monitor_$RUN_ID" \
             --report_dir "reports/$CONFIG"
 
         if [[ $? -eq 0 ]]; then

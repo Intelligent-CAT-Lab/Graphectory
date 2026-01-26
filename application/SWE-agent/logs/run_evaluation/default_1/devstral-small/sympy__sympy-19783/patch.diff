@@ -1,0 +1,78 @@
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..2f56229c80
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,15 @@
++from sympy.physics.quantum.dagger import Dagger
++from sympy.physics.quantum.operator import Operator, IdentityOperator
++
++A = Operator('A')
++B = Operator('B')
++Identity = IdentityOperator()
++
++# Test basic cases
++print("A * Identity =", A * Identity)  # Should give A
++print("Dagger(A) * Identity =", Dagger(A) * Identity)  # Should give Dagger(A)
++
++# Test more complex cases
++print("Dagger(A) * Dagger(B) * Identity =", Dagger(A) * Dagger(B) * Identity)  # Should give Dagger(A) * Dagger(B)
++print("Dagger(A * B) * Identity =", Dagger(A * B) * Identity)  # Should give Dagger(A * B)
++print("Dagger(A) * B * Identity =", Dagger(A) * B * Identity)  # Should give Dagger(A) * B
+\ No newline at end of file
+diff --git a/sympy/physics/quantum/dagger.py b/sympy/physics/quantum/dagger.py
+index 17da3cfd2c..dc52bcc1dc 100644
+--- a/sympy/physics/quantum/dagger.py
++++ b/sympy/physics/quantum/dagger.py
+@@ -2,7 +2,7 @@
+ 
+ from __future__ import print_function, division
+ 
+-from sympy.core import Expr
++from sympy.core import Expr, Mul
+ from sympy.functions.elementary.complexes import adjoint
+ 
+ __all__ = [
+@@ -85,5 +85,7 @@ def __new__(cls, arg):
+             return obj
+         return Expr.__new__(cls, arg)
+ 
++
++
+ adjoint.__name__ = "Dagger"
+ adjoint._sympyrepr = lambda a, b: "Dagger(%s)" % b._print(a.args[0])
+diff --git a/sympy/physics/quantum/operator.py b/sympy/physics/quantum/operator.py
+index 306bfee64f..61a6fa9e22 100644
+--- a/sympy/physics/quantum/operator.py
++++ b/sympy/physics/quantum/operator.py
+@@ -306,9 +306,29 @@ def _print_contents_latex(self, printer, *args):
+         return r'{\mathcal{I}}'
+ 
+     def __mul__(self, other):
+-
+         if isinstance(other, Operator):
+             return other
++        if hasattr(other, '__class__') and other.__class__.__name__ == 'Dagger':
++            # Handle Dagger(A) case
++            return other
++        if hasattr(other, 'args') and len(other.args) == 1 and hasattr(other.args[0], '__class__') and other.args[0].__class__.__name__ == 'Dagger':
++            # Handle Dagger(A) * Dagger(B) case
++            return other
++        if hasattr(other, 'args') and len(other.args) > 1:
++            # Handle Dagger(A) * B * I case
++            result = 1
++            for arg in other.args:
++                if not isinstance(arg, IdentityOperator):
++                    result *= arg
++            return result
++        if hasattr(other, 'args') and len(other.args) == 1:
++            # Handle Dagger(A) * I case
++            if hasattr(other.args[0], '__class__') and other.args[0].__class__.__name__ == 'Dagger':
++                return other.args[0]
++        if hasattr(other, 'args') and len(other.args) == 1:
++            # Handle I * Dagger(A) case
++            if hasattr(other.args[0], '__class__') and other.args[0].__class__.__name__ == 'Dagger':
++                return other.args[0]
+ 
+         return Mul(self, other)
+ 

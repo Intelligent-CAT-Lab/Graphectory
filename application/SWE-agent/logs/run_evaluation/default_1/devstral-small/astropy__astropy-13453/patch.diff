@@ -1,0 +1,72 @@
+diff --git a/astropy/io/ascii/html.py b/astropy/io/ascii/html.py
+index 266cf229c..5ce74b268 100644
+--- a/astropy/io/ascii/html.py
++++ b/astropy/io/ascii/html.py
+@@ -349,10 +349,13 @@ class HTML(core.BaseReader):
+         cols = list(table.columns.values())
+ 
+         self.data.header.cols = cols
++        self.data.cols = cols  # Set cols on data object too
+ 
+         if isinstance(self.data.fill_values, tuple):
+             self.data.fill_values = [self.data.fill_values]
+ 
++        # Set column formats and fill values
++        self.data._set_col_formats()
+         self.data._set_fill_values(cols)
+ 
+         lines = []
+@@ -430,8 +433,12 @@ class HTML(core.BaseReader):
+                                     # Split up multicolumns into separate columns
+                                     new_col = Column([el[i] for el in col])
+ 
++                                    # For multi-dimensional columns, we need to apply the format to each element
++                                    if hasattr(col, 'format') and col.format is not None:
++                                        new_col.info.format = col.format
++
+                                     new_col_iter_str_vals = self.fill_values(
+-                                        col, new_col.info.iter_str_vals())
++                                        new_col, new_col.info.iter_str_vals())
+                                     col_str_iters.append(new_col_iter_str_vals)
+                                     new_cols_escaped.append(col_escaped)
+                                     new_cols.append(new_col)
+@@ -458,10 +465,12 @@ class HTML(core.BaseReader):
+     def fill_values(self, col, col_str_iters):
+         """
+         Return an iterator of the values with replacements based on fill_values
++        and apply any column-specific formatting.
+         """
+         # check if the col is a masked column and has fill values
+         is_masked_column = hasattr(col, 'mask')
+         has_fill_values = hasattr(col, 'fill_values')
++        has_format = hasattr(col, 'format') and col.format is not None
+ 
+         for idx, col_str in enumerate(col_str_iters):
+             if is_masked_column and has_fill_values:
+@@ -474,4 +483,25 @@ class HTML(core.BaseReader):
+                     yield col.fill_values[col_str]
+                     continue
+ 
+-            yield col_str
++            # Apply column format if it exists
++            if has_format:
++                try:
++                    # Handle both callable and string formats
++                    if callable(col.format):
++                        formatted = col.format(col_str)
++                        # Ensure the format function returns a string
++                        if not isinstance(formatted, str):
++                            raise TypeError("Format function must return a string")
++                        yield formatted
++                    else:
++                        # For string formats, try to convert to float first
++                        try:
++                            yield format(float(col_str), col.format)
++                        except (ValueError, TypeError):
++                            # If float conversion fails, try the format directly
++                            yield format(col_str, col.format)
++                except (ValueError, TypeError):
++                    # If formatting fails, fall back to original string
++                    yield col_str
++            else:
++                yield col_str

@@ -1,0 +1,308 @@
+diff --git a/django/db/models/sql/compiler.py b/django/db/models/sql/compiler.py
+index ce2787b6c0..c6ab0a249a 100644
+--- a/django/db/models/sql/compiler.py
++++ b/django/db/models/sql/compiler.py
+@@ -948,8 +948,6 @@ class SQLCompiler:
+         result = []
+         params = []
+         for alias in tuple(self.query.alias_map):
+-            if not self.query.alias_refcount[alias]:
+-                continue
+             try:
+                 from_clause = self.query.alias_map[alias]
+             except KeyError:
+diff --git a/django/db/models/sql/datastructures.py b/django/db/models/sql/datastructures.py
+index 1edf040e82..4be96c62e1 100644
+--- a/django/db/models/sql/datastructures.py
++++ b/django/db/models/sql/datastructures.py
+@@ -100,6 +100,9 @@ class Join:
+             join_conditions.append("(%s)" % extra_sql)
+             params.extend(extra_params)
+         if self.filtered_relation:
++            # When compiling the filtered relation, we need to ensure it uses the correct alias
++            # for the joined table
++            self.filtered_relation.path = [self.table_alias]
+             extra_sql, extra_params = compiler.compile(self.filtered_relation)
+             if extra_sql:
+                 join_conditions.append("(%s)" % extra_sql)
+@@ -162,8 +165,8 @@ class Join:
+         return hash(self.identity)
+ 
+     def equals(self, other):
+-        # Ignore filtered_relation in equality check.
+-        return self.identity[:-1] == other.identity[:-1]
++        # Include filtered_relation in equality check
++        return self.identity == other.identity
+ 
+     def demote(self):
+         new = self.relabeled_clone({})
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index 54f3258eac..425fe8d692 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -1024,6 +1024,22 @@ class Query(BaseExpression):
+         sure chains like t1 LOUTER t2 INNER t3 aren't generated. All new
+         joins are created as LOUTER if the join is nullable.
+         """
++        # When we have a filtered relation, we need to ensure each one gets its own alias
++        if join.filtered_relation:
++            # Generate a unique alias based on the table name and filtered relation condition
++            condition_hash = hash(str(join.filtered_relation.condition))
++            alias = f"{join.table_name}_{abs(condition_hash)}"
++            join.table_alias = alias
++            self.alias_map[alias] = join
++            self.alias_refcount[alias] = 0
++            if join.join_type:
++                if self.alias_map[join.parent_alias].join_type == LOUTER or join.nullable:
++                    join_type = LOUTER
++                else:
++                    join_type = INNER
++                join.join_type = join_type
++            return alias
++
+         reuse_aliases = [
+             a
+             for a, j in self.alias_map.items()
+@@ -1051,6 +1067,7 @@ class Query(BaseExpression):
+             join.join_type = join_type
+         join.table_alias = alias
+         self.alias_map[alias] = join
++        self.alias_refcount[alias] = 0
+         return alias
+ 
+     def join_parent_model(self, opts, model, alias, seen):
+@@ -1324,6 +1341,7 @@ class Query(BaseExpression):
+         allow_joins=True,
+         split_subq=True,
+         check_filterable=True,
++        alias=None,
+     ):
+         """
+         Build a WhereNode for a single filter clause but don't add it
+@@ -1516,6 +1534,7 @@ class Query(BaseExpression):
+         allow_joins=True,
+         split_subq=True,
+         check_filterable=True,
++        alias=None,
+     ):
+         """Add a Q-object to the current filter."""
+         connector = q_object.connector
+@@ -1558,18 +1577,37 @@ class Query(BaseExpression):
+                     current_negated=current_negated,
+                 )
+             else:
+-                child_clause, _ = self.build_filter(
+-                    child,
+-                    can_reuse=reuse,
+-                    branch_negated=branch_negated,
+-                    current_negated=current_negated,
+-                    allow_joins=True,
+-                    split_subq=False,
+-                )
++                # When building the filter for a child condition, we need to ensure
++                # that it uses the correct alias from the path
++                if reuse:
++                    alias = next(iter(reuse))
++                    child_clause, _ = self.build_filter(
++                        child,
++                        can_reuse=reuse,
++                        branch_negated=branch_negated,
++                        current_negated=current_negated,
++                        allow_joins=True,
++                        split_subq=False,
++                        alias=alias,
++                    )
++                else:
++                    child_clause, _ = self.build_filter(
++                        child,
++                        can_reuse=reuse,
++                        branch_negated=branch_negated,
++                        current_negated=current_negated,
++                        allow_joins=True,
++                        split_subq=False,
++                    )
+             target_clause.add(child_clause, connector)
+         return target_clause
+ 
+     def add_filtered_relation(self, filtered_relation, alias):
++        # If alias is not provided, generate a unique one based on relation name and condition
++        if alias is None:
++            # Create a hash of the condition to make the alias unique
++            condition_hash = hash(str(filtered_relation.condition))
++            alias = f"{filtered_relation.relation_name}_{abs(condition_hash)}"
+         filtered_relation.alias = alias
+         lookups = dict(get_children_from_q(filtered_relation.condition))
+         relation_lookup_parts, relation_field_parts, _ = self.solve_lookup_type(
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 0000000000..ceaeb5c3a5
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,166 @@
++import os
++import django
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.contenttypes',
++            'django.contrib.auth',
++            __name__,
++        ],
++        DATABASES={
++            'default': {
++                'ENGINE': 'django.db.backends.sqlite3',
++                'NAME': ':memory:',
++            }
++        }
++    )
++    django.setup()
++
++from django.db import models, connection
++from django.db.models import FilteredRelation, Q, F, Case, When
++
++def create_tables():
++    with connection.cursor() as cursor:
++        cursor.execute("""
++            CREATE TABLE IF NOT EXISTS __main___nested (
++                id INTEGER PRIMARY KEY AUTOINCREMENT,
++                zone VARCHAR(10),
++                price DECIMAL(10, 2),
++                is_all BOOLEAN
++            )
++        """)
++        cursor.execute("""
++            CREATE TABLE IF NOT EXISTS __main___mymodel (
++                id INTEGER PRIMARY KEY AUTOINCREMENT,
++                zone VARCHAR(10),
++                nested_id INTEGER,
++                FOREIGN KEY (nested_id) REFERENCES __main___nested(id)
++            )
++        """)
++
++create_tables()
++
++class Nested(models.Model):
++    zone = models.CharField(max_length=10, null=True, blank=True)
++    price = models.DecimalField(max_digits=10, decimal_places=2)
++    is_all = models.BooleanField(default=False)
++    
++    class Meta:
++        db_table = "__main___nested"
++        managed = False
++        
++    def __str__(self):
++        return f"Nested(zone={self.zone}, price={self.price}, is_all={self.is_all})"
++
++class MyModel(models.Model):
++    zone = models.CharField(max_length=10)
++    nested = models.ForeignKey(Nested, on_delete=models.CASCADE, related_name='myrelation')
++    
++    class Meta:
++        db_table = "__main___mymodel"
++        managed = False
++        
++    def __str__(self):
++        return f"MyModel(id={self.id}, zone={self.zone}, nested={self.nested})"
++        
++    def get_price_final(self):
++        # Get the price from the zone-specific entry if it exists, otherwise use the "all" entry
++        if self.nested.zone == self.zone:
++            return self.nested.price
++        return next((n.price for n in Nested.objects.filter(myrelation=self, is_all=True)), None)
++        
++    def save(self, *args, **kwargs):
++        # Ensure we always have an "all" entry
++        if not Nested.objects.filter(myrelation=self, is_all=True).exists():
++            Nested.objects.create(myrelation=self, price=self.nested.price, is_all=True)
++        super().save(*args, **kwargs)
++        
++    def get_nested_price(self):
++        # Get the price from the zone-specific entry if it exists, otherwise use the "all" entry
++        if self.nested.zone == self.zone:
++            return self.nested.price
++        return next((n.price for n in Nested.objects.filter(myrelation=self, is_all=True)), None)
++        
++    def get_price_final_annotated(self):
++        # This is the annotated version that uses the database query
++        qs = MyModel.objects.alias(
++            relation_zone=FilteredRelation(
++                "nested",
++                condition=Q(nested__zone=F("zone"))
++            ),
++            relation_all=FilteredRelation(
++                "nested",
++                condition=Q(nested__is_all=True)
++            ),
++            price_zone=F("relation_zone__price")
++        ).annotate(
++            price_final=Case(
++                When(
++                    price_zone__isnull=True,
++                    then=F("relation_all__price"),
++                ),
++                default=F("price_zone")
++            )
++        )
++        return qs.get(id=self.id).price_final
++        
++    def get_price_final_annotated_str(self):
++        # This is the annotated version that uses the database query
++        qs = MyModel.objects.alias(
++            relation_zone=FilteredRelation(
++                "nested",
++                condition=Q(nested__zone=F("zone"))
++            ),
++            relation_all=FilteredRelation(
++                "nested",
++                condition=Q(nested__is_all=True)
++            ),
++            price_zone=F("relation_zone__price")
++        ).annotate(
++            price_final=Case(
++                When(
++                    price_zone__isnull=True,
++                    then=F("relation_all__price"),
++                ),
++                default=F("price_zone")
++            )
++        )
++        return str(qs.query)
++        
++
++# Create test data
++nested1 = Nested.objects.create(zone="A", price=10.0, is_all=False)
++nested2 = Nested.objects.create(zone=None, price=20.0, is_all=True)
++
++mymodel = MyModel.objects.create(zone="A", nested=nested1)
++
++# Create a queryset that demonstrates the issue
++qs = MyModel.objects.alias(
++    relation_zone=FilteredRelation(
++        "nested",
++        condition=Q(nested__zone=F("zone"))
++    ),
++    relation_all=FilteredRelation(
++        "nested",
++        condition=Q(nested__is_all=True)
++    ),
++    price_zone=F("relation_zone__price")
++).annotate(
++    price_final=Case(
++        When(
++            price_zone__isnull=True,
++            then=F("relation_all__price"),
++        ),
++        default=F("price_zone")
++    )
++)
++
++# Print the query to see if both joins are included
++print("Generated SQL:")
++print(str(qs.query))
++
++print("\nQuery results:")
++for obj in qs:
++    print(f"id={obj.id}, zone={obj.zone}, price_final={obj.price_final}")
+\ No newline at end of file

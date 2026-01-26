@@ -1,0 +1,107 @@
+diff --git a/.a/foo.py b/.a/foo.py
+new file mode 100644
+index 00000000..1dd4d07d
+--- /dev/null
++++ b/.a/foo.py
+@@ -0,0 +1 @@
++# import re
+diff --git a/bar.py b/bar.py
+new file mode 100644
+index 00000000..1dd4d07d
+--- /dev/null
++++ b/bar.py
+@@ -0,0 +1 @@
++# import re
+diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py
+index 53345a6b..d20bd65d 100644
+--- a/pylint/lint/pylinter.py
++++ b/pylint/lint/pylinter.py
+@@ -8,6 +8,7 @@ import collections
+ import contextlib
+ import functools
+ import os
++import re
+ import sys
+ import tokenize
+ import traceback
+@@ -564,8 +565,7 @@ class PyLinter(
+             if not msg.may_be_emitted():
+                 self._msgs_state[msg.msgid] = False
+ 
+-    @staticmethod
+-    def _discover_files(files_or_modules: Sequence[str]) -> Iterator[str]:
++    def _discover_files(self, files_or_modules: Sequence[str]) -> Iterator[str]:
+         """Discover python modules and packages in sub-directory.
+ 
+         Returns iterator of paths to discovered modules and packages.
+@@ -583,12 +583,29 @@ class PyLinter(
+                         skip_subtrees.append(root)
+                         yield root
+                     else:
+-                        yield from (
+-                            os.path.join(root, file)
+-                            for file in files
+-                            if file.endswith(".py")
+-                        )
++                        for file in files:
++                            if file.endswith(".py"):
++                                path = os.path.join(root, file)
++                                # Skip files that match ignore patterns
++                                if any(
++                                    re.match(pattern, os.path.basename(path)) 
++                                    for pattern in self.config.ignore_patterns
++                                ) or any(
++                                    re.match(pattern, path) 
++                                    for pattern in self.config.ignore_paths
++                                ) or os.path.basename(path) in self.config.ignore:
++                                    continue
++                                yield path
+             else:
++                # Skip files that match ignore patterns
++                if any(
++                    re.match(pattern, os.path.basename(something)) 
++                    for pattern in self.config.ignore_patterns
++                ) or any(
++                    re.match(pattern, something) 
++                    for pattern in self.config.ignore_paths
++                ) or os.path.basename(something) in self.config.ignore:
++                    continue
+                 yield something
+ 
+     def check(self, files_or_modules: Sequence[str] | str) -> None:
+diff --git a/reproduce.py b/reproduce.py
+new file mode 100644
+index 00000000..f59ad22a
+--- /dev/null
++++ b/reproduce.py
+@@ -0,0 +1,29 @@
++import os
++import shutil
++
++# Create test directory structure
++os.makedirs('.a', exist_ok=True)
++
++# Create test files
++with open('.a/foo.py', 'w') as f:
++    f.write('# import re\n')
++
++with open('bar.py', 'w') as f:
++    f.write('# import re\n')
++
++# Run pylint with different ignore options
++print("\nTesting pylint --recursive=y .:")
++os.system('pylint --recursive=y .')
++
++print("\nTesting pylint --recursive=y --ignore=.a .:")
++os.system('pylint --recursive=y --ignore=.a .')
++
++print("\nTesting pylint --recursive=y --ignore-paths=.a .:")
++os.system('pylint --recursive=y --ignore-paths=.a .')
++
++print("\nTesting pylint --recursive=y --ignore-patterns=\"^\\.a\" .:")
++os.system('pylint --recursive=y --ignore-patterns=\"^\\.a\" .')
++
++# Cleanup
++shutil.rmtree('.a')
++os.remove('bar.py')
+\ No newline at end of file

@@ -35,6 +35,8 @@ We persist across steps:
 
 from __future__ import annotations
 import ast
+import hashlib
+import os
 import re
 from typing import Iterable, List, Tuple, Any, Optional, Set, Dict, Union
 
@@ -166,11 +168,17 @@ def _is_test_related(paths: List[str]) -> bool:
 def _contains_redirection(tokens: List[str]) -> bool:
     """
     Detect shell output redirection / heredocs / tee (== writing).
+    Filters out quoted strings to avoid false positives.
     """
     if not tokens:
         return False
+
+    # Skip tokens that are quoted strings (e.g., echo ">" shouldn't trigger)
+    unquoted = [t for t in tokens if not ((t.startswith('"') and t.endswith('"')) or
+                                           (t.startswith("'") and t.endswith("'"))) or len(t) < 2]
+
     redir_ops = {">", ">>", "1>", "2>", ">|", "<<<", "<<", "<>", ">&", "2>&1"}
-    if any(t in redir_ops or t.startswith((">", ">>", "1>", "2>")) for t in tokens):
+    if any(t in redir_ops or t.startswith((">", ">>", "1>", "2>")) for t in unquoted):
         return True
     embedded_ops = (
         " <<", "<<",
@@ -178,9 +186,9 @@ def _contains_redirection(tokens: List[str]) -> bool:
         " 1>", " 2>", " >", " >|",
         "<>", ">&", "2>&1"
     )
-    if any(any(op in t for op in embedded_ops) for t in tokens):
+    if any(any(op in t for op in embedded_ops) for t in unquoted):
         return True
-    return any("tee" == t or " tee " in t for t in tokens)
+    return any("tee" == t or " tee " in t for t in unquoted)
 
 def _is_piped_readonly_operation(cmd: str, tokens: List[str]) -> bool:
     """
@@ -418,21 +426,25 @@ def _dynamic_key_for_inline_test(
     for i, tok in enumerate(tokens):
         if tok in ("-m", "m") and i + 1 < len(tokens):
             mod = tokens[i + 1]
-            return f"module:{mod[:200]}"
+            mod_hash = hashlib.sha256(mod.encode()).hexdigest()[:16]
+            return f"module:{mod_hash}"
         if tok.startswith("-m") and tok not in ("-m",):
             mod = tok[2:]
             if mod:
-                return f"module:{mod[:200]}"
+                mod_hash = hashlib.sha256(mod.encode()).hexdigest()[:16]
+                return f"module:{mod_hash}"
 
     # inline code after -c / c / "-cCODE"
     for i, tok in enumerate(tokens):
         if tok in ("-c", "c") and i + 1 < len(tokens):
             code_snip = tokens[i + 1]
-            return f"inline:{code_snip[:200]}"
+            code_hash = hashlib.sha256(code_snip.encode()).hexdigest()[:16]
+            return f"inline:{code_hash}"
         if tok.startswith("-c") and tok not in ("-c",):
             code_snip = tok[2:]
             if code_snip:
-                return f"inline:{code_snip[:200]}"
+                code_hash = hashlib.sha256(code_snip.encode()).hexdigest()[:16]
+                return f"inline:{code_hash}"
 
     return "inline:<unknown>"
 
@@ -457,9 +469,9 @@ def _postpatch_validation_kind(
                     return "V_newly_generated_test"
                 # Basename match (handles relative vs absolute path differences)
                 # E.g., 'test_file.py' should match '/path/to/test_file.py'
-                p_basename = p.split('/')[-1] if '/' in p else p
+                p_basename = os.path.basename(p)
                 for created_path in created_tests:
-                    created_basename = created_path.split('/')[-1] if '/' in created_path else created_path
+                    created_basename = os.path.basename(created_path)
                     if p_basename == created_basename:
                         return "V_newly_generated_test"
         return "V_regression_test"

@@ -1,0 +1,20 @@
+diff --git a/xarray/core/rolling.py b/xarray/core/rolling.py
+index c194ec08..98ebeaed 100644
+--- a/xarray/core/rolling.py
++++ b/xarray/core/rolling.py
+@@ -973,7 +973,14 @@ class Coarsen(CoarsenArithmetic, Generic[T_Xarray]):
+             else:
+                 reshaped[key] = var
+ 
+-        should_be_coords = set(window_dim) & set(self.obj.coords)
++        # Preserve coordinates that were coordinates in the original dataset
++        should_be_coords = set(self.obj.coords) & set(reshaped.data_vars)
++        # For coordinates that are being windowed, we need to check if they should be coordinates
++        # in the result by checking if their dimension is being windowed
++        for dim, new_dims in window_dim.items():
++            if dim in self.obj.coords:
++                should_be_coords.discard(dim)
++                should_be_coords.update(new_dims)
+         result = reshaped.set_coords(should_be_coords)
+         if isinstance(self.obj, DataArray):
+             return self.obj._from_temp_dataset(result)

@@ -1,0 +1,39 @@
+diff --git a/django/template/engine.py b/django/template/engine.py
+index dfaa67ba12..ad09739c1d 100644
+--- a/django/template/engine.py
++++ b/django/template/engine.py
+@@ -154,13 +154,18 @@ class Engine:
+         if isinstance(template_name, (list, tuple)):
+             t = self.select_template(template_name)
+         else:
+-            t = self.get_template(template_name)
++            # If template_name is a string that looks like a template (contains {{ or {%)
++            # treat it as a template string
++            if isinstance(template_name, str) and ('{{' in template_name or '{%' in template_name):
++                t = self.from_string(template_name)
++            else:
++                t = self.get_template(template_name)
+         # Django < 1.8 accepted a Context in `context` even though that's
+         # unintended. Preserve this ability but don't rewrap `context`.
+         if isinstance(context, Context):
+             return t.render(context)
+         else:
+-            return t.render(Context(context))
++            return t.render(Context(context, autoescape=self.autoescape))
+ 
+     def select_template(self, template_name_list):
+         """
+@@ -171,7 +176,12 @@ class Engine:
+         not_found = []
+         for template_name in template_name_list:
+             try:
+-                return self.get_template(template_name)
++                # If template_name is a string that looks like a template (contains {{ or {%
++                # treat it as a template string
++                if isinstance(template_name, str) and ('{{' in template_name or '{%' in template_name):
++                    return self.from_string(template_name)
++                else:
++                    return self.get_template(template_name)
+             except TemplateDoesNotExist as exc:
+                 if exc.args[0] not in not_found:
+                     not_found.append(exc.args[0])

@@ -1,0 +1,272 @@
+diff --git a/debug_factor.py b/debug_factor.py
+new file mode 100644
+index 0000000000..fb90d5ae12
+--- /dev/null
++++ b/debug_factor.py
+@@ -0,0 +1,27 @@
++from sympy import *
++from sympy.polys.polytools import Poly
++from sympy.polys.factortools import dmp_ext_factor
++from sympy.polys.domains import QQ
++from sympy.polys.domains import AlgebraicField
++
++x, y = symbols('x y')
++z = expand((x-1)*(y-1))
++
++# Create algebraic extension with I = sqrt(-1)
++K = AlgebraicField(QQ, [1, 0, 1], 'I')  # minpoly: I^2 + 1
++
++# Create a Poly object for the expression
++poly = Poly(z, x, y, domain=QQ)
++
++print("Original polynomial:")
++print(poly)
++
++# Try factoring with extension
++print("\nFactoring with extension=[I]:")
++ext_poly = poly.set_domain(QQ_I)
++print("Poly in extension domain:", ext_poly)
++
++# Try to factor manually
++print("\nManual factorization in extension domain:")
++factors = dmp_ext_factor(ext_poly.rep, 1, ext_poly.domain)
++print("Factors:", factors)
+\ No newline at end of file
+diff --git a/detailed_reproduce.py b/detailed_reproduce.py
+new file mode 100644
+index 0000000000..b5f298b50f
+--- /dev/null
++++ b/detailed_reproduce.py
+@@ -0,0 +1,16 @@
++from sympy import *
++
++x, y = symbols('x y')
++z = expand((x-1)*(y-1))
++
++print("Without extension:")
++f1 = factor(z)
++print(f1)
++print("Type:", type(f1))
++print("Args:", f1.args if isinstance(f1, Mul) else "Not a Mul")
++
++print("\nWith extension=[I]:")
++f2 = factor(z, extension=[I])
++print(f2)
++print("Type:", type(f2))
++print("Args:", f2.args if isinstance(f2, Mul) else "Not a Mul")
+\ No newline at end of file
+diff --git a/direct_factor_test.py b/direct_factor_test.py
+new file mode 100644
+index 0000000000..5491777e65
+--- /dev/null
++++ b/direct_factor_test.py
+@@ -0,0 +1,19 @@
++from sympy import symbols, I
++from sympy.polys.polytools import Poly
++from sympy.polys.factortools import dmp_factor_list
++from sympy.polys.domains import QQ, ZZ
++from sympy.polys.domains import AlgebraicField
++
++# Create algebraic extension with I = sqrt(-1)
++K = AlgebraicField(QQ, I)  # minpoly: I^2 + 1
++
++# Test polynomial: (x-1)*(y-1) = x*y - x - y + 1
++x, y = symbols('x y')
++poly = Poly(x*y - x - y + 1, x, y, domain=ZZ)
++
++print("Without extension:")
++print("Factor list:", dmp_factor_list(poly.rep, 1, poly.domain))
++
++print("\nWith extension [I]:")
++poly_ext = poly.set_domain(K)
++print("Factor list:", dmp_factor_list(poly_ext.rep, 1, poly_ext.domain))
+\ No newline at end of file
+diff --git a/reproduce_factor_issue.py b/reproduce_factor_issue.py
+new file mode 100644
+index 0000000000..5d0224e247
+--- /dev/null
++++ b/reproduce_factor_issue.py
+@@ -0,0 +1,10 @@
++from sympy import *
++
++x, y = symbols('x y')
++z = expand((x-1)*(y-1))
++
++print("Without extension:")
++print(factor(z))
++
++print("\nWith extension=[I]:")
++print(factor(z, extension=[I]))
+\ No newline at end of file
+diff --git a/simple_factor_test.py b/simple_factor_test.py
+new file mode 100644
+index 0000000000..560c48fc23
+--- /dev/null
++++ b/simple_factor_test.py
+@@ -0,0 +1,19 @@
++from sympy import *
++from sympy.polys.polytools import Poly
++from sympy.polys.factortools import dmp_factor_list
++from sympy.polys.domains import QQ
++
++x, y = symbols('x y')
++
++# Test polynomial: (x-1)*(y-1) = x*y - x - y + 1
++poly = Poly(x*y - x - y + 1, x, y, domain=QQ)
++print("Without extension:")
++print("Factor list:", dmp_factor_list(poly.rep, 1, poly.domain))
++
++# With I as an algebraic extension
++from sympy.polys.domains import AlgebraicField
++K = AlgebraicField(QQ, [1, 0, 1])  # I^2 + 1
++
++poly_ext = Poly(x*y - x - y + 1, x, y, domain=K)
++print("\nWith extension [I]:")
++print("Factor list:", dmp_factor_list(poly_ext.rep, 1, poly_ext.domain))
+\ No newline at end of file
+diff --git a/simple_factor_test_fixed.py b/simple_factor_test_fixed.py
+new file mode 100644
+index 0000000000..4373ee29b7
+--- /dev/null
++++ b/simple_factor_test_fixed.py
+@@ -0,0 +1,10 @@
++from sympy import symbols, I, Poly, expand, factor
++
++x, y = symbols('x y')
++z = expand((x-1)*(y-1))
++
++print("Without extension:")
++print(factor(z))
++
++print("\nWith extension=[I]:")
++print(factor(z, extension=[I]))
+\ No newline at end of file
+diff --git a/sympy/polys/factortools.py b/sympy/polys/factortools.py
+index c6a5f9f063..13115d2b22 100644
+--- a/sympy/polys/factortools.py
++++ b/sympy/polys/factortools.py
+@@ -1141,15 +1141,40 @@ def dmp_ext_factor(f, u, K):
+         return dup_ext_factor(f, K)
+ 
+     lc = dmp_ground_LC(f, u, K)
+-    f = dmp_ground_monic(f, u, K)
+-
++    
++    # If the polynomial is constant, return it immediately
+     if all(d <= 0 for d in dmp_degree_list(f, u)):
+-        return lc, []
+-
+-    f, F = dmp_sqf_part(f, u, K), f
+-    s, g, r = dmp_sqf_norm(f, u, K)
+-
+-    factors = dmp_factor_list_include(r, u, K.dom)
++        return lc, [(f, 1)]
++        
++    # For multivariate polynomials, try to factor directly
++    # without going through the norm computation
++    try:
++        # Try to factor using the standard factor_list
++        factors = dmp_factor_list(f, u, K)
++        if lc != K.one:
++            # Create a constant polynomial for the leading coefficient
++            const_poly = dmp_ground(lc, u)
++            # Add it as the first factor with exponent 1
++            factors = (lc, [(const_poly, 1)] + factors[1])
++        return factors
++    except NotImplementedError:
++        # If direct factorization fails, use the norm method
++        # Make the polynomial monic
++        f_monic = dmp_ground_monic(f, u, K)
++        
++        # Compute the square-free part and norm
++        f_sqf, F = dmp_sqf_part(f_monic, u, K), f_monic
++        s, g, r = dmp_sqf_norm(f_sqf, u, K)
++        
++        # Factor the norm
++        factors = dmp_factor_list_include(r, u, K.dom)
++        
++        # If we have a non-trivial leading coefficient, include it as a factor
++        if lc != K.one:
++            # Create a constant polynomial for the leading coefficient
++            const_poly = dmp_ground(lc, u)
++            # Add it as the first factor with exponent 1
++            factors = [(const_poly, 1)] + factors
+ 
+     if len(factors) == 1:
+         factors = [f]
+diff --git a/sympy/polys/polytools.py b/sympy/polys/polytools.py
+index 68b69d1a24..c21118ef95 100644
+--- a/sympy/polys/polytools.py
++++ b/sympy/polys/polytools.py
+@@ -5928,7 +5928,7 @@ def _symbolic_factor_list(expr, opt, method):
+             if _coeff is not S.One:
+                 if exp.is_Integer:
+                     coeff *= _coeff**exp
+-                elif _coeff.is_positive:
++                elif _coeff.is_positive or opt.extension is not None:
+                     factors.append((_coeff, exp))
+                 else:
+                     _factors.append((_coeff, S.One))
+diff --git a/test_algebraic_factorization.py b/test_algebraic_factorization.py
+new file mode 100644
+index 0000000000..d0f1192c2e
+--- /dev/null
++++ b/test_algebraic_factorization.py
+@@ -0,0 +1,30 @@
++from sympy import *
++from sympy.polys.polytools import Poly
++from sympy.polys.factortools import dmp_ext_factor
++from sympy.polys.domains import QQ
++from sympy.polys.domains import AlgebraicField
++
++x, y = symbols('x y')
++z = expand((x-1)*(y-1))
++
++# Create algebraic extension with I = sqrt(-1)
++from sympy import I
++K = AlgebraicField(QQ, I)  # minpoly: I^2 + 1
++
++# Create a Poly object for the expression
++poly = Poly(z, x, y, domain=K)
++print("Poly representation:", poly)
++
++# Try to factor manually
++print("\nManual factorization in extension domain:")
++factors = dmp_ext_factor(poly.rep, 1, poly.domain)
++print("Factors:", factors)
++
++# Convert factors to expressions
++result = factors[0]
++for factor, exp in factors[1]:
++    # Convert factor to Poly and then to expression
++    factor_poly = Poly(factor, *poly.gens, domain=poly.domain)
++    result *= factor_poly.as_expr()**exp
++
++print("\nResult:", result)
+\ No newline at end of file
+diff --git a/test_factorization.py b/test_factorization.py
+new file mode 100644
+index 0000000000..85ce210608
+--- /dev/null
++++ b/test_factorization.py
+@@ -0,0 +1,19 @@
++from sympy import *
++from sympy.polys.polytools import Poly
++
++x, y = symbols('x y')
++z = expand((x-1)*(y-1))
++
++# Without extension
++print("Without extension:")
++poly = Poly(z, x, y)
++print("Poly representation:", poly)
++print("Factor list:", poly.factor_list())
++print("Factor:", factor(z))
++
++# With extension
++print("\nWith extension=[I]:")
++poly_ext = Poly(z, x, y, extension=[I])
++print("Poly representation:", poly_ext)
++print("Factor list:", poly_ext.factor_list())
++print("Factor:", factor(z, extension=[I]))
+\ No newline at end of file
