@@ -1,0 +1,43 @@
+diff --git a/sympy/functions/special/zeta_functions.py b/sympy/functions/special/zeta_functions.py
+index b8e2b6619..7dfdf9ce6 100644
+--- a/sympy/functions/special/zeta_functions.py
++++ b/sympy/functions/special/zeta_functions.py
+@@ -288,10 +288,10 @@ def _eval_rewrite_as_lerchphi(self, s, z):
+         return z*lerchphi(z, s, 1)
+ 
+     def _eval_expand_func(self, **hints):
+-        from sympy import log, expand_mul, Dummy, exp_polar, I
++        from sympy import log, expand_mul, Dummy
+         s, z = self.args
+         if s == 1:
+-            return -log(1 + exp_polar(-I*pi)*z)
++            return -log(1 - z)
+         if s.is_Integer and s <= 0:
+             u = Dummy('u')
+             start = u/(1 - u)
+diff --git a/test_polylog_fix.py b/test_polylog_fix.py
+new file mode 100644
+index 000000000..ab26bd6c9
+--- /dev/null
++++ b/test_polylog_fix.py
+@@ -0,0 +1,19 @@
++from sympy import polylog, Rational, expand_func, pi, log, nsimplify
++from sympy.abc import z
++
++# Test for issue 1: polylog(1, z) expansion
++print("Test 1: polylog(1, z) expansion")
++print("Before fix:", expand_func(polylog(1, z)))
++print("Expected: -log(1 - z)")
++print()
++
++# Test for issue 2: polylog(2, 1/2) expansion
++print("Test 2: polylog(2, 1/2) expansion")
++result = expand_func(polylog(2, Rational(1,2)))
++print("Result:", result)
++print("Expected:", pi**2/12 - log(2)**2/2)
++
++# Verify the result matches the expected form
++simplified = nsimplify(result, [pi**2, log(2)**2])
++print("Simplified:", simplified)
++print("Matches expected:", simplified == pi**2/12 - log(2)**2/2)
+\ No newline at end of file

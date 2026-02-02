@@ -1,0 +1,40 @@
+diff --git a/sympy/solvers/diophantine.py b/sympy/solvers/diophantine.py
+index 6092e35dab..24dbdeeec9 100644
+--- a/sympy/solvers/diophantine.py
++++ b/sympy/solvers/diophantine.py
+@@ -182,7 +182,7 @@ def diophantine(eq, param=symbols("t", integer=True), syms=None,
+             if syms != var:
+                 dict_sym_index = dict(zip(syms, range(len(syms))))
+                 return {tuple([t[dict_sym_index[i]] for i in var])
+-                            for t in diophantine(eq, param)}
++                            for t in diophantine(eq, param, syms=None, permute=permute)}
+         n, d = eq.as_numer_denom()
+         if n.is_number:
+             return set()
+diff --git a/test_diophantine.py b/test_diophantine.py
+new file mode 100644
+index 0000000000..bd63f03f98
+--- /dev/null
++++ b/test_diophantine.py
+@@ -0,0 +1,20 @@
++from sympy.solvers.diophantine import diophantine
++from sympy.abc import m, n
++
++# Test case from PR description
++expr = n**4 + m**4 - 2**4 - 3**4
++
++# Test with syms=(m,n)
++result1 = diophantine(expr, syms=(m,n), permute=True)
++print(f"With syms=(m,n): {result1}")
++
++# Test with syms=(n,m)
++result2 = diophantine(expr, syms=(n,m), permute=True)
++print(f"With syms=(n,m): {result2}")
++
++# Verify both results have the same solutions
++assert {tuple(sorted(abs(x) for x in sol)) for sol in result1} == \
++       {tuple(sorted(abs(x) for x in sol)) for sol in result2}, \
++       "Results are not equivalent!"
++
++print("Test passed! Both results are equivalent.")
+\ No newline at end of file

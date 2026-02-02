@@ -1,0 +1,20 @@
+diff --git a/django/db/models/expressions.py b/django/db/models/expressions.py
+index d913658291..6090f2e3b5 100644
+--- a/django/db/models/expressions.py
++++ b/django/db/models/expressions.py
+@@ -460,6 +460,15 @@ class CombinedExpression(SQLiteNumericMixin, Expression):
+         datetime_fields = {'DateField', 'DateTimeField', 'TimeField'}
+         if self.connector == self.SUB and lhs_type in datetime_fields and lhs_type == rhs_type:
+             return TemporalSubtraction(self.lhs, self.rhs).as_sql(compiler, connection)
++        # Handle DurationField operations
++        if 'DurationField' in {lhs_type, rhs_type}:
++            if self.connector in (self.ADD, self.SUB):
++                if lhs_type == 'DurationField' and rhs_type == 'DurationField':
++                    # Both sides are DurationField, use standard handling
++                    pass
++                else:
++                    # Mixed types, ensure output field is DurationField
++                    self.output_field = fields.DurationField()
+         expressions = []
+         expression_params = []
+         sql, params = compiler.compile(self.lhs)

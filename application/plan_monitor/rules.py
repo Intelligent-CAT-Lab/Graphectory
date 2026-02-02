@@ -655,24 +655,21 @@ class PlanComplianceRule(Rule):
         # Get the current phase category (exact match or prefix)
         current_category = current_phase.value  # Use full phase name first
 
-        # Only check plan compliance on FIRST appearance of a phase category
-        # Check both exact match and prefix match
+        # Get role_history to distinguish between successful execution vs blocked attempts
+        role_history = kwargs.get('role_history', [])
+
+        # Only check plan compliance on FIRST appearance of a phase category in role_history
+        # (i.e., first SUCCESSFUL execution, not first attempt)
         if current_category in self.seen_phases:
-            # Already seen this exact phase, skip (phase revisits are allowed)
-            return None
-
-        # Also check if we've seen any phase with the same prefix
-        # E.g., if we've seen V_newly_generated_test, then V_regression_test shouldn't trigger
-        current_prefix = current_phase.prefix
-        if current_prefix:
-            for seen_phase in self.seen_phases:
-                # Check if any seen phase starts with the same prefix
-                if seen_phase.startswith(current_prefix + '_') or seen_phase == current_prefix:
-                    # Already seen a phase in this category, skip
-                    return None
-
-        # Mark this as first appearance
-        self.seen_phases[current_category] = step_index or 0
+            # Phase was already attempted
+            if current_category in role_history:
+                # Phase was successfully executed before (in role_history), allow revisit
+                return None
+            else:
+                # Phase was attempted but blocked (in seen_phases but not in role_history)
+                # Agent is retrying the same phase
+                # Don't mark it in seen_phases again, and skip reporting (already triggered once)
+                return None
 
         # Check if current phase matches expected position in plan
         if self.plan_index >= len(self.intended_plan):
@@ -681,8 +678,19 @@ class PlanComplianceRule(Rule):
 
         expected_phase = self.intended_plan[self.plan_index]
 
-        # Check if current phase matches expected (exact match or category match)
-        if current_category == expected_phase or current_phase.prefix == expected_phase:
+        # Check if we've already seen a phase that matches the expected phase
+        # This handles cases like: expected="V", seen=["V_regression_test"]
+        for seen_phase in self.seen_phases:
+            # Check if seen phase matches expected phase (exact or prefix match)
+            if seen_phase == expected_phase or seen_phase.startswith(expected_phase + '_'):
+                # Already seen a phase matching the expected, no need to check again
+                return None
+
+        # Mark this as first appearance
+        self.seen_phases[current_category] = step_index or 0
+
+        # Check if current phase matches expected (exact match or prefix match)
+        if current_category == expected_phase or current_category.startswith(expected_phase + '_'):
             # On track - advance to next expected phase
             self.plan_index += 1
             return None

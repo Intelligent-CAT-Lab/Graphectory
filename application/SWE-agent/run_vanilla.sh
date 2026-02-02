@@ -4,7 +4,7 @@
 RUN_ID="${1:-1}"
 CONFIG="oscillation"
 
-CSV_FILE="/home/shuyang/Graphectory/stats/flawed_trajs/oscillation.csv"
+CSV_FILE="../stats/flawed_trajs/oscillation.csv"
 
 # Extract SWE-agent instances and group by model
 declare -A MODEL_INSTANCES
@@ -25,9 +25,9 @@ while IFS=, read -r agent model resolution_status debug_difficulty instance_id p
             "deepseek-v3")
                 openrouter_model="openrouter/deepseek/deepseek-chat-v3-0324"
                 ;;
-            # "devstral-small")
-            #     openrouter_model="openrouter/mistralai/devstral-small"
-            #     ;;
+            "devstral-small")
+                openrouter_model="openrouter/mistralai/devstral-small"
+                ;;
             # "claude-sonnet-4")
             #     openrouter_model="openrouter/anthropic/claude-sonnet-4"
             #     ;;

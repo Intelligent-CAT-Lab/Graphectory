@@ -1,0 +1,195 @@
+diff --git a/pylint/checkers/variables.py b/pylint/checkers/variables.py
+index 3ddafd59..7d571641 100644
+--- a/pylint/checkers/variables.py
++++ b/pylint/checkers/variables.py
+@@ -1650,6 +1650,10 @@ class VariablesChecker(BaseChecker):
+             if global_names and _import_name_is_global(stmt, global_names):
+                 return
+ 
++        # Check if the name is used in a type comment
++        if self._is_used_in_type_comment(name, node):
++            return
++
+         argnames = list(
+             itertools.chain(node.argnames(), [arg.name for arg in node.args.kwonlyargs])
+         )
+@@ -1715,6 +1719,56 @@ class VariablesChecker(BaseChecker):
+         else:
+             regex = authorized_rgx
+         return regex and regex.match(name)
++        
++    def _is_used_in_type_comment(self, name, node):
++        """Check if the given name is used in any type comment in the current scope."""
++        # Look for all nodes in the current scope that might have type comments
++        for child in node.body:
++            # Check Assign nodes
++            if isinstance(child, astroid.Assign) and child.type_comment:
++                if name in child.type_comment or f"{name}." in child.type_comment:
++                    return True
++            # Check AnnAssign nodes
++            elif isinstance(child, astroid.AnnAssign) and child.annotation:
++                annotation_str = child.annotation.as_string()
++                if name in annotation_str or f"{name}." in annotation_str:
++                    return True
++            # Check FunctionDef and ClassDef nodes
++            elif isinstance(child, (astroid.FunctionDef, astroid.ClassDef)) and child.type_comment:
++                if name in child.type_comment or f"{name}." in child.type_comment:
++                    return True
++            # Check arguments in function definitions
++            elif isinstance(child, astroid.FunctionDef):
++                for arg in child.args.args:
++                    if arg.type_comment and (name in arg.type_comment or f"{name}." in arg.type_comment):
++                        return True
++                if child.args.vararg and child.args.vararg.type_comment and \
++                   (name in child.args.vararg.type_comment or f"{name}." in child.args.vararg.type_comment):
++                    return True
++                if child.args.kwarg and child.args.kwarg.type_comment and \
++                   (name in child.args.kwarg.type_comment or f"{name}." in child.args.kwarg.type_comment):
++                    return True
++            # Check type comments in other nodes
++            elif hasattr(child, 'type_comment') and child.type_comment and \
++                 (name in child.type_comment or f"{name}." in child.type_comment):
++                return True
++            # Check type annotations in other nodes
++            elif hasattr(child, 'annotation') and child.annotation:
++                annotation_str = child.annotation.as_string()
++                if name in annotation_str or f"{name}." in annotation_str:
++                    return True
++            # Check for imported names used in type comments
++            elif isinstance(child, (astroid.Import, astroid.ImportFrom)):
++                for imported_name, imported_alias in child.names:
++                    if imported_alias and imported_alias == name:
++                        # This is an imported name with an alias
++                        if self._is_used_in_type_comment(imported_name, node):
++                            return True
++                    elif imported_name == name:
++                        # This is the imported name
++                        if self._is_used_in_type_comment(name, node):
++                            return True
++        return False
+ 
+     def _check_unused_arguments(self, name, node, stmt, argnames):
+         is_method = node.is_method()
+diff --git a/run_pylint.py b/run_pylint.py
+new file mode 100644
+index 00000000..fac3b357
+--- /dev/null
++++ b/run_pylint.py
+@@ -0,0 +1,18 @@
++#!/usr/bin/env python3
++"""Simple script to run pylint on a file."""
++import sys
++from pylint.lint import Run
++
++if __name__ == "__main__":
++    if len(sys.argv) < 2:
++        print("Usage: python run_pylint.py <filename>")
++        sys.exit(1)
++    
++    filename = sys.argv[1]
++    print(f"Running pylint on {filename}")
++    
++    try:
++        results = Run([filename], do_exit=False)
++        print("\nPylint completed successfully.")
++    except Exception as e:
++        print(f"Error running pylint: {e}")
+\ No newline at end of file
+diff --git a/test_unused_import_type_comment.py b/test_unused_import_type_comment.py
+new file mode 100644
+index 00000000..ba4ac30f
+--- /dev/null
++++ b/test_unused_import_type_comment.py
+@@ -0,0 +1,7 @@
++"""Docstring."""
++
++import abc
++from abc import ABC
++
++X = ...  # type: abc.ABC
++Y = ...  # type: ABC
+\ No newline at end of file
+diff --git a/test_unused_import_type_comment_comprehensive.py b/test_unused_import_type_comment_comprehensive.py
+new file mode 100644
+index 00000000..c68e1b8a
+--- /dev/null
++++ b/test_unused_import_type_comment_comprehensive.py
+@@ -0,0 +1,28 @@
++"""Comprehensive test for unused imports with type comments."""
++
++import abc
++from abc import ABC
++import typing
++import os
++
++# Type comment on assignment
++X = ...  # type: abc.ABC
++
++# Type comment on function argument
++def func(arg: typing.List[str]) -> None:
++    pass
++
++# Type comment on class method
++class MyClass:
++    def __init__(self, value):  # type: (int) -> None
++        self.value = value
++
++# Type comment on variable annotation
++Y: os.PathLike = ...
++
++# Type comment on function with complex type
++def another_func() -> typing.Dict[str, abc.ABC]:
++    return {}
++
++# Type comment on assignment with alias
++Z = ...  # type: typing.Callable[[], None]
+\ No newline at end of file
+diff --git a/test_unused_import_type_comment_final.py b/test_unused_import_type_comment_final.py
+new file mode 100644
+index 00000000..461a2877
+--- /dev/null
++++ b/test_unused_import_type_comment_final.py
+@@ -0,0 +1,28 @@
++"""Final test for unused imports with type comments."""
++
++import abc
++from abc import ABC
++import typing
++import os
++
++# Type comment on assignment
++X = ...  # type: abc.ABC
++
++# Type comment on function argument
++def func(arg: typing.List[str]) -> None:
++    pass
++
++# Type comment on class method
++class MyClass:
++    def __init__(self, value):  # type: (int) -> None
++        self.value = value
++
++# Type comment on variable annotation
++Y: os.PathLike = ...
++
++# Type comment on function with complex type
++def another_func() -> typing.Dict[str, abc.ABC]:
++    return {}
++
++# Type comment on assignment with alias
++Z = ...  # type: typing.Callable[[], None]
+\ No newline at end of file
+diff --git a/test_unused_import_type_comment_original.py b/test_unused_import_type_comment_original.py
+new file mode 100644
+index 00000000..ba4ac30f
+--- /dev/null
++++ b/test_unused_import_type_comment_original.py
+@@ -0,0 +1,7 @@
++"""Docstring."""
++
++import abc
++from abc import ABC
++
++X = ...  # type: abc.ABC
++Y = ...  # type: ABC
+\ No newline at end of file

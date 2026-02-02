@@ -1,0 +1,46 @@
+diff --git a/django/core/management/base.py b/django/core/management/base.py
+index abc6f79a15..8020281f04 100644
+--- a/django/core/management/base.py
++++ b/django/core/management/base.py
+@@ -5,6 +5,7 @@ be executed through ``django-admin`` or ``manage.py``).
+ import argparse
+ import os
+ import sys
++import functools
+ from argparse import ArgumentParser, HelpFormatter
+ from io import TextIOBase
+ 
+@@ -70,6 +71,33 @@ class CommandParser(ArgumentParser):
+             super().error(message)
+         else:
+             raise CommandError("Error: %s" % message)
++    def add_subparsers(self, **kwargs):
++        # Ensure subparsers use CommandParser with proper error handling
++        if 'parser_class' not in kwargs:
++            kwargs['parser_class'] = type(self)
++        
++        # Create the subparsers action
++        subparsers_action = super().add_subparsers(**kwargs)
++        
++        # Capture the original add_parser method
++        orig_add_parser = subparsers_action.add_parser
++        
++        # Create a wrapper to set error handling attributes on subparsers
++        def add_parser_wrapper(name, **parser_kwargs):
++            # Create the subparser
++            parser = orig_add_parser(name, **parser_kwargs)
++            
++            # Propagate error handling attributes to subparsers
++            if isinstance(parser, CommandParser):
++                parser.called_from_command_line = self.called_from_command_line
++                parser.missing_args_message = self.missing_args_message
++            
++            return parser
++        
++        # Replace the add_parser method with our wrapper
++        subparsers_action.add_parser = add_parser_wrapper
++        
++        return subparsers_action
+ 
+ 
+ def handle_default_options(options):

@@ -1,8 +1,11 @@
+misc/
+start_with_P/
+
 keys.yaml
 .swe-agent-human-history
 .vscode/**
 cov.xml
-trajectories/**
+# trajectories/**
 !trajectories/demonstrations/**
 data/**
 *.env

@@ -1,0 +1,31 @@
+diff --git a/astropy/io/ascii/rst.py b/astropy/io/ascii/rst.py
+index abdeba8ef..70a8dc4c3 100644
+--- a/astropy/io/ascii/rst.py
++++ b/astropy/io/ascii/rst.py
+@@ -57,10 +57,23 @@ class RST(FixedWidth):
+     data_class = SimpleRSTData
+     header_class = SimpleRSTHeader
+ 
+-    def __init__(self):
+-        super().__init__(delimiter_pad=None, bookend=False)
++    def __init__(self, header_rows=None, **kwargs):
++        super().__init__(delimiter_pad=None, bookend=False, header_rows=header_rows, **kwargs)
+ 
+     def write(self, lines):
+         lines = super().write(lines)
+-        lines = [lines[1]] + lines + [lines[1]]
++        # Find the separator line (it's the first line that starts and ends with '=')
++        separator_line = next((line for line in lines if line.strip().startswith('=') and line.strip().endswith('=')), None)
++        if separator_line:
++            # The superclass returns lines in the format:
++            # [header_row1, header_row2, ..., separator_line, data_row1, data_row2, ...]
++            # We need to insert the separator at the top and bottom
++            # First, find the index of the separator line
++            sep_index = lines.index(separator_line)
++            # The header rows are all lines before the separator
++            header_rows = lines[:sep_index]
++            # The data rows are all lines after the separator
++            data_rows = lines[sep_index+1:]
++            # Reconstruct the table with separators at top and bottom
++            return [separator_line] + header_rows + [separator_line] + data_rows + [separator_line]
+         return lines

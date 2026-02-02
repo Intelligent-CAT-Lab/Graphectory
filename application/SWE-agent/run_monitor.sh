@@ -4,7 +4,7 @@
 RUN_ID="${1:-1}"
 CONFIG="oscillation"
 
-CSV_FILE="/home/shuyang/Graphectory/stats/flawed_trajs/oscillation.csv"
+CSV_FILE="../stats/flawed_trajs/oscillation.csv"
 
 # Extract SWE-agent instances and group by model
 declare -A MODEL_INSTANCES

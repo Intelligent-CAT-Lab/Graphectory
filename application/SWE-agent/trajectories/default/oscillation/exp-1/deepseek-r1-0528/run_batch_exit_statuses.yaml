@@ -1,0 +1,42 @@
+instances_by_exit_status:
+    exit_error:
+    - astropy__astropy-14182
+    - django__django-13401
+    - matplotlib__matplotlib-22865
+    - sphinx-doc__sphinx-10466
+    submitted:
+    - django__django-11477
+    - django__django-13128
+    - django__django-11820
+    - django__django-14500
+    - django__django-14725
+    - django__django-16454
+    - pydata__xarray-4629
+    - django__django-16938
+    - django__django-11848
+    - pydata__xarray-6461
+    - pydata__xarray-7229
+    - pytest-dev__pytest-5262
+    - sphinx-doc__sphinx-10323
+    - sphinx-doc__sphinx-10449
+    - sphinx-doc__sphinx-10614
+    - pylint-dev__pylint-4604
+    - sphinx-doc__sphinx-8551
+    - sphinx-doc__sphinx-9461
+    - sympy__sympy-13852
+    - sphinx-doc__sphinx-7757
+    - sympy__sympy-18189
+    - sympy__sympy-16597
+    - sympy__sympy-20438
+    - sympy__sympy-19783
+    submitted (exit_context):
+    - sympy__sympy-19040
+    submitted (exit_cost):
+    - sympy__sympy-23262
+    submitted (exit_error):
+    - django__django-7530
+    - sympy__sympy-12419
+    submitted (exit_format):
+    - django__django-10097
+    - django__django-15375
+total_cost: 11.287277099999992

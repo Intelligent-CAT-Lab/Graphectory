@@ -1,0 +1,72 @@
+diff --git a/django/forms/models.py b/django/forms/models.py
+index 7effb202e3..ef14ae86ca 100644
+--- a/django/forms/models.py
++++ b/django/forms/models.py
+@@ -571,11 +571,28 @@ class BaseModelFormSet(BaseFormSet):
+ 
+     # Set of fields that must be unique among forms of this set.
+     unique_fields = set()
++    can_add = True  # whether to allow adding new objects
+ 
+     def __init__(self, data=None, files=None, auto_id='id_%s', prefix=None,
+-                 queryset=None, *, initial=None, **kwargs):
++                 queryset=None, *, initial=None, can_add=None, **kwargs):
++        if can_add is not None:
++            self.can_add = can_add
++        else:
++            self.can_add = self.__class__.can_add
++            
+         self.queryset = queryset
+         self.initial_extra = initial
++        
++        if not self.can_add:
++            # Disallow adding new objects
++            if self.queryset is not None:
++                count = self.queryset.count()
++            else:
++                count = self.model._default_manager.count()
++            # Set max_num to current object count and extra to 0
++            self.max_num = count
++            self.extra = 0
++            
+         super().__init__(**{'data': data, 'files': files, 'auto_id': auto_id, 'prefix': prefix, **kwargs})
+ 
+     def initial_form_count(self):
+@@ -875,7 +892,8 @@ def modelformset_factory(model, form=ModelForm, formfield_callback=None,
+                          widgets=None, validate_max=False, localized_fields=None,
+                          labels=None, help_texts=None, error_messages=None,
+                          min_num=None, validate_min=False, field_classes=None,
+-                         absolute_max=None, can_delete_extra=True, renderer=None):
++                         absolute_max=None, can_delete_extra=True, renderer=None,
++                         can_add=True):
+     """Return a FormSet class for the given Django model class."""
+     meta = getattr(form, 'Meta', None)
+     if (getattr(meta, 'fields', fields) is None and
+@@ -884,6 +902,9 @@ def modelformset_factory(model, form=ModelForm, formfield_callback=None,
+             "Calling modelformset_factory without defining 'fields' or "
+             "'exclude' explicitly is prohibited."
+         )
++    
++    # Set the can_add attribute on the formset class
++    formset.can_add = can_add
+ 
+     form = modelform_factory(model, form=form, fields=fields, exclude=exclude,
+                              formfield_callback=formfield_callback,
+@@ -1076,7 +1097,8 @@ def inlineformset_factory(parent_model, model, form=ModelForm,
+                           widgets=None, validate_max=False, localized_fields=None,
+                           labels=None, help_texts=None, error_messages=None,
+                           min_num=None, validate_min=False, field_classes=None,
+-                          absolute_max=None, can_delete_extra=True, renderer=None):
++                          absolute_max=None, can_delete_extra=True, renderer=None,
++                          can_add=True):
+     """
+     Return an ``InlineFormSet`` for the given kwargs.
+ 
+@@ -1109,6 +1131,7 @@ def inlineformset_factory(parent_model, model, form=ModelForm,
+         'absolute_max': absolute_max,
+         'can_delete_extra': can_delete_extra,
+         'renderer': renderer,
++        'can_add': can_add,
+     }
+     FormSet = modelformset_factory(model, **kwargs)
+     FormSet.fk = fk

@@ -4,7 +4,13 @@
 
 Graphectory transforms agent execution traces into structured graphs that capture the problem-solving patterns of AI software engineering agents. By modeling agent actions as directed graphs with phase classification (localization, patching, validation), this tool enables systematic analysis of how agents approach and solve software engineering tasks.
 
----
+
+## Online Monitor
+
+We provide an online monitoring system that leverages Graphectory and Langutory to track agent execution in real-time, and intervene to reduce inefficiency patterns and plan violations. The monitor (`plan_monitor/`) is pluggable and currently integrates with SWE-agent.
+
+**See [application/README.md](application/README.md) for installation and usage instructions.**
+
 
 ## Dataset
 

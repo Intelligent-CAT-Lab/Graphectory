@@ -1,0 +1,189 @@
+diff --git a/reproduce_error.py b/reproduce_error.py
+new file mode 100644
+index 000000000..8ca7c697f
+--- /dev/null
++++ b/reproduce_error.py
+@@ -0,0 +1,24 @@
++from sympy import *
++from sympy import Q as Query
++
++n = Symbol('n', integer=True, positive=True)
++i, j = symbols('i j', integer=True)
++M = MatrixSymbol('M', n, n)
++
++e = None
++with assuming(Query.orthogonal(M)):
++    e = refine((M.T * M).doit())
++
++# Correct: M.T * M is an identity matrix.
++print("Matrix:", e)
++print("Elements:", e[0, 0], e[0, 1], e[1, 0], e[1, 1])
++
++# Correct: The output is True True
++print("Is diagonal?", ask(Query.diagonal(e)))
++print("Has integer elements?", ask(Query.integer_elements(e)))
++
++# Correct: The sum of the diagonal elements is n
++print("Trace (sum of diagonal):", Sum(e[i, i], (i, 0, n-1)).doit())
++
++# Total sum of the elements is expected to be 'n' but the answer is 0!
++print("Total sum of all elements:", Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit())
+\ No newline at end of file
+diff --git a/sympy/matrices/expressions/matexpr.py b/sympy/matrices/expressions/matexpr.py
+index b4d759836..4bc3cbac0 100644
+--- a/sympy/matrices/expressions/matexpr.py
++++ b/sympy/matrices/expressions/matexpr.py
+@@ -377,6 +377,66 @@ def _eval_derivative(self, v):
+ 
+         from sympy import KroneckerDelta
+         return KroneckerDelta(self.args[1], v.args[1])*KroneckerDelta(self.args[2], v.args[2])
++        
++    def _eval_sum(self, limits):
++        from sympy import KroneckerDelta, Sum
++        parent = self.parent
++        i, j = self.i, self.j
++        
++        # Handle identity matrix case
++        if hasattr(parent, 'is_Identity') and parent.is_Identity:
++            if len(limits) == 1:
++                (x, a, b) = limits[0]
++                if x == i or x == j:
++                    if a == 0 and b == parent.rows - 1:
++                        return S.One
++            elif len(limits) == 2:
++                (x, a, b), (y, c, d) = limits
++                if (x == i and y == j) or (x == j and y == i):
++                    if a == 0 and b == parent.rows - 1 and \
++                       c == 0 and d == parent.cols - 1:
++                        return parent.rows
++        
++        # Fall back to default summation behavior
++        return None
++        
++        # Handle identity matrix case
++        if hasattr(parent, 'is_Identity') and parent.is_Identity:
++            if len(limits) == 1:
++                (x, a, b) = limits[0]
++                if x == i or x == j:
++                    if a == 0 and b == parent.rows - 1:
++                        return S.One
++            elif len(limits) == 2:
++                (x, a, b), (y, c, d) = limits
++                if (x == i and y == j) or (x == j and y == i):
++                    if a == 0 and b == parent.rows - 1 and \
++                       c == 0 and d == parent.cols - 1:
++                        return parent.rows
++        
++        # Fall back to default summation behavior
++        return None
++        
++    def _eval_sum(self, limits):
++        from sympy import KroneckerDelta, Sum
++        parent = self.parent
++        i, j = self.i, self.j
++        
++        # Handle identity matrix case
++        if hasattr(parent, 'is_Identity') and parent.is_Identity:
++            if len(limits) == 1:
++                (x, a, b) = limits[0]
++                if x == i or x == j:
++                    if a == 0 and b == parent.rows - 1:
++                        return S.One
++            elif len(limits) == 2:
++                (x, a, b), (y, c, d) = limits
++                if (x == i and y == j) or (x == j and y == i):
++                    if a == 0 and b == parent.rows - 1 and \
++                       c == 0 and d == parent.cols - 1:
++                        return parent.rows
++        
++        return super(MatrixElement, self)._eval_sum(limits)
+ 
+ 
+ class MatrixSymbol(MatrixExpr):
+@@ -480,6 +540,25 @@ def _entry(self, i, j):
+             return S.One
+         else:
+             return S.Zero
++            
++    def _eval_total_sum(self):
++        """Return the sum of all elements in the identity matrix"""
++        return self.rows
++        
++    def _eval_sum(self, limits):
++        from sympy import Sum
++        # For double sum over all elements
++        if len(limits) == 2:
++            (i, a, b), (j, c, d) = limits
++            if (a == 0 and b == self.rows - 1 and 
++                c == 0 and d == self.cols - 1):
++                return self.rows
++        # For single sum over rows/cols
++        elif len(limits) == 1:
++            (x, a, b) = limits
++            if a == 0 and b == self.rows - 1:
++                return S.One
++        return super(Identity, self)._eval_sum(limits)
+ 
+     def _eval_determinant(self):
+         return S.One
+diff --git a/test_identity_fix.py b/test_identity_fix.py
+new file mode 100644
+index 000000000..90d0c0188
+--- /dev/null
++++ b/test_identity_fix.py
+@@ -0,0 +1,27 @@
++from sympy import *
++from sympy.matrices.expressions import Identity
++
++# Test case for identity matrix summation
++def test_identity_sum():
++    n = Symbol('n', integer=True, positive=True)
++    i, j = symbols('i j', integer=True)
++    I = Identity(n)
++    
++    # Single sum over rows
++    sum_i = Sum(I[i, j], (i, 0, n-1)).doit()
++    print(f"Sum over i: {sum_i}")  # Should be 1
++    
++    # Single sum over columns
++    sum_j = Sum(I[i, j], (j, 0, n-1)).doit()
++    print(f"Sum over j: {sum_j}")  # Should be 1
++    
++    # Double sum over all elements
++    total_sum = Sum(Sum(I[i, j], (i, 0, n-1)), (j, 0, n-1)).doit()
++    print(f"Total sum: {total_sum}")  # Should be n
++    
++    # Test with specific value
++    val = total_sum.subs(n, 3).doit()
++    print(f"Total sum for n=3: {val} (should be 3)")
++
++if __name__ == "__main__":
++    test_identity_sum()
+\ No newline at end of file
+diff --git a/test_identity_sum.py b/test_identity_sum.py
+new file mode 100644
+index 000000000..1d92324b9
+--- /dev/null
++++ b/test_identity_sum.py
+@@ -0,0 +1,20 @@
++from sympy import *
++from sympy.matrices.expressions import Identity
++
++n = Symbol('n', integer=True, positive=True)
++i, j = symbols('i j', integer=True)
++
++# Test single sum
++sum_i = Sum(Identity(n)[i, j], (i, 0, n-1))
++print("Sum over i:", sum_i.doit())  # Should be 1
++
++sum_j = Sum(Identity(n)[i, j], (j, 0, n-1))
++print("Sum over j:", sum_j.doit())  # Should be 1
++
++# Test double sum
++double_sum = Sum(Sum(Identity(n)[i, j], (i, 0, n-1)), (j, 0, n-1))
++print("Double sum:", double_sum.doit())  # Should be n
++
++# Test with specific value
++val = double_sum.subs(n, 3).doit()
++print("Double sum for n=3:", val, "(should be 3)")
+\ No newline at end of file

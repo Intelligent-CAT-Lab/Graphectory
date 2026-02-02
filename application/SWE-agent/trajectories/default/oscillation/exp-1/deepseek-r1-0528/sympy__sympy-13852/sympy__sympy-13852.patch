@@ -1,0 +1,40 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1cecb1f79..33bc9394d 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -2661,7 +2661,23 @@ class PropertyDocumenter(DocstringStripSignatureMixin, ClassLevelDocumenter):  #
+     @classmethod
+     def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any
+                             ) -> bool:
+-        return inspect.isproperty(member) and isinstance(parent, ClassDocumenter)
++        # Check for regular properties
++        if inspect.isproperty(member):
++            return isinstance(parent, ClassDocumenter)
++        
++        # Check for class properties (classmethods that return properties)
++        if inspect.isclassmethod(member) and hasattr(member, "__func__") and \
++           inspect.isproperty(member.__func__):
++            return isinstance(parent, ClassDocumenter)
++            
++        return False
++        
++    def import_object(self, raiseerror: bool = False) -> bool:
++        ret = super().import_object(raiseerror)
++        if ret and inspect.isclassmethod(self.object):
++            # Unwrap classmethod to get the underlying property
++            self.object = self.object.__func__
++        return ret
+ 
+     def document_members(self, all_members: bool = False) -> None:
+         pass
+@@ -2675,6 +2691,10 @@ class PropertyDocumenter(DocstringStripSignatureMixin, ClassLevelDocumenter):  #
+         sourcename = self.get_sourcename()
+         if inspect.isabstractmethod(self.object):
+             self.add_line('   :abstractmethod:', sourcename)
++            
++        # Check if this is a class property and add :classmethod: directive
++        if hasattr(self.object, "__self__") and isinstance(self.object.__self__, type):
++            self.add_line('   :classmethod:', sourcename)
+ 
+         if safe_getattr(self.object, 'fget', None) and self.config.autodoc_typehints != 'none':
+             try:

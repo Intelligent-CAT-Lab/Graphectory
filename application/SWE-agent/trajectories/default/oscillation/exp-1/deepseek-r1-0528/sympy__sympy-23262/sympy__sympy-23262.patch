@@ -1,0 +1,217 @@
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000000..6ce00b684b
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,10 @@
++import inspect
++from sympy import lambdify
++
++# Test tuple with one element
++print("Tuple with one element:")
++print(inspect.getsource(lambdify([], tuple([1]))))
++
++# Test tuple with two elements
++print("\nTuple with two elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2]))))
+\ No newline at end of file
+diff --git a/sympy/printing/lambdarepr.py b/sympy/printing/lambdarepr.py
+index b9227d8d7a..c753ed8334 100644
+--- a/sympy/printing/lambdarepr.py
++++ b/sympy/printing/lambdarepr.py
+@@ -23,6 +23,21 @@ class LambdaPrinter(PythonCodePrinter):
+     lambdify.
+     """
+     printmethod = "_lambdacode"
++    
++    def _print_Tuple(self, expr):
++        """
++        Print a Tuple with proper comma handling for single-element tuples
++        
++        In Python, a single-element tuple requires a trailing comma to distinguish
++        it from a parenthesized expression. This method ensures that tuples with
++        one element are printed with a trailing comma.
++        """
++        if len(expr) == 0:
++            return "()"
++        elif len(expr) == 1:
++            return "(%s,)" % self._print(expr[0])
++        else:
++            return "(%s)" % ", ".join(self._print(item) for item in expr)
+ 
+ 
+     def _print_And(self, expr):
+@@ -176,7 +191,6 @@ def blacklisted(self, expr):
+     # blacklist some Python expressions
+     _print_list = \
+     _print_tuple = \
+-    _print_Tuple = \
+     _print_dict = \
+     _print_Dict = \
+     blacklisted
+@@ -236,4 +250,7 @@ def lambdarepr(expr, **settings):
+     """
+     Returns a string usable for lambdifying.
+     """
++    # Special handling for single-element tuples in return statements
++    if isinstance(expr, tuple) and len(expr) == 1:
++        return "(%s,)" % LambdaPrinter(settings).doprint(expr[0])
+     return LambdaPrinter(settings).doprint(expr)
+diff --git a/sympy/printing/pycode.py b/sympy/printing/pycode.py
+index 1877c3f92a..1576899ab4 100644
+--- a/sympy/printing/pycode.py
++++ b/sympy/printing/pycode.py
+@@ -308,7 +308,19 @@ def _print_Declaration(self, decl):
+ 
+     def _print_Return(self, ret):
+         arg, = ret.args
+-        return 'return %s' % self._print(arg)
++        # Special handling for tuples to ensure proper formatting
++        if hasattr(arg, 'is_Tuple') and arg.is_Tuple:
++            if len(arg) == 1:
++                return 'return (%s,)' % self._print(arg[0])
++            else:
++                return 'return %s' % self._print(arg)
++        elif isinstance(arg, tuple):
++            if len(arg) == 1:
++                return 'return (%s,)' % self._print(arg[0])
++            else:
++                return 'return %s' % self._print(arg)
++        else:
++            return 'return %s' % self._print(arg)
+ 
+     def _print_Print(self, prnt):
+         print_args = ', '.join(map(lambda arg: self._print(arg), prnt.print_args))
+@@ -552,6 +564,21 @@ def _print_Half(self, expr):
+ 
+     def _print_frac(self, expr):
+         return self._print_Mod(Mod(expr.args[0], 1))
++        
++    def _print_Tuple(self, expr):
++        """
++        Print a Tuple with proper comma handling for single-element tuples
++        
++        In Python, a single-element tuple requires a trailing comma to distinguish
++        it from a parenthesized expression. This method ensures that tuples with
++        one element are printed with a trailing comma.
++        """
++        if len(expr) == 0:
++            return "()"
++        elif len(expr) == 1:
++            return "(%s,)" % self._print(expr[0])
++        else:
++            return "(%s)" % ", ".join(self._print(item) for item in expr)
+ 
+     def _print_Symbol(self, expr):
+ 
+diff --git a/test_lambdify_direct.py b/test_lambdify_direct.py
+new file mode 100644
+index 0000000000..ef6d080ab9
+--- /dev/null
++++ b/test_lambdify_direct.py
+@@ -0,0 +1,10 @@
++import inspect
++from sympy import lambdify
++
++# Test lambdify with tuple of one element
++print("Tuple with one element:")
++print(inspect.getsource(lambdify([], tuple([1])))
++
++# Test lambdify with tuple of two elements
++print("\nTuple with two elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2])))
+\ No newline at end of file
+diff --git a/test_lambdify_tuple.py b/test_lambdify_tuple.py
+new file mode 100644
+index 0000000000..1eb80e3bb8
+--- /dev/null
++++ b/test_lambdify_tuple.py
+@@ -0,0 +1,12 @@
++import inspect
++from sympy import lambdify
++
++# Test lambdify with tuples
++print("Tuple with one element:")
++print(inspect.getsource(lambdify([], tuple([1])))
++
++print("\nTuple with two elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2])))
++
++print("\nTuple with three elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2, 3])))))))
+\ No newline at end of file
+diff --git a/test_lambdify_tuple_corrected.py b/test_lambdify_tuple_corrected.py
+new file mode 100644
+index 0000000000..ba7e69fb07
+--- /dev/null
++++ b/test_lambdify_tuple_corrected.py
+@@ -0,0 +1,12 @@
++import inspect
++from sympy import lambdify
++
++# Test lambdify with tuples
++print("Tuple with one element:")
++print(inspect.getsource(lambdify([], tuple([1])))
++
++print("\nTuple with two elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2])))
++
++print("\nTuple with three elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2, 3]))))
+\ No newline at end of file
+diff --git a/test_lambdify_tuple_final.py b/test_lambdify_tuple_final.py
+new file mode 100644
+index 0000000000..47c9d90c59
+--- /dev/null
++++ b/test_lambdify_tuple_final.py
+@@ -0,0 +1,12 @@
++import inspect
++from sympy import lambdify
++
++# Test lambdify with tuples
++print("Tuple with one element:")
++print(inspect.getsource(lambdify([], tuple([1]))))
++
++print("\nTuple with two elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2]))))
++
++print("\nTuple with three elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2, 3]))))
+\ No newline at end of file
+diff --git a/test_lambdify_tuple_fixed.py b/test_lambdify_tuple_fixed.py
+new file mode 100644
+index 0000000000..ba7e69fb07
+--- /dev/null
++++ b/test_lambdify_tuple_fixed.py
+@@ -0,0 +1,12 @@
++import inspect
++from sympy import lambdify
++
++# Test lambdify with tuples
++print("Tuple with one element:")
++print(inspect.getsource(lambdify([], tuple([1])))
++
++print("\nTuple with two elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2])))
++
++print("\nTuple with three elements:")
++print(inspect.getsource(lambdify([], tuple([1, 2, 3]))))
+\ No newline at end of file
+diff --git a/test_tuple_printing.py b/test_tuple_printing.py
+new file mode 100644
+index 0000000000..fae87d7a18
+--- /dev/null
++++ b/test_tuple_printing.py
+@@ -0,0 +1,11 @@
++from sympy import Tuple
++from sympy.printing.pycode import PythonCodePrinter
++
++# Create a printer instance
++printer = PythonCodePrinter()
++
++# Test printing of tuples
++print("Empty tuple:", printer._print_Tuple(Tuple()))
++print("Single-element tuple:", printer._print_Tuple(Tuple(1)))
++print("Two-element tuple:", printer._print_Tuple(Tuple(1, 2)))
++print("Three-element tuple:", printer._print_Tuple(Tuple(1, 2, 3)))
+\ No newline at end of file

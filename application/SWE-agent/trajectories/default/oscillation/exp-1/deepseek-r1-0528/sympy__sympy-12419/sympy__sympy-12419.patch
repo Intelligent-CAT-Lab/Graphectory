@@ -1,0 +1,17 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 79d7e4f46..54a739a62 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -90,7 +90,11 @@ def type_to_xref(text: str, env: BuildEnvironment = None) -> addnodes.pending_xr
+                   'py:class': env.ref_context.get('py:class')}
+     else:
+         kwargs = {}
+-
++    
++    # Set refspecific=True only for unqualified names to ensure proper context resolution
++    if '.' not in text:
++        kwargs['refspecific'] = True
++    
+     return pending_xref('', nodes.Text(text),
+                         refdomain='py', reftype=reftype, reftarget=text, **kwargs)
+ 

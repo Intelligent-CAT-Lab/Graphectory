@@ -56,6 +56,11 @@ from sweagent.utils.jinja_warnings import _warn_probably_wrong_jinja_syntax
 from sweagent.utils.log import get_logger
 from sweagent.utils.patch_formatter import PatchFormatter
 
+try:
+    from plan_monitor import StatefulPhaseMonitor, ActionEvent
+    MONITOR_AVAILABLE = True
+except ImportError:
+    MONITOR_AVAILABLE = False
 
 class TemplateConfig(BaseModel):
     """This configuration is used to define almost all message templates that are
@@ -498,6 +503,12 @@ class DefaultAgent(AbstractAgent):
         self._n_consecutive_timeouts = 0
         self._total_execution_time = 0.0
 
+        # Initialize plan monitor if available
+        self._plan_monitor: StatefulPhaseMonitor | None = None
+        if MONITOR_AVAILABLE:
+            self._plan_monitor = StatefulPhaseMonitor()
+            print("Plan monitor initialized for agent.")
+
     @classmethod
     def from_config(cls, config: DefaultAgentConfig) -> Self:
         # To ensure that all models stay completely independent, we deepcopy the
@@ -713,6 +724,23 @@ class DefaultAgent(AbstractAgent):
 
     def add_step_to_history(self, step: StepOutput) -> None:
         """Adds a step (command that was run and output) to the model history"""
+        monitor_message = step.extra_info.get("monitor_message")
+        monitor_blocked = step.extra_info.get("monitor_blocked", False)
+
+        # If monitor blocked execution, don't add assistant's action to history
+        # Only add the monitor message as user
+        if monitor_blocked:
+            self._append_history(
+                {
+                    "role": "user",
+                    "content": monitor_message,
+                    "agent": self.name,
+                    "message_type": "monitor",
+                },
+            )
+            return
+
+        # Normal case: add assistant's action
         self._append_history(
             {
                 "role": "assistant",
@@ -744,6 +772,17 @@ class DefaultAgent(AbstractAgent):
             tool_call_ids=step.tool_call_ids,
             **step.state,
         )
+
+        # If monitor provided message (non-blocking case), add it as user message
+        if monitor_message and not monitor_blocked:
+            self._append_history(
+                {
+                    "role": "user",
+                    "content": monitor_message,
+                    "agent": self.name,
+                    "message_type": "monitor",
+                },
+            )
 
     def add_instance_template_to_history(self, state: dict[str, str]) -> None:
         """Add observation to history, as well as the instance template or demonstrations if we're
@@ -1049,6 +1088,33 @@ class DefaultAgent(AbstractAgent):
                 step.tool_calls = output["tool_calls"]
             self.logger.info(f"💭 THOUGHT\n{step.thought}\n\n🎬 ACTION\n{step.action.strip()}")
             self._chook.on_actions_generated(step=step)
+
+            # Pre-emptively check plan monitor before executing action
+            if self._plan_monitor is not None:
+                step_index = len(self.trajectory)
+                event = ActionEvent(
+                    step_index=step_index,
+                    command=step.action,
+                )
+                monitor_result = self._plan_monitor.check_step_pre_emptively(event, thought=step.thought)
+
+                if monitor_result is not None:
+                    messages = monitor_result.get_all_messages()
+                    if messages:
+                        monitor_message = "\n".join(messages)
+                        self.logger.info(f"📋 PLAN MONITOR\n{monitor_message}")
+                        # Store monitor message and blocking status for later handling
+                        step.extra_info["monitor_message"] = monitor_message
+                        step.extra_info["monitor_blocked"] = monitor_result.should_block_and_refine()
+
+                        # If blocking, don't execute action
+                        if monitor_result.should_block_and_refine():
+                            self.logger.warning("Plan monitor blocked action execution")
+                            assert self._env is not None
+                            step.observation = ""  # No observation since action wasn't executed
+                            step.state = self.tools.get_state(env=self._env)
+                            return step
+
             return self.handle_action(step)
         except Exception as e:
             if step.action == step.thought == "":
@@ -1250,14 +1316,24 @@ class DefaultAgent(AbstractAgent):
         n_step = len(self.trajectory) + 1
         self.logger.info("=" * 25 + f" STEP {n_step} " + "=" * 25)
         step_output = self.forward_with_handling(self.messages)
+
+        # Check if plan monitor blocked execution
+        monitor_blocked = step_output.extra_info.get("monitor_blocked", False)
+
+        # Always add to history (handles blocking/non-blocking internally)
         self.add_step_to_history(step_output)
 
-        self.info["submission"] = step_output.submission
-        self.info["exit_status"] = step_output.exit_status  # type: ignore
-        self.info.update(self._get_edited_files_with_context(patch=step_output.submission or ""))  # type: ignore
+        # Update model stats regardless of blocking (the model was queried)
         self.info["model_stats"] = self.model.stats.model_dump()
 
-        self.add_step_to_trajectory(step_output)
+        # Update info and trajectory only if not blocked
+        if not monitor_blocked:
+            self.info["submission"] = step_output.submission
+            self.info["exit_status"] = step_output.exit_status  # type: ignore
+            self.info.update(self._get_edited_files_with_context(patch=step_output.submission or ""))  # type: ignore
+
+            # Add to trajectory only if not blocked
+            self.add_step_to_trajectory(step_output)
 
         self._chook.on_step_done(step=step_output, info=self.info)
         return step_output

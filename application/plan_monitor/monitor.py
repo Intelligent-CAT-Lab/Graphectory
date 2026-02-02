@@ -114,8 +114,23 @@ class StatefulPhaseMonitor:
         graph_backup = copy.deepcopy(self.graph_builder.G) if self.graph_builder else None
         prev_node_backup = self.graph_builder.previous_node if self.graph_builder else None
         node_sig_backup = copy.deepcopy(self.graph_builder.node_signature_to_key) if self.graph_builder else None
+        localization_nodes_backup = self.graph_builder.localization_nodes.copy() if self.graph_builder else None
+        # Backup graph_builder's prev_phases and created_tests for correct phase classification
+        # These are used by get_action_role() during graph building and must be rolled back
+        prev_phases_backup = self.graph_builder.prev_phases.copy() if self.graph_builder else None
+        created_tests_gb_backup = self.graph_builder.created_tests.copy() if self.graph_builder else None
         role_history_len = len(self.role_history)
         step_counter_backup = self.step_counter
+        current_phase_backup = self.current_phase
+        previous_phase_backup = self.previous_phase
+
+        # Backup test tracking sets
+        created_tests_backup = self.created_tests.copy()
+        created_dynamic_suites_backup = self.created_dynamic_suites.copy()
+
+        # Backup rule engine state
+        rules_backup = copy.deepcopy(self.rule_engine.rules) if self.rule_engine else None
+        trigger_history_backup = self.rule_engine.trigger_history.copy() if self.rule_engine else None
 
         # Temporarily build graph for this step
         if self.graph_builder:
@@ -163,12 +178,23 @@ class StatefulPhaseMonitor:
 
             self.role_history.append(role)
 
+            # Update current phase
+            new_phase = Phase(role)
+            if self.current_phase is None:
+                # First phase - just initialize
+                self.current_phase = new_phase
+            elif new_phase != self.current_phase:
+                # Phase changed - update state
+                self.previous_phase = self.current_phase
+                self.current_phase = new_phase
+
             # Check rules for non-general roles
             if self.enable_rules and self.rule_engine:
                 rule_matches = self.rule_engine.evaluate(
-                    current_phase=Phase(role), previous_phase=self.current_phase,
+                    current_phase=new_phase, previous_phase=self.previous_phase,
                     graph=self.graph_builder.G if self.graph_builder else None,
-                    step_index=event.step_index, command=event.command, outcome=None
+                    step_index=event.step_index, command=event.command, outcome=None,
+                    role_history=self.role_history[:role_history_len]  # Pass history before current step
                 )
                 if rule_matches:
                     all_rule_matches.extend(rule_matches)
@@ -177,17 +203,50 @@ class StatefulPhaseMonitor:
         should_block = any(hasattr(m, 'block_execution') and m.block_execution for m in all_rule_matches)
 
         if should_block:
-            # Rollback all changes
+            # Rollback monitor state
             del self.role_history[role_history_len:]
             self.step_counter = step_counter_backup
-            if self.graph_builder and graph_backup:
+            self.current_phase = current_phase_backup
+            self.previous_phase = previous_phase_backup
+
+            # Rollback graph builder state
+            if self.graph_builder and graph_backup is not None:
                 self.graph_builder.G = graph_backup
                 self.graph_builder.previous_node = prev_node_backup
                 self.graph_builder.node_signature_to_key = node_sig_backup
+                if localization_nodes_backup is not None:
+                    self.graph_builder.localization_nodes = localization_nodes_backup
+                # Rollback prev_phases and created_tests to prevent misclassification
+                # If P was tentatively added to prev_phases, it must be removed
+                # Otherwise get_action_role() will think P was already executed
+                if prev_phases_backup is not None:
+                    self.graph_builder.prev_phases = prev_phases_backup
+                if created_tests_gb_backup is not None:
+                    self.graph_builder.created_tests = created_tests_gb_backup
+
+            # Rollback test tracking sets
+            # These are modified by get_action_role() during tentative evaluation
+            self.created_tests = created_tests_backup
+            self.created_dynamic_suites = created_dynamic_suites_backup
+
+            # Rollback ALL rule engine state
+            # During tentative evaluation, all rules update their internal state:
+            # - PhaseTransitionRule/StrategyShiftRule increment trigger_count
+            # - DwellTimeRule updates current_phase and dwell_count
+            # - OscillationDetector updates triggered_patterns and pattern_counts
+            # - PlanComplianceRule updates seen_phases, violation_count, etc.
+            # - RuleEngine updates trigger_history for rate limiting
+            # Since the action is blocked and never actually executed, all rule state
+            # changes must be rolled back to maintain consistency
+            if self.rule_engine:
+                if rules_backup is not None:
+                    self.rule_engine.rules = rules_backup
+                if trigger_history_backup is not None:
+                    self.rule_engine.trigger_history = trigger_history_backup
 
             return MonitorResult(
-                current_phase=self.current_phase, phase_changed=False, category_changed=False,
-                previous_phase=self.previous_phase, rule_matches=all_rule_matches
+                current_phase=current_phase_backup, phase_changed=False, category_changed=False,
+                previous_phase=previous_phase_backup, rule_matches=all_rule_matches
             )
         else:
             # State already updated, return result

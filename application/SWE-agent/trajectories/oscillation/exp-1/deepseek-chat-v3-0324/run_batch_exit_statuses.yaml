@@ -1,0 +1,44 @@
+instances_by_exit_status:
+    skipped (submitted (exit_context)):
+    - pydata__xarray-4687
+    - sphinx-doc__sphinx-8459
+    - sphinx-doc__sphinx-9230
+    skipped (submitted):
+    - django__django-10999
+    - astropy__astropy-14995
+    - django__django-11551
+    - django__django-13346
+    - django__django-14034
+    - django__django-14351
+    - django__django-14404
+    - django__django-14539
+    - django__django-14765
+    - django__django-15278
+    - django__django-15561
+    - django__django-15563
+    - django__django-16082
+    - matplotlib__matplotlib-14623
+    - matplotlib__matplotlib-26208
+    - pydata__xarray-3095
+    - pydata__xarray-6744
+    - scikit-learn__scikit-learn-9288
+    - django__django-11292
+    - sphinx-doc__sphinx-7757
+    - sphinx-doc__sphinx-8056
+    - django__django-12858
+    - sphinx-doc__sphinx-9229
+    - sphinx-doc__sphinx-8548
+    - django__django-11964
+    - sympy__sympy-13852
+    - sympy__sympy-12481
+    - sphinx-doc__sphinx-9602
+    - sympy__sympy-16792
+    - sympy__sympy-17630
+    - django__django-13569
+    - sympy__sympy-17318
+    - sympy__sympy-21612
+    - sympy__sympy-18189
+    - sympy__sympy-19495
+    - sympy__sympy-23534
+    - sympy__sympy-19783
+total_cost: 0

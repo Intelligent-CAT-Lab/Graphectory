@@ -1,0 +1,320 @@
+diff --git a/django/db/models/aggregates.py b/django/db/models/aggregates.py
+index 8c4eae7906..4c00b875fe 100644
+--- a/django/db/models/aggregates.py
++++ b/django/db/models/aggregates.py
+@@ -22,6 +22,28 @@ class Aggregate(Func):
+     window_compatible = True
+     allow_distinct = False
+     empty_result_set_value = None
++    
++    def as_sql(self, compiler, connection, **extra_context):
++        # Special handling for aggregates with default after annotations
++        if self.default is not None and compiler.query.annotations:
++            # When there are annotations, we need to ensure the aggregate is computed correctly
++            # by using a subquery approach
++            from django.db.models import Subquery, OuterRef
++            # Create a clone of the query without annotations
++            subquery = compiler.query.model.objects.filter(pk=OuterRef('pk'))
++            # Apply the aggregate directly to the subquery
++            subquery = subquery.annotate(
++                agg_value=super(Aggregate, self.copy())
++            ).values('agg_value')
++            
++            # Create a Coalesce expression to handle the default
++            from django.db.models import Coalesce
++            coalesce_expr = Coalesce(Subquery(subquery), self.default, output_field=self._output_field_or_none)
++            
++            # Return the SQL for the Coalesce expression
++            return coalesce_expr.as_sql(compiler, connection, **extra_context)
++            
++        return super().as_sql(compiler, connection, **extra_context)
+ 
+     def __init__(self, *expressions, distinct=False, filter=None, default=None, **extra):
+         if distinct and not self.allow_distinct:
+@@ -65,6 +87,20 @@ class Aggregate(Func):
+         if hasattr(default, 'resolve_expression'):
+             default = default.resolve_expression(query, allow_joins, reuse, summarize)
+         c.default = None  # Reset the default argument before wrapping.
++        
++        # Special handling for aggregates after annotations
++        if query and query.annotations:
++            # When there are annotations, we need to ensure the aggregate is computed correctly
++            # by using a subquery approach
++            from django.db.models import Subquery, OuterRef
++            # Create a clone of the query without annotations
++            subquery = query.model.objects.filter(pk=OuterRef('pk'))
++            # Apply the aggregate directly to the subquery
++            subquery = subquery.annotate(
++                agg_value=c
++            ).values('agg_value')
++            return Coalesce(Subquery(subquery), default, output_field=c._output_field_or_none)
++        
+         return Coalesce(c, default, output_field=c._output_field_or_none)
+ 
+     @property
+@@ -95,6 +131,26 @@ class Aggregate(Func):
+                 condition = When(self.filter, then=source_expressions[0])
+                 copy.set_source_expressions([Case(condition)] + source_expressions[1:])
+                 return super(Aggregate, copy).as_sql(compiler, connection, **extra_context)
++                
++        # Special handling for aggregates with default after annotations
++        if self.default is not None and compiler.query.annotations:
++            # When there are annotations, we need to wrap the aggregate in a subquery
++            # to ensure the SQL is generated correctly
++            from django.db.models import Subquery, OuterRef
++            # Create a clone of the query without annotations
++            subquery = compiler.query.model.objects.filter(pk=OuterRef('pk'))
++            # Apply the aggregate directly to the subquery
++            subquery = subquery.annotate(
++                agg_value=super(Aggregate, self.copy())
++            ).values('agg_value')
++            
++            # Create a Coalesce expression to handle the default
++            from django.db.models import Coalesce
++            coalesce_expr = Coalesce(Subquery(subquery), self.default, output_field=self._output_field_or_none)
++            
++            # Return the SQL for the Coalesce expression
++            return coalesce_expr.as_sql(compiler, connection, **extra_context)
++                
+         return super().as_sql(compiler, connection, **extra_context)
+ 
+     def _get_repr_options(self):
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index e3fdea6f3a..e20c4709e8 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -465,6 +465,11 @@ class Query(BaseExpression):
+                 if inner_query.default_cols and has_existing_aggregate_annotations:
+                     inner_query.group_by = (self.model._meta.pk.get_col(inner_query.get_initial_alias()),)
+                 inner_query.default_cols = False
++            
++            # Special handling for aggregates with default values
++            # Ensure we don't generate invalid SQL with empty SELECT clause
++            if not inner_query.select and not inner_query.annotation_select_mask:
++                inner_query.select = (self.model._meta.pk.get_col(inner_query.get_initial_alias()),)
+ 
+             relabels = {t: 'subquery' for t in inner_query.alias_map}
+             relabels[None] = 'subquery'
+@@ -473,7 +478,8 @@ class Query(BaseExpression):
+             col_cnt = 0
+             for alias, expression in list(inner_query.annotation_select.items()):
+                 annotation_select_mask = inner_query.annotation_select_mask
+-                if expression.is_summary:
++                # Move aggregates to outer query, including those with default values
++                if expression.is_summary or (expression.contains_aggregate and expression.is_summary is None) or getattr(expression, 'default', None) is not None:
+                     expression, col_cnt = inner_query.rewrite_cols(expression, col_cnt)
+                     outer_query.annotations[alias] = expression.relabeled_clone(relabels)
+                     del inner_query.annotations[alias]
+@@ -485,6 +491,25 @@ class Query(BaseExpression):
+                 # field selected in the inner query, yet we must use a subquery.
+                 # So, make sure at least one field is selected.
+                 inner_query.select = (self.model._meta.pk.get_col(inner_query.get_initial_alias()),)
++            # Special case for aggregates with default after annotations
++            # Ensure we have at least one field in SELECT to prevent empty SELECT clause
++            elif inner_query.select == () and inner_query.annotation_select_mask:
++                # If we have annotations but no selected fields, add the primary key
++                inner_query.select = (self.model._meta.pk.get_col(inner_query.get_initial_alias()),)
++            # Special case for aggregates with default after annotations
++            # Ensure we have at least one field in SELECT to prevent empty SELECT clause
++            elif inner_query.select == () and inner_query.annotation_select_mask:
++                # If we have annotations but no selected fields, add the primary key
++                inner_query.select = (self.model._meta.pk.get_col(inner_query.get_initial_alias()),)
++            # Special case for aggregates with default after annotations
++            # Ensure we have at least one field in SELECT to prevent empty SELECT clause
++            elif inner_query.select == () and inner_query.annotation_select_mask:
++                # If we have annotations but no selected fields, add the primary key
++                inner_query.select = (self.model._meta.pk.get_col(inner_query.get_initial_alias()),)
++            # Always ensure we have at least one field in the SELECT clause
++            # to prevent empty SELECT statements when using aggregate with default
++            elif inner_query.select == () and not inner_query.annotation_select_mask:
++                inner_query.select = (self.model._meta.pk.get_col(inner_query.get_initial_alias()),)
+         else:
+             outer_query = self
+             self.select = ()
+diff --git a/reproduce_bug.py b/reproduce_bug.py
+new file mode 100644
+index 0000000000..7978a8c675
+--- /dev/null
++++ b/reproduce_bug.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/env python3
++"""Script to reproduce the aggregate+annotate bug"""
++
++import os
++import sys
++
++# Setup Django environment
++sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
++import django
++from django.conf import settings
++
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=[],
++)
++django.setup()
++
++# Define minimal model
++from django.db import models
++
++class Book(models.Model):
++    title = models.CharField(max_length=100)
++    
++    class Meta:
++        app_label = 'core'
++
++# Create database schema
++from django.db import connection
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Book)
++
++# Reproduce bug
++from django.db.models import F, Sum
++
++# Create some test data
++Book.objects.create(title="Book 1")
++Book.objects.create(title="Book 2")
++
++print("Testing aggregate after annotate:")
++
++# This should work
++result1 = Book.objects.annotate(idx=F("id")).aggregate(Sum("id"))
++print(f"Without default: {result1}")
++
++try:
++    # This should break
++    result2 = Book.objects.annotate(idx=F("id")).aggregate(Sum("id", default=0))
++    print(f"With default: {result2}")
++except Exception as e:
++    print(f"With default: ERROR - {str(e)}")
++    print("\nBug reproduced successfully!")
+diff --git a/simple_reproduce.py b/simple_reproduce.py
+new file mode 100644
+index 0000000000..fad5de1151
+--- /dev/null
++++ b/simple_reproduce.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/env python3
++"""Simpler script to reproduce the aggregate+annotate bug"""
++
++import os
++import sys
++
++# Setup Django environment
++sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
++import django
++from django.conf import settings
++
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=[],
++)
++django.setup()
++
++# Define minimal model
++from django.db import models
++
++class SimpleModel(models.Model):
++    value = models.IntegerField()
++    
++    class Meta:
++        app_label = 'core'
++
++# Create database schema
++from django.db import connection
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(SimpleModel)
++
++# Reproduce bug
++from django.db.models import F, Sum
++
++# Create some test data
++SimpleModel.objects.create(value=1)
++SimpleModel.objects.create(value=2)
++
++print("Testing aggregate after annotate:")
++
++# This should work
++result1 = SimpleModel.objects.annotate(val=F("value")).aggregate(Sum("value"))
++print(f"Without default: {result1}")
++
++try:
++    # This should break
++    result2 = SimpleModel.objects.annotate(val=F("value")).aggregate(Sum("value", default=0))
++    print(f"With default: {result2}")
++except Exception as e:
++    print(f"With default: ERROR - {str(e)}")
++    print("\nBug reproduced successfully!")
+diff --git a/simple_reproduce_fixed.py b/simple_reproduce_fixed.py
+new file mode 100644
+index 0000000000..a6daf90bcc
+--- /dev/null
++++ b/simple_reproduce_fixed.py
+@@ -0,0 +1,57 @@
++#!/usr/bin/env python3
++"""Simpler script to reproduce and fix the aggregate+annotate bug"""
++
++import os
++import sys
++
++# Setup Django environment
++sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
++import django
++from django.conf import settings
++
++settings.configure(
++    DATABASES={
++        'default': {
++            'ENGINE': 'django.db.backends.sqlite3',
++            'NAME': ':memory:',
++        }
++    },
++    INSTALLED_APPS=[],
++)
++django.setup()
++
++# Define minimal model
++from django.db import models
++
++class SimpleModel(models.Model):
++    value = models.IntegerField()
++    
++    class Meta:
++        app_label = 'core'
++
++# Create database schema
++from django.db import connection
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(SimpleModel)
++
++# Reproduce bug
++from django.db.models import F, Sum
++
++# Create some test data
++SimpleModel.objects.create(value=1)
++SimpleModel.objects.create(value=2)
++
++print("Testing aggregate after annotate:")
++
++# This should work
++result1 = SimpleModel.objects.annotate(val=F("value")).aggregate(Sum("value"))
++print(f"Without default: {result1}")
++
++try:
++    # This should work after our fix
++    result2 = SimpleModel.objects.annotate(val=F("value")).aggregate(Sum("value", default=0))
++    print(f"With default: {result2}")
++    print("\nBug fixed successfully!")
++except Exception as e:
++    print(f"With default: ERROR - {str(e)}")
++    print("\nBug still exists!")
