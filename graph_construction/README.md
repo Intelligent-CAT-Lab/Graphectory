@@ -2,16 +2,6 @@
 
 Interactive graph visualiser for SWE-agent and OpenHands trajectory files. Two entry points are provided: a **live server** that renders graphs on demand in the browser, and a **batch export script** that pre-generates graph JSON files to disk.
 
-## Dependencies
-
-```
-networkx       # Graph data structure
-bashlex        # Shell command parsing (used by commandParser)
-datasets       # HuggingFace datasets — required by generatejson.py for difficulty lookup,
-               # optional in the live server (omitting it just leaves difficulty as "unknown")
-dagre (JS)     # Automatic graph layout — loaded from unpkg.com at render time
-```
-
 ---
 
 ## Live Server
@@ -37,6 +27,9 @@ python live_graph_server.py \
 ```
 
 Then open **http://localhost:8000** in your browser.
+
+![Interactive trajectory graph visualization in the browser](../figures/html_demo.png)
+*Live server interface showing instance list (left) and interactive graph visualization (right) with phase-colored nodes.*
 
 ### Arguments
 

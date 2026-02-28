@@ -1,6 +1,6 @@
 # Graphectory
 
-**Process-centric analysis of agentic software systems.**
+Artifact repository for the paper [**Process-centric analysis of agentic software systems**](https://arxiv.org/abs/2512.02393), accepted to OOPSLA 2026.
 
 Graphectory transforms agent execution traces into structured graphs that capture the problem-solving patterns of AI software engineering agents. By modeling agent actions as directed graphs with phase classification (localization, patching, validation), this tool enables systematic analysis of how agents approach and solve software engineering tasks.
 
@@ -22,48 +22,60 @@ cd Graphectory
 python -m pip install -e .
 ```
 
-We recommend using conda or virtual environments to manage dependencies.
+We recommend using conda or virtual environments (python>=3.12) to manage dependencies.
 
 ---
 
 ## Quick Start
 
-### Basic Usage
+Graphectory provides two tools for working with agent trajectories:
 
-```bash
-python graph_construction/generate_graphs.py \
-  --agent {sa|oh} \
-  --model {dsk-v3|dsk-r1|dev|cld-4} \
-  --trajs <path_to_trajectories> \
-  --eval_report <path_to_report.json> \
-  --output_dir <output_directory>
-```
+- **[generatejson.py](graph_construction/generatejson.py)**: Batch export graphs to JSON files
+- **[live_graph_server.py](graph_construction/live_graph_server.py)**: Interactive browser-based graph visualization
 
-### Sample runs
+For detailed usage and configuration options, see [graph_construction/README.md](graph_construction/README.md).
+
+### Batch Export (generatejson.py)
+
+Generate JSON graph files for offline analysis:
 
 **SWE-agent with DeepSeek-V3:**
 ```bash
-python graph_construction/generate_graphs.py \
+python graph_construction/generatejson.py \
   --agent sa --model dsk-v3 \
   --trajs data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test \
   --eval_report data/SWE-agent/reports/deepseek-chat.json \
   --output_dir data/samples
 ```
 
-**OpenHands with DeepSeek-V3:**
+**OpenHands with Claude-Sonnet-4:**
 ```bash
-python graph_construction/generate_graphs.py \
-  --agent oh --model dsk-v3 \
+python graph_construction/generatejson.py \
+  --agent oh --model cld-4 \
   --trajs data/samples/OpenHands/trajectories/deepseek-chat_maxiter_100_N_v0.40.0-no-hint-run_1/sample_output.jsonl \
   --eval_report data/samples/OpenHands/trajectories/deepseek-chat_maxiter_100_N_v0.40.0-no-hint-run_1/report.json \
   --output_dir data/samples
 ```
 
-**Output**: `{output_dir}/{Agent}/graphs/{model}/{instance_id}/{instance_id}.{json,pdf}`
+**Output**: `{output_dir}/{Agent}/graphs/{model}/{instance_id}/{instance_id}.json`
+
+### Live Interactive Visualization (live_graph_server.py)
+
+Launch a local server for exploring trajectories interactively in your browser:
+
+```bash
+python graph_construction/live_graph_server.py \
+  --trajs <path_to_trajectories> \
+  --eval_report <path_to_report.json>
+```
+
+Then open **http://localhost:8000** to browse and visualize graphs on demand. 
 
 ---
 
 ## Input Requirements
+
+### generatejson.py
 
 | Argument | Description | Format |
 |----------|-------------|--------|
@@ -74,21 +86,36 @@ python graph_construction/generate_graphs.py \
 | `--output_dir` | Base output directory | Organized as `{agent}/graphs/{model}/{instance_id}/` |
 | `--workers` | Parallel workers (optional) | Default: 8 |
 
+### live_graph_server.py
+
+| Argument | Description | Format |
+|----------|-------------|--------|
+| `--trajs` | Trajectory path | **SWE-agent**: directory with `.traj` files<br>**OpenHands**: `output.jsonl` file<br>Agent type auto-detected |
+| `--eval_report` | Evaluation report | JSON with `resolved_ids`/`unresolved_ids` keys |
+| `--port` | Server port (optional) | Default: 8000 |
+| `--assets_dir` | Assets directory (optional) | Default: script directory |
+
 ---
 
 ## Graph Construction Process
 
-1. **Parsing**: Agent trajectories → atomic actions (tool calls, commands, subcommands)
+Both `generatejson.py` and `live_graph_server.py` share the same graph construction pipeline:
+
+1. **Parsing**: Agent trajectories → atomic actions using [commandParser.py](graph_construction/commandParser.py)
 2. **Node Deduplication**: Identical actions merged with occurrence tracking
 3. **Phase Classification**: Actions categorized using heuristics ([mapPhase.py](graph_construction/mapPhase.py)):
    - **Localization**: Information gathering, searching, test generation before patching
    - **Patch**: Creating/editing non-test files
    - **Validation**: Running tests or editing test files after patching
    - **General**: Other actions (planning, environment setup)
-4. **Edge Construction**: Execution edges (sequential flow) + hierarchical edges (conceptual dependencies)
-5. **Output**: JSON (NetworkX node-link format) + PDF visualization with phase-colored nodes
+4. **Edge Construction**: Execution edges (sequential flow) + hierarchical edges (structural relationship)
+5. **Output**:
+   - `generatejson.py`: JSON files (NetworkX node-link format)
+   - `live_graph_server.py`: Interactive HTML visualization with phase-colored nodes
 
 **Graph Metadata**: Each graph includes `resolution_status`, `instance_name`, and `debug_difficulty`
+
+For detailed graph construction internals, see [buildGraph.py](graph_construction/buildGraph.py).
 
 ---
 
@@ -96,49 +123,60 @@ python graph_construction/generate_graphs.py \
 
 ### Adding New Models
 
-The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility, but you can easily add new models without code modification:
+The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility. To add new models, edit [generatejson.py:38](graph_construction/generatejson.py#L38):
 
+```python
+SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "my-model"}
+```
+
+Then run with your new model:
 ```bash
-python graph_construction/generate_graphs.py \
-  --agent sa --model your-custom-model \
+python graph_construction/generatejson.py \
+  --agent sa --model my-model \
   --trajs <your_trajectories> \
   --eval_report <your_report> \
   --output_dir <output>
 ```
 
-Simply provide a unique model identifier. Outputs will be organized under `graphs/your-custom-model/`.
-
 ### Supporting New SWE-agent Tools
 
-To parse custom SWE-agent tools:
+To parse custom SWE-agent tools, add their `config.yaml` files to [generatejson.py:558-562](graph_construction/generatejson.py#L558-L562):
 
-1. Add the tool's `config.yaml` to [graph_construction/generate_graphs.py:236-242](graph_construction/generate_graphs.py#L236-L242)
-2. Update `tool_configs` list in `setup_parser_for_agent()`
-
-Example:
 ```python
-tool_configs = [
-    "data/SWE-agent/tools/edit_anthropic/config.yaml",
-    "data/SWE-agent/tools/your_custom_tool/config.yaml",  # Add here
-]
+def setup_parser_for_agent(agent: str) -> CommandParser:
+    parser = CommandParser()
+    tool_configs = []
+    if agent == "sa":
+        tool_configs = [
+            "data/SWE-agent/tools/edit_anthropic/config.yaml",
+            "data/SWE-agent/tools/review_on_submit_m/config.yaml",
+            "data/SWE-agent/tools/registry/config.yaml",
+            "data/SWE-agent/tools/your_custom_tool/config.yaml",  # Add here
+        ]
+    if tool_configs:
+        parser.load_tool_yaml_files(tool_configs)
+    return parser
 ```
 
 ### Supporting New Agents
 
 To add support for a new agent framework:
 
-1. **Implement trajectory loader** in [buildGraph.py](graph_construction/buildGraph.py) following the pattern:
+1. **Implement trajectory builder** in [buildGraph.py](graph_construction/buildGraph.py) (see existing functions at lines 274 & 365):
    ```python
-   def build_graph_from_newagent_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path):
-       builder = GraphBuilder()
-       # Parse agent-specific trajectory structure
-       # Convert to builder.add_or_update_node() calls
-       return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
+    def build_graph_from_newagent_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path):
+        builder = GraphBuilder()
+        # Parse agent-specific trajectory structure
+        # Convert to builder.add_or_update_node() calls
+        return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
    ```
 
-2. **Add agent mapping** in [generate_graphs.py](graph_construction/generate_graphs.py):
+2. **Register the agent** in [generatejson.py:37-50](graph_construction/generatejson.py#L37-L50):
    - Update `SUPPORTED_AGENTS` and `AGENT_NAMES`
-   - Add conditional branch in `GraphProcessor.process_trajectory()`
+
+3. **Add trajectory loading logic** in [generatejson.py](graph_construction/generatejson.py):
+   - Update `load_trajectories()` to handle NewAgent's file format
+   - Add branch in `GraphProcessor.process_trajectory()` to call your builder function
 
 **Key principle**: Different agents have different trajectory formats, but all generate the same unified graph structure (nodes with phases, execution/hierarchical edges, metadata).
 

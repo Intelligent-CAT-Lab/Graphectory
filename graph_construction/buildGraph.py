@@ -78,7 +78,6 @@ def detect_observation_outcome(observation: str) -> str:
     success_signs = [
         "success",
         "passed",
-        "ok",
         "has been edited",
         "created successfully",
     ]

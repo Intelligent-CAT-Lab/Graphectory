@@ -6,8 +6,8 @@ This script generates trajectory graphs (JSON) from agent execution traces.
 Supports SWE-agent and OpenHands trajectories across multiple models.
 
 Usage:
-    python generate_graphs_json.py --agent sa --model dsk-v3 --trajs path_to_your_trajectory_folder --eval_report path_to_your_report.json --output_dir data/samples
-    python generate_graphs_json.py --agent oh --model dsk-v3 --trajs path_to_your_output.jsonl --eval_report path_to_your_report.json --output_dir data/samples
+    python generatejson.py --agent sa --model dsk-v3 --trajs path_to_your_trajectory_folder --eval_report path_to_your_report.json --output_dir data/samples
+    python generatejson.py --agent oh --model dsk-v3 --trajs path_to_your_output.jsonl --eval_report path_to_your_report.json --output_dir data/samples
 
 Output Structure:
     {output_dir}/SWE-agent/graphs/{model}/{instance_id}/{instance_id}.json

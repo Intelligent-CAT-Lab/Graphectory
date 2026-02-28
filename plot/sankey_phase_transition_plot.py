@@ -485,7 +485,7 @@ Examples:
   python sankey_phase_transition_plot.py --data-dir ./my_data
 
   # Specify custom output path
-  python sankey_phase_transition_plot.py --output figures/custom_sankey.pdf
+  python sankey_phase_transition_plot.py --output figures/custom_sankey.png
         """
     )
 
@@ -499,8 +499,8 @@ Examples:
     parser.add_argument(
         "--output",
         type=FilePath,
-        default=FilePath("figures/sankey_grid.pdf"),
-        help="Output file path (default: figures/sankey_grid.pdf)"
+        default=FilePath("figures/sankey_grid.png"),
+        help="Output file path (default: figures/sankey_grid.png)"
     )
 
     args = parser.parse_args()

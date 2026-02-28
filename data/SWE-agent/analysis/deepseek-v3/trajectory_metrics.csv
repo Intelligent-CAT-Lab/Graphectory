@@ -36,7 +36,7 @@ sphinx-doc__sphinx-8548,unresolved,under4h,28,62,11,63,15,1.2142857142857142,7,3
 django__django-11133,resolved,under15min,12,19,3,16,7,1.25,4,3.0,0.21052631578947367,4,2,22,4:cd,4,0.4,early,3,1.14,True,3,2.5,2,1.33,False,1,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-12774,unresolved,under1h,24,45,1,34,11,1.4583333333333333,13,3.8461538461538463,0.26666666666666666,8,2,46,4:cd,11,0.04,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 scikit-learn__scikit-learn-12973,unresolved,under1h,9,9,2,10,8,1.0,1,2.0,0.1111111111111111,2,2,11,7:submit,2,0.3,early,1,1.0,False,2,2.0,2,1.5,True,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-sphinx-doc__sphinx-7454,unresolved,under15min,15,22,5,23,8,1.2666666666666666,5,3.2,0.36363636363636365,5,1,27,4:complex_command,5,0.35,early,2,1.0,False,3,2.75,3,2.0,True,1,False,False,4,4,True,False,False,N/A,0,0.0,0,0,0,0,0,0
+sphinx-doc__sphinx-7454,unresolved,under15min,19,38,5,23,12,1.2105263157894737,5,6.4,0.21052631578947367,9,1,43,4:complex_command,5,0.51,early,6,1.82,True,3,2.75,3,2.0,True,1,False,False,4,4,True,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-15252,unresolved,under1h,4,5,0,6,3,1.0,1,2.0,0.2,2,2,5,2:think,2,0.17,early,1,1.0,False,1,1.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 astropy__astropy-14598,unresolved,under1h,13,18,6,16,9,1.2307692307692308,4,3.75,0.2222222222222222,6,2,24,1:python,4,0.68,mixed,1,1.3,True,4,4.0,4,1.75,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-15851,resolved,under15min,12,16,2,14,7,1.25,4,2.25,0.25,3,2,18,5:python,4,0.18,early,1,1.0,False,3,3.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
@@ -155,7 +155,7 @@ django__django-11433,unresolved,under15min,7,8,3,9,6,1.0,1,2.0,0.125,2,2,11,5:th
 scikit-learn__scikit-learn-10844,resolved,under1h,9,9,1,10,8,1.0,1,3.0,0.1111111111111111,3,3,10,6:submit,2,0.2,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 sympy__sympy-17630,unresolved,under4h,12,18,0,19,5,1.5,7,2.142857142857143,0.3888888888888889,3,1,18,1:python,6,0.37,early,1,1.4,True,1,1.0,1,1.0,False,0,False,False,4,4,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-14170,unresolved,under1h,11,12,7,13,10,1.0,1,2.0,0.08333333333333333,2,2,19,9:think,2,0.62,early,1,1.0,False,4,3.2,5,2.0,False,4,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-django__django-13569,resolved,under1h,22,44,3,33,9,1.5,12,3.0,0.25,4,2,47,5:cd,12,0.09,early,2,1.0,False,4,4.0,1,1.0,True,0,False,False,4,4,False,False,False,N/A,0,0.0,0,0,0,0,0,0
+django__django-13569,resolved,under1h,22,49,3,33,10,1.5454545454545454,23,3.4782608695652173,0.32653061224489793,5,2,52,5:cd,12,0.08,early,2,1.0,False,4,4.0,1,1.0,True,0,False,False,4,4,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-11087,unresolved,under1h,4,5,1,6,3,1.0,1,2.0,0.2,2,2,6,2:think,2,0.33,early,1,1.0,False,2,2.0,1,1.0,False,1,False,True,0,0,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 sympy__sympy-16597,unresolved,under4h,9,10,3,11,8,1.0,1,2.0,0.1,2,2,13,7:think,2,0.36,early,1,1.0,False,3,3.0,2,1.33,False,1,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 sphinx-doc__sphinx-7910,unresolved,under15min,14,16,4,17,10,1.1428571428571428,3,4.0,0.1875,7,2,20,2:python,3,0.59,early,1,1.11,True,5,5.0,1,1.0,True,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
@@ -174,7 +174,7 @@ psf__requests-1766,unresolved,under15min,11,14,1,15,7,1.2727272727272727,4,2.0,0
 django__django-17087,unresolved,under15min,16,17,11,18,15,1.0,1,2.0,0.058823529411764705,2,2,28,14:think,2,0.78,mixed,1,1.0,False,3,2.1,10,4.0,False,10,False,False,0,0,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 sphinx-doc__sphinx-10323,resolved,under15min,12,14,3,15,9,1.1666666666666667,3,2.3333333333333335,0.21428571428571427,3,2,17,6:python,3,0.27,early,1,1.0,False,4,4.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 matplotlib__matplotlib-24149,unresolved,under15min,10,12,1,12,7,1.2,3,3.0,0.25,5,2,13,1:python,3,0.38,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-django__django-10554,unresolved,under4h,16,33,0,24,6,1.5625,10,2.9,0.2727272727272727,4,2,33,1:cd,10,0.09,early,2,1.0,False,0,0.0,0,0.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
+django__django-10554,unresolved,under4h,16,34,0,24,7,1.625,19,3.4210526315789473,0.29411764705882354,5,2,34,1:cd,10,0.09,early,2,1.0,False,0,0.0,0,0.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 sympy__sympy-15809,unresolved,under15min,26,27,10,28,25,1.0,1,3.0,0.037037037037037035,3,3,37,23:think,2,0.71,mixed,1,1.0,False,5,2.57,6,2.2,True,2,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-12273,unresolved,under1h,13,14,7,15,12,1.0,1,3.0,0.07142857142857142,3,3,21,10:think,2,0.73,mixed,2,1.0,False,2,2.0,7,4.0,False,7,False,True,0,0,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 astropy__astropy-7671,resolved,under1h,12,16,0,17,6,1.3333333333333333,5,2.4,0.3125,4,2,16,2:python,5,0.29,early,1,1.25,True,1,1.0,1,1.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
@@ -186,7 +186,7 @@ django__django-11555,unresolved,under15min,18,23,4,24,8,1.2777777777777777,6,3.0
 django__django-13363,resolved,under15min,12,14,2,13,10,1.0833333333333333,2,2.5,0.14285714285714285,3,2,16,6:cd,2,0.2,early,1,1.0,False,3,3.0,1,1.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-12754,unresolved,under1h,30,46,1,46,10,1.4333333333333333,16,3.375,0.32608695652173914,6,2,47,2:python,13,0.43,early,4,1.43,True,2,1.25,4,2.5,False,1,False,False,7,7,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-16801,resolved,under15min,7,8,3,9,6,1.0,1,2.0,0.125,2,2,11,5:think,2,0.44,early,1,1.0,False,4,4.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-django__django-15563,unresolved,under1h,43,192,1,143,23,1.441860465116279,25,6.48,0.5833333333333334,17,1,193,2:python,45,0.05,early,4,1.11,True,2,1.5,2,1.5,False,1,False,False,7,7,False,False,False,N/A,0,0.0,0,0,0,0,0,0
+django__django-15563,unresolved,under1h,43,193,1,143,24,1.4651162790697674,42,7.595238095238095,0.5854922279792746,18,1,194,2:python,46,0.05,early,4,1.11,True,2,1.5,2,1.5,False,1,False,False,7,7,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 pydata__xarray-6721,resolved,under1h,10,12,1,11,8,1.1,2,4.5,0.16666666666666666,7,2,13,1:python,2,0.54,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-14787,resolved,under15min,5,6,1,7,4,1.0,1,2.0,0.16666666666666666,2,2,7,3:think,2,0.29,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 sympy__sympy-14531,resolved,under1h,16,20,5,19,14,1.1875,4,4.25,0.2,8,2,25,3:str_replace_editor: view,2,0.38,early,3,1.33,True,4,3.8,4,2.0,True,0,False,False,4,4,False,False,False,N/A,0,0.0,0,0,0,0,0,0
@@ -219,7 +219,7 @@ pylint-dev__pylint-6528,unresolved,under1h,30,41,7,38,14,1.3666666666666667,12,3
 sympy__sympy-22914,resolved,under1h,12,14,4,15,9,1.0833333333333333,2,3.5,0.14285714285714285,4,3,18,5:python,2,0.47,early,1,1.0,False,4,3.5,2,1.25,False,1,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 astropy__astropy-14995,unresolved,under15min,43,67,10,68,26,1.2093023255813953,10,5.0,0.208955223880597,14,1,77,13:python,10,0.29,mixed,10,1.82,True,4,3.88,15,5.0,True,2,False,False,35,30,False,True,False,N/A,5,5.0,1,3,0,2,0,0
 sympy__sympy-15976,unresolved,under1h,10,12,2,13,8,1.1,2,2.5,0.16666666666666666,3,2,14,4:python,2,0.46,early,1,1.0,False,3,3.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-sphinx-doc__sphinx-11510,unresolved,under4h,21,31,0,17,18,1.1428571428571428,4,7.75,0.0967741935483871,13,3,31,6:sphinx-build,4,0.25,mixed,8,1.6,True,1,1.0,3,3.0,False,0,False,False,16,15,True,False,False,N/A,1,1.0,1,0,0,0,1,0
+sphinx-doc__sphinx-11510,unresolved,under4h,22,32,0,17,19,1.1363636363636365,4,8.0,0.09375,13,3,32,7:sphinx-build,4,0.24,mixed,8,1.6,True,1,1.0,3,3.0,False,0,False,False,16,15,True,False,False,N/A,1,1.0,1,0,0,0,1,0
 django__django-16333,resolved,under15min,5,6,1,7,4,1.0,1,2.0,0.16666666666666666,2,2,7,3:think,2,0.29,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-13807,unresolved,under15min,6,7,2,8,5,1.0,1,2.0,0.14285714285714285,2,2,9,4:think,2,0.38,early,1,1.0,False,3,3.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-15499,resolved,under15min,12,15,4,14,10,1.0833333333333333,2,2.5,0.13333333333333333,3,2,19,7:cd,2,0.31,early,1,1.0,False,4,3.5,2,1.25,False,1,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
@@ -254,7 +254,7 @@ matplotlib__matplotlib-25960,unresolved,under1h,16,17,9,17,14,1.0625,2,7.0,0.117
 django__django-13023,unresolved,under15min,11,12,3,11,9,1.0909090909090908,2,2.0,0.16666666666666666,2,2,15,6:python,2,0.31,early,1,1.0,False,4,4.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 matplotlib__matplotlib-14623,unresolved,under1h,33,51,10,51,23,1.2424242424242424,9,3.6666666666666665,0.29411764705882354,17,1,61,1:python,8,0.29,early,2,1.0,False,5,4.0,5,2.2,True,1,False,True,26,13,False,True,False,N/A,12,6.5,2,7,6,0,0,0
 sympy__sympy-20438,unresolved,under1h,14,15,4,16,12,1.0714285714285714,2,2.0,0.13333333333333333,2,2,19,7:python,2,0.5,early,1,1.0,False,4,4.0,2,1.25,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-django__django-15554,unresolved,under1h,24,35,1,24,14,1.1666666666666667,5,5.2,0.14285714285714285,11,2,36,4:cd,6,0.25,early,6,1.0,False,2,1.2,5,3.0,False,2,False,False,4,4,False,False,False,N/A,0,0.0,0,0,0,0,0,0
+django__django-15554,unresolved,under1h,24,38,1,24,15,1.2083333333333333,8,5.25,0.21052631578947367,11,2,39,4:cd,6,0.23,early,6,1.0,False,2,1.2,5,3.0,False,2,False,False,4,4,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 astropy__astropy-7606,unresolved,under1h,10,10,3,11,9,1.0,1,2.0,0.1,2,2,13,8:submit,2,0.36,early,1,1.0,False,2,2.0,3,2.0,True,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-12276,resolved,under15min,7,7,2,8,6,1.0,1,1.0,0.14285714285714285,1,1,9,6:submit,2,0.38,early,1,1.0,False,3,3.0,1,1.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-13809,resolved,under1h,6,7,1,8,5,1.0,1,2.0,0.14285714285714285,2,2,8,4:think,2,0.25,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
@@ -268,7 +268,7 @@ pydata__xarray-6744,unresolved,under1h,12,85,2,86,7,1.3333333333333333,5,2.0,0.4
 django__django-11095,resolved,under1h,6,7,2,8,5,1.0,1,2.0,0.14285714285714285,2,2,9,4:think,2,0.38,early,1,1.0,False,3,3.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 sphinx-doc__sphinx-9711,resolved,under15min,6,5,1,6,5,0.8333333333333334,0,0.0,0.0,0,0,6,0:str_replace_editor: view,1,0.67,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-17084,unresolved,under1h,18,29,4,23,11,1.2777777777777777,6,3.8333333333333335,0.20689655172413793,9,2,33,3:cd,6,0.57,mixed,7,1.31,True,4,3.5,2,1.25,False,1,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-django__django-15561,resolved,under1h,19,35,1,27,10,1.4736842105263157,10,4.0,0.2857142857142857,9,2,36,1:cd,9,0.36,early,6,1.3,True,2,1.33,3,2.0,False,1,False,False,4,4,True,False,False,N/A,0,0.0,0,0,0,0,0,0
+django__django-15561,resolved,under1h,19,37,1,27,11,1.5263157894736843,13,4.384615384615385,0.32432432432432434,10,2,38,1:cd,9,0.34,early,6,1.3,True,2,1.33,3,2.0,False,1,False,False,4,4,True,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-13406,unresolved,under15min,54,90,13,69,19,1.3333333333333333,19,4.7894736842105265,0.2111111111111111,11,3,103,1:cd,12,0.3,mixed,10,1.08,True,3,2.18,11,4.67,True,1,False,False,13,12,False,False,False,"('localization',)",1,1.0,1,0,1,0,0,0
 sphinx-doc__sphinx-7462,unresolved,under15min,15,21,0,17,9,1.2,4,4.0,0.19047619047619047,6,2,21,2:cd,4,0.14,middle,3,1.0,False,1,1.0,2,2.0,False,1,False,False,4,4,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-13837,resolved,under4h,10,12,1,11,8,1.1,2,2.5,0.16666666666666666,3,2,13,4:cd,2,0.15,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
@@ -286,7 +286,7 @@ django__django-14404,unresolved,under15min,38,87,36,88,34,1.131578947368421,7,11
 astropy__astropy-13033,unresolved,under1h,9,11,0,10,6,1.2222222222222223,3,2.6666666666666665,0.2727272727272727,3,2,11,1:python,3,0.42,early,1,1.25,True,1,1.0,1,1.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 sphinx-doc__sphinx-7757,unresolved,under1h,24,39,6,39,11,1.4583333333333333,19,4.7368421052631575,0.3076923076923077,8,2,45,3:sphinx-build,7,0.42,early,8,1.13,True,3,2.8,4,2.33,False,0,False,False,8,8,True,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-15127,unresolved,under15min,10,14,0,15,5,1.3,4,2.5,0.2857142857142857,3,2,14,2:python,4,0.33,early,1,1.25,True,1,1.0,1,1.0,False,0,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-django__django-11211,unresolved,under1h,33,61,10,46,17,1.4848484848484849,18,4.444444444444445,0.2786885245901639,14,2,71,12:cd,16,0.18,early,4,1.1,True,3,3.0,6,3.67,False,1,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
+django__django-11211,unresolved,under1h,33,62,10,46,18,1.5151515151515151,21,5.0,0.2903225806451613,15,2,72,12:cd,16,0.17,early,4,1.1,True,3,3.0,6,3.67,False,1,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 pydata__xarray-4966,resolved,under1h,8,10,0,11,6,1.25,3,2.6666666666666665,0.3,3,2,10,0:python,3,0.36,early,1,1.33,True,1,1.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 pylint-dev__pylint-4551,unresolved,under4h,20,45,3,35,8,1.55,16,3.9375,0.2222222222222222,6,2,48,3:cd,11,0.26,early,8,1.71,True,3,2.14,7,3.0,False,1,False,False,9,9,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 matplotlib__matplotlib-24870,unresolved,under1h,14,15,6,15,13,1.0714285714285714,2,6.0,0.13333333333333333,10,2,21,0:str_replace_editor: view,2,0.44,early,2,1.17,True,4,4.0,3,1.75,False,1,False,True,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
@@ -361,7 +361,7 @@ django__django-14017,resolved,under1h,12,14,0,13,9,1.0833333333333333,2,3.0,0.14
 sympy__sympy-14711,resolved,under15min,7,8,0,8,5,1.1428571428571428,2,2.5,0.25,3,2,8,1:python,2,0.33,early,1,1.0,False,1,1.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-12193,unresolved,under15min,10,11,4,12,9,1.0,1,2.0,0.09090909090909091,2,2,15,8:think,2,0.58,early,1,1.0,False,3,2.67,2,1.67,False,2,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 scikit-learn__scikit-learn-13328,unresolved,under15min,7,8,0,8,5,1.1428571428571428,2,2.5,0.25,3,2,8,1:python,2,0.33,early,1,1.0,False,1,1.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
-django__django-13516,resolved,under1h,15,22,3,18,9,1.2666666666666666,5,3.0,0.22727272727272727,3,3,25,4:cd,5,0.35,early,4,1.14,True,3,3.0,2,1.33,False,1,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
+django__django-13516,resolved,under1h,15,23,3,18,10,1.3333333333333333,9,3.4444444444444446,0.2608695652173913,4,3,26,4:cd,5,0.33,early,4,1.14,True,3,3.0,2,1.33,False,1,False,False,2,2,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 django__django-9296,resolved,under15min,10,10,2,10,9,1.0,1,2.0,0.1,2,2,12,8:submit,2,0.27,early,1,1.0,False,3,3.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 astropy__astropy-14309,resolved,under15min,8,10,1,11,6,1.125,2,3.5,0.2,4,3,11,1:python,2,0.36,early,1,1.0,False,2,2.0,1,1.0,False,0,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0
 matplotlib__matplotlib-21568,unresolved,under1h,15,18,3,19,11,1.2,4,3.75,0.2222222222222222,9,2,21,1:python,4,0.63,early,1,1.2,True,2,2.0,3,3.0,False,2,False,False,1,1,False,False,False,N/A,0,0.0,0,0,0,0,0,0

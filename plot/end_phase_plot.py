@@ -4,9 +4,7 @@
 """
 Start/End PHASE donut plots (inner=Resolved, outer=Unresolved), 2×4 grid:
 - Row 1 = SWE-agent + {models}, Row 2 = OpenHands + {models}
-- Two separate figures:
-    1) start_phases_donuts.pdf — FIRST non-general phase
-    2) end_phases_donuts.pdf   — LAST  non-general phase
+- end_phases_donuts.png   — LAST  non-general phase
 - Exactly 3 canonical phases: localization (L), patch (P), validation (V)
 
 Modified:
@@ -404,7 +402,7 @@ Examples:
   python end_phase_plot.py --data-dir ./my_data
 
   # Specify custom output path
-  python end_phase_plot.py --output figures/custom_end_phases.pdf
+  python end_phase_plot.py --output figures/custom_end_phases.png
         """
     )
 
@@ -418,8 +416,8 @@ Examples:
     parser.add_argument(
         "--output",
         type=FilePath,
-        default=FilePath("figures/end_phases_donuts.pdf"),
-        help="Output file path (default: figures/end_phases_donuts.pdf)"
+        default=FilePath("figures/end_phases_donuts.png"),
+        help="Output file path (default: figures/end_phases_donuts.png)"
     )
 
     args = parser.parse_args()
