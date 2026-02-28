@@ -615,77 +615,99 @@ def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, e
 
 def build_hierarchical_edges(G: nx.MultiDiGraph, localization_nodes):
     """Add 'hier' edges between str_replace_editor view nodes based on file-path
-    containment and view-range nesting.
+    containment and view-range nesting, with transitive reduction.
 
-    Hierarchy rules
-    ---------------
-    1. Directory containment: if node A views a directory (or file) that is a
-       prefix of the path viewed by node B, add A → B.
-    2. Range nesting within the same file: if node A views a range [a1, a2] and
-       node B views [b1, b2] with b1 >= a1 and b2 <= a2, add A → B.
-    3. Whole-file view → ranged view of the same file: if node A has no range
-       and node B views a range of the same file, add A → B.
+    Hierarchy rules (with transitive reduction)
+    --------------------------------------------
+    1. Directory containment: each node connects only to its closest parent,
+       not all ancestors (avoiding A→B, B→C, A→C redundancy).
+    2. Range nesting: each range connects only to its immediate outer range.
+    3. Whole-file → ranged views: outermost ranges connect to path nodes.
     """
-    path_nodes: list[tuple[str, list | None]] = []  # (node_key, view_range_or_None)
+    path_nodes = []  # [(node_id, Path_object)]
+    range_nodes_by_path = defaultdict(list)  # path_str -> [(node_id, [start, end])]
 
-    for node_key in localization_nodes:
-        data = G.nodes.get(node_key, {})
+    for node in localization_nodes:
+        data = G.nodes.get(node, {})
         args = data.get("args", {}) or {}
         if not isinstance(args, dict):
             continue
         path = args.get("path")
         if not path:
             continue
-        vr = args.get("view_range")
-        if isinstance(vr, (list, tuple)) and len(vr) == 2:
-            try:
-                vr = [int(vr[0]), int(vr[1])]
-            except (TypeError, ValueError):
-                vr = None
-        else:
-            vr = None
-        path_nodes.append((node_key, str(path), vr))
 
-    added: set[tuple] = set()
+        view_range = args.get("view_range")
+        if view_range is None:
+            path_nodes.append((node, Path(path)))
+        elif (isinstance(view_range, (list, tuple)) and
+              len(view_range) == 2 and
+              all(isinstance(x, int) for x in view_range)):
+            range_nodes_by_path[str(Path(path))].append((node, view_range))
 
-    def _add(src, dst):
-        if src != dst and (src, dst) not in added:
-            G.add_edge(src, dst, type="hier", label="")
-            added.add((src, dst))
+    # --- 1) Path hierarchy by folder containment (closest parent only) ---
+    for child_node, child_path in path_nodes:
+        best_parent_node = None
+        best_parent_path = None
+        for parent_node, parent_path in path_nodes:
+            if parent_node == child_node:
+                continue
+            # Check if parent_path is a prefix of child_path
+            if (len(parent_path.parts) < len(child_path.parts) and
+                child_path.parts[:len(parent_path.parts)] == parent_path.parts):
+                # Keep only the closest (deepest) parent
+                if best_parent_path is None or len(parent_path.parts) > len(best_parent_path.parts):
+                    best_parent_node = parent_node
+                    best_parent_path = parent_path
+        if best_parent_node:
+            G.add_edge(best_parent_node, child_node, type="hier", label="")
 
-    # Group by normalised path for range comparisons
-    by_path: dict[str, list] = defaultdict(list)
-    for node_key, path, vr in path_nodes:
-        by_path[path].append((node_key, vr))
+    # --- 2) Range nodes: handle nesting + link outermost to path nodes ---
+    path_to_node = {str(p): n for n, p in path_nodes}
 
-    for path, entries in by_path.items():
-        whole  = [(nk, vr) for nk, vr in entries if vr is None]
-        ranged = [(nk, vr) for nk, vr in entries if vr is not None]
+    for path_str, range_nodes in range_nodes_by_path.items():
+        is_nested = {n: False for n, _ in range_nodes}
 
-        # Whole-file → ranged views of same file
-        for w_nk, _ in whole:
-            for r_nk, _ in ranged:
-                _add(w_nk, r_nk)
-
-        # Range nesting: outer range → inner range
-        for i, (nk_a, vr_a) in enumerate(ranged):
-            for j, (nk_b, vr_b) in enumerate(ranged):
+        # Detect nesting and mark inner ranges, connecting only immediate parent→child
+        for i, (node_i, r_i) in enumerate(range_nodes):
+            for j, (node_j, r_j) in enumerate(range_nodes):
                 if i == j:
                     continue
-                if vr_b[0] >= vr_a[0] and vr_b[1] <= vr_a[1]:
-                    _add(nk_a, nk_b)
+                a1, a2 = r_i
+                b1, b2 = r_j
+                # node_j is nested inside node_i
+                if b1 >= a1 and b2 <= a2:
+                    # Check if there's no intermediate range between i and j
+                    is_immediate = True
+                    for k, (node_k, r_k) in enumerate(range_nodes):
+                        if k == i or k == j:
+                            continue
+                        c1, c2 = r_k
+                        # node_k is between node_i and node_j if:
+                        # c is inside i AND j is inside c
+                        if (c1 >= a1 and c2 <= a2 and b1 >= c1 and b2 <= c2):
+                            is_immediate = False
+                            break
+                    if is_immediate:
+                        G.add_edge(node_i, node_j, type="hier", label="")
+                        is_nested[node_j] = True
 
-    # Directory/path prefix containment across different paths
-    path_list = list(by_path.keys())
-    for path_a in path_list:
-        for path_b in path_list:
-            if path_a == path_b:
-                continue
-            parts_a = [p for p in path_a.replace("\\", "/").split("/") if p]
-            parts_b = [p for p in path_b.replace("\\", "/").split("/") if p]
-            if (len(parts_a) < len(parts_b) and
-                    parts_b[:len(parts_a)] == parts_a):
-                # path_a is a parent dir of path_b
-                for nk_a, _ in by_path[path_a]:
-                    for nk_b, _ in by_path[path_b]:
-                        _add(nk_a, nk_b)
+        # Link outermost ranges to path node (or closest ancestor)
+        path_node = path_to_node.get(path_str)
+        if path_node:
+            for node, _ in range_nodes:
+                if not is_nested[node]:
+                    G.add_edge(path_node, node, type="hier", label="")
+        else:
+            # No exact path node → find nearest ancestor
+            path_parts = Path(path_str).parts
+            best_ancestor_node = None
+            best_ancestor_depth = -1
+            for pn, pp in path_nodes:
+                if (len(pp.parts) < len(path_parts) and
+                    path_parts[:len(pp.parts)] == pp.parts):
+                    if len(pp.parts) > best_ancestor_depth:
+                        best_ancestor_node = pn
+                        best_ancestor_depth = len(pp.parts)
+            for node, _ in range_nodes:
+                if not is_nested[node] and best_ancestor_node:
+                    G.add_edge(best_ancestor_node, node, type="hier", label="")

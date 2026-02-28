@@ -179,6 +179,10 @@ class GraphBuilder:
 
 # ==================== Hierarchical Edges ====================
 def build_hierarchical_edges(G: nx.MultiDiGraph, localization_nodes):
+    """Add 'hier' edges with transitive reduction: only immediate parent relationships.
+
+    Avoids redundancy: if A→B and B→C exist, A→C is not added.
+    """
     path_nodes = []
     range_nodes_by_path = defaultdict(list)
 
@@ -200,7 +204,7 @@ def build_hierarchical_edges(G: nx.MultiDiGraph, localization_nodes):
             else:
                 print(f"[WARN] Skipping invalid view_range for node {node}: {view_range}")
 
-    # Path hierarchy by folder containment
+    # Path hierarchy: connect only to closest parent
     for child_node, child_path in path_nodes:
         best_parent_node = None
         best_parent_path = None
@@ -220,6 +224,7 @@ def build_hierarchical_edges(G: nx.MultiDiGraph, localization_nodes):
     for path_str, range_nodes in range_nodes_by_path.items():
         is_nested = {n: False for n, _ in range_nodes}
 
+        # Range nesting: connect only immediate outer→inner, not all ancestors
         for i, (node_i, r_i) in enumerate(range_nodes):
             for j, (node_j, r_j) in enumerate(range_nodes):
                 if i == j:
@@ -227,12 +232,25 @@ def build_hierarchical_edges(G: nx.MultiDiGraph, localization_nodes):
                 try:
                     a1, a2 = r_i
                     b1, b2 = r_j
+                    # node_j nested inside node_i
                     if b1 >= a1 and b2 <= a2:
-                        G.add_edge(node_i, node_j, type="hier")
-                        is_nested[node_j] = True
+                        # Check if immediate (no intermediate range between i and j)
+                        is_immediate = True
+                        for k, (node_k, r_k) in enumerate(range_nodes):
+                            if k == i or k == j:
+                                continue
+                            c1, c2 = r_k
+                            # node_k is between node_i and node_j if both conditions hold
+                            if (c1 >= a1 and c2 <= a2 and b1 >= c1 and b2 <= c2):
+                                is_immediate = False
+                                break
+                        if is_immediate:
+                            G.add_edge(node_i, node_j, type="hier")
+                            is_nested[node_j] = True
                 except Exception as e:
                     print(f"[WARN] Failed to unpack ranges for nesting check: {r_i}, {r_j} ({e})")
 
+        # Link outermost ranges to path node or closest ancestor
         path_node = path_to_node.get(path_str)
         if path_node:
             for node, _ in range_nodes:
