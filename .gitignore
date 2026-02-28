@@ -5,3 +5,6 @@ __pycache__/
 dist/
 build/
 misc/
+application/plan_monitor/*
+application/SWE-agent/*
+README_v0.md
