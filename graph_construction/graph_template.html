@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trajectory Graph: {{INSTANCE_NAME}}</title>
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Trajectory Graph: {{INSTANCE_NAME}}</h1>
+            <div class="metadata">
+                <div class="metadata-item">
+                    <strong>Status:</strong>
+                    <span class="status-badge status-{{RESOLUTION_STATUS}}">{{RESOLUTION_STATUS}}</span>
+                </div>
+                <div class="metadata-item">
+                    <strong>Difficulty:</strong> {{DIFFICULTY}}
+                </div>
+                <div class="metadata-item">
+                    <strong>Nodes:</strong> {{NODE_COUNT}}
+                </div>
+                <div class="metadata-item">
+                    <strong>Edges:</strong> {{EDGE_COUNT}}
+                </div>
+            </div>
+            <div class="metadata-comment" id="metadataComment" style="display: none;">
+                <strong>Info:</strong> <span id="metadataCommentText">{{METADATA_COMMENT}}</span>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button onclick="fitToScreen()">🔍 Fit to Screen</button>
+            <button onclick="zoomIn()">+ Zoom In</button>
+            <button onclick="zoomOut()">− Zoom Out</button>
+            <button onclick="toggleFullscreen()">⛶ Fullscreen</button>
+        </div>
+        
+        <div class="graph-container">
+            <div id="graph"></div>
+            <!-- Detail sidebar – populated by JS on node click -->
+            <div class="detail-sidebar" id="detailSidebar">
+                <div class="sidebar-resizer" id="sidebarResizer"></div>
+                <div class="sidebar-header">
+                    <span class="sidebar-node-title" id="sidebarTitle">—</span>
+                    <button class="sidebar-close-btn" id="sidebarCloseBtn" title="Close">✕</button>
+                </div>
+                <div class="step-tabs" id="stepTabs"></div>
+                <div class="sidebar-content" id="sidebarContent"></div>
+            </div>
+        </div>
+        
+        <div class="legend">
+            <div class="legend-title">Phase Legend</div>
+            <div class="legend-grid">
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #C5B3F0;"></div>
+                    <span class="legend-label">Localization</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #FCC9B0;"></div>
+                    <span class="legend-label">Patch</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #A8E6F0;"></div>
+                    <span class="legend-label">Validation</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: #CFE0F6;"></div>
+                    <span class="legend-label">General</span>
+                </div>
+            </div>
+            <div class="legend-title" style="margin-top: 20px;">Edge Types</div>
+            <div class="legend-grid">
+                <div class="legend-item">
+                    <div style="width: 32px; height: 2px; background: #95a5a6; flex-shrink: 0;"></div>
+                    <span class="legend-label">Execution</span>
+                </div>
+                <div class="legend-item">
+                    <svg width="32" height="12" style="flex-shrink:0;overflow:visible;">
+                        <line x1="0" y1="6" x2="32" y2="6" stroke="#27ae60" stroke-width="2" stroke-dasharray="5,3"/>
+                        <polygon points="32,3 32,9 38,6" fill="#27ae60"/>
+                    </svg>
+                    <span class="legend-label">Hierarchy</span>
+                </div>
+                <div class="legend-item">
+                    <div style="width: 32px; height: 3px; background: #e74c3c; flex-shrink: 0;"></div>
+                    <span class="legend-label">Thought Continuation</span>
+                </div>
+                <div class="legend-item">
+                    <svg width="32" height="12" style="flex-shrink:0;overflow:visible;">
+                        <line x1="0" y1="6" x2="32" y2="6" stroke="#3498db" stroke-width="2" stroke-dasharray="4,3"/>
+                        <polygon points="32,3 32,9 38,6" fill="#3498db"/>
+                    </svg>
+                    <span class="legend-label">Intra-step (&amp;&amp;)</span>
+                </div>
+            </div>
+            <div class="legend-title" style="margin-top: 20px;">Node Symbols</div>
+            <div class="legend-grid">
+                <div class="legend-item">
+                    <div class="legend-symbol" style="position: relative;">
+                        <svg width="32" height="24" style="overflow: visible;">
+                            <rect x="0" y="10" width="32" height="14" fill="#CFE0F6" stroke="#2c3e50" stroke-width="1" rx="2"/>
+                            <path d="M 16 4 L 10 10 L 22 10 Z" fill="#f39c12" stroke="#e67e22" stroke-width="1"/>
+                        </svg>
+                    </div>
+                    <span class="legend-label">cd command stripped (▲ hat)</span>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        const nodesData = {{NODES_DATA}};
+        const edgesData = {{EDGES_DATA}};
+        const phaseColors = {{PHASE_COLORS}};
+        const settings = {{SETTINGS}};
+        
+        // Show metadata comment if present
+        const metadataComment = document.getElementById('metadataCommentText').textContent;
+        if (metadataComment && metadataComment.trim() !== '') {
+            document.getElementById('metadataComment').style.display = 'block';
+        }
+    </script>
+    <script src="graph_renderer.js"></script>
+</body>
+</html>

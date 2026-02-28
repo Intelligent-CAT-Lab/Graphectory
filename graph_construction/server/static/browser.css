@@ -1,0 +1,218 @@
+/* ── Reset ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Layout ─────────────────────────────────────────────── */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+    background: #f0f2f5;
+}
+
+.sidebar {
+    width: 320px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    box-shadow: 2px 0 8px rgba(0,0,0,.10);
+    overflow: hidden;
+    z-index: 10;
+}
+
+.main {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Sidebar header ─────────────────────────────────────── */
+.sidebar-header {
+    padding: 18px 16px 14px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.sidebar-header h1 { font-size: 18px; margin-bottom: 2px; }
+
+.subtitle { font-size: 12px; opacity: .85; }
+
+/* ── Controls ───────────────────────────────────────────── */
+.controls {
+    padding: 12px;
+    border-bottom: 1px solid #e8eaed;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.search-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1.5px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color .2s;
+}
+
+.search-input:focus { border-color: #667eea; }
+
+/* ── Toggle ─────────────────────────────────────────────── */
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-label { font-size: 12px; color: #555; }
+
+.toggle-wrap {
+    position: relative;
+    width: 42px;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+.toggle-wrap input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: #ccc;
+    border-radius: 22px;
+    transition: background .3s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform .3s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
+
+.toggle-wrap input:checked + .toggle-slider { background: #667eea; }
+.toggle-wrap input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+/* ── Stats bar ──────────────────────────────────────────── */
+.stats {
+    padding: 7px 12px;
+    font-size: 11px;
+    color: #888;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e8eaed;
+    flex-shrink: 0;
+}
+
+/* ── Graph list ─────────────────────────────────────────── */
+.graph-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.graph-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: background .15s;
+}
+
+.graph-item:hover { background: #f5f7ff; }
+
+.graph-item.active {
+    background: #eef0ff;
+    border-left: 3px solid #667eea;
+    padding-left: 11px;
+}
+
+.item-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #888;
+}
+
+.badge {
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+}
+
+.badge-resolved     { background: #d1fae5; color: #065f46; }
+.badge-unresolved   { background: #fee2e2; color: #991b1b; }
+.badge-unsubmitted  { background: #fef3c7; color: #92400e; }
+.badge-unknown      { background: #f3f4f6; color: #6b7280; }
+
+/* ── Main pane ──────────────────────────────────────────── */
+.graph-pane {
+    flex: 1;
+    position: relative;
+    background: #fff;
+    overflow: hidden;
+}
+
+.graph-pane iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+}
+
+/* ── Shared placeholder ─────────────────────────────────── */
+.placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: #aaa;
+    font-size: 14px;
+    pointer-events: none;
+}
+
+.placeholder-icon { font-size: 52px; opacity: .3; }
+
+/* ── Spinner ─────────────────────────────────────────────── */
+.spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid #e5e7eb;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }

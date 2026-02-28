@@ -1,34 +1,102 @@
+"""
+Graph Construction Module
+
+Builds trajectory graphs from agent execution traces (SWE-agent and OpenHands).
+"""
+
 import json
 import os
-import sys
+import re
 import hashlib
 import networkx as nx
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, FancyBboxPatch
 from pathlib import Path
 from networkx.readwrite import json_graph
-from graph_construction.commandParser import CommandParser
-from datasets import load_dataset
 from collections import defaultdict
-import getpass
-import tempfile
-import multiprocessing
-from graph_construction.mapPhase import get_phase
-import pygraphviz as pgv
-_HAS_PYGRAPHVIZ = True
+# Import the refactored visualizer
+from visualizer import GraphVisualizer
 
-FONT_FAMILY = os.environ.get("GRAPH_FONT", "DejaVu Sans")
+# Optional datasets import for difficulty lookup
+try:
+    from datasets import load_dataset
+    swe_bench_ds = load_dataset("princeton-nlp/SWE-bench_Verified", split="test")
+    difficulty_lookup = {row["instance_id"]: row["difficulty"] for row in swe_bench_ds}
+except ImportError:
+    # Fallback if datasets is not available
+    difficulty_lookup = {}
 
-# -------------------- Data lookups --------------------
-swe_bench_ds = load_dataset("princeton-nlp/SWE-bench_Verified", split="test")
-difficulty_lookup = {row["instance_id"]: row["difficulty"] for row in swe_bench_ds}
+
+FONT_FAMILY = os.environ.get("GRAPH_FONT", "DejaVu Sans, Arial, sans-serif")
+
+# ── Thought-length helpers ──────────────────────────────────────────────────
+
+def compute_thought_length_raw(thought: str) -> int:
+    """Raw character count of thought text."""
+    return len(thought or "")
+
+
+def compute_thought_length_clean(thought: str) -> int:
+    """Character count excluding text inside quotes/backticks.
+
+    Strips content inside:
+      - "..."  (double quotes)
+      - '...'  (single quotes)
+      - `...`  (single backtick)
+      - ```...``` (triple backtick)
+    """
+    if not thought:
+        return 0
+    s = re.sub(r'```.*?```', '', thought, flags=re.DOTALL)
+    s = re.sub(r'`[^`]*`', '', s)
+    s = re.sub(r'"[^"]*"', '', s)
+    s = re.sub(r"'[^']*'", '', s)
+    return len(s)
+
+
+# ── Outcome detection helper ────────────────────────────────────────────────
+
+def detect_observation_outcome(observation: str) -> str:
+    """Return 'success', 'failure', or 'neutral' based on observation content."""
+    if not observation:
+        return "neutral"
+
+    obs_lower = observation.lower()
+
+    failure_signs = [
+        "traceback (most recent call last)",
+        "error:",
+        "exception:",
+        "failed",
+        "failure",
+        "assertion",
+        "syntaxerror",
+        "nameerror",
+        "typeerror",
+    ]
+    if any(sign in obs_lower for sign in failure_signs):
+        return "failure"
+
+    success_signs = [
+        "success",
+        "passed",
+        "ok",
+        "has been edited",
+        "created successfully",
+    ]
+    if any(sign in obs_lower for sign in success_signs):
+        return "success"
+
+    return "neutral"
+
 
 # -------------------- Helpers --------------------
 def hash_node_signature(label, args, flags):
+    """Create unique hash for node signature."""
     normalized = json.dumps({"label": label, "args": args, "flags": flags}, sort_keys=True)
     return hashlib.md5(normalized.encode("utf-8")).hexdigest()
 
+
 def check_edit_status(tool, subcommand, args, observation):
+    """Check if an edit operation succeeded or failed."""
     def check_str_edit_status(obs):
         if not obs:
             return None
@@ -46,10 +114,9 @@ def check_edit_status(tool, subcommand, args, observation):
         return check_str_edit_status(observation)
     return None
 
+
 def determine_resolution_status(instance_id: str, eval_report_path: str) -> str:
     """Determine resolution status from eval report given an instance ID."""
-    if not os.path.isfile(eval_report_path):
-        return "N/A"
     with open(eval_report_path, 'r') as f:
         report = json.load(f)
     if instance_id in report.get("resolved_ids", []):
@@ -57,6 +124,7 @@ def determine_resolution_status(instance_id: str, eval_report_path: str) -> str:
     elif instance_id in report.get("unresolved_ids", []):
         return "unresolved"
     return "unsubmitted"
+
 
 # -------------------- Graph Builder Class --------------------
 class GraphBuilder:
@@ -72,9 +140,10 @@ class GraphBuilder:
         self.localization_nodes = []
         self.prev_phases = set()
         self.previous_node = None
+        self.thought_history = []  # Track (node_key, thought_text) pairs
 
     def add_or_update_node(self, node_label, args, flags, phase, step_idx,
-                          tool=None, command=None, subcommand=None):
+                          tool=None, command=None, subcommand=None, thought_length=0, has_cd=False):
         """Add a new node or update existing node with a new occurrence.
 
         Args:
@@ -86,6 +155,8 @@ class GraphBuilder:
             tool: Tool name (if applicable)
             command: Command name (if applicable)
             subcommand: Subcommand name (if applicable)
+            thought_length: Length of thought text for this step
+            has_cd: Whether this node had a cd command stripped
 
         Returns:
             node_key: The key of the added or updated node
@@ -96,9 +167,13 @@ class GraphBuilder:
             # Update existing node
             node_key = self.node_signature_to_key[node_signature]
             self.G.nodes[node_key]["step_indices"].append(step_idx)
+            self.G.nodes[node_key]["thought_lengths"].append(thought_length)
             if "phases" not in self.G.nodes[node_key]:
                 self.G.nodes[node_key]["phases"] = []
             self.G.nodes[node_key]["phases"].append(phase)
+            # Update has_cd if this occurrence has cd
+            if has_cd:
+                self.G.nodes[node_key]["has_cd"] = True
         else:
             # Add new node
             node_key = f"{len(self.G.nodes)}:{node_label}"
@@ -109,9 +184,11 @@ class GraphBuilder:
                 flags=flags,
                 phases=[phase],
                 step_indices=[step_idx],
+                thought_lengths=[thought_length],
                 tool=tool,
                 command=command,
-                subcommand=subcommand
+                subcommand=subcommand,
+                has_cd=has_cd
             )
             self.node_signature_to_key[node_signature] = node_key
 
@@ -121,15 +198,28 @@ class GraphBuilder:
 
         return node_key
 
-    def add_execution_edge(self, node_key, step_idx):
+    def add_execution_edge(self, node_key, step_idx, is_first_in_step=False,
+                           thought_length_raw: int = 0,
+                           thought_length_clean: int = 0):
         """Add execution edge from previous node to current node.
 
         Args:
             node_key: Target node key
             step_idx: Step index for edge label
+            is_first_in_step: Whether this is the first edge in this trajectory step
+            thought_length_raw: Raw character count of the thought for this step
+            thought_length_clean: Character count with quoted text stripped
         """
         if self.previous_node:
-            self.G.add_edge(self.previous_node, node_key, label=str(step_idx), type="exec")
+            self.G.add_edge(
+                self.previous_node,
+                node_key,
+                label=str(step_idx),
+                type="exec",
+                is_first_in_step=is_first_in_step,
+                thought_length_raw=thought_length_raw,
+                thought_length_clean=thought_length_clean,
+            )
 
     def update_previous_node(self, node_key):
         """Update the previous node pointer.
@@ -147,16 +237,42 @@ class GraphBuilder:
         """
         self.prev_phases.add(phase)
 
-    def finalize_and_save(self, output_dir, instance_id, eval_report_path):
+    def track_thought(self, node_key, thought_text):
+        """Track thought text for a node and detect substring relationships.
+        
+        Args:
+            node_key: The node to associate with this thought
+            thought_text: The thought text content
+        """
+        # Only track non-empty thoughts
+        if not thought_text or not thought_text.strip():
+            return
+        
+        # Check if this thought is a substring continuation of the previous thought
+        if self.thought_history:
+            prev_node_key, prev_thought = self.thought_history[-1]
+            
+            # Check if previous thought is a substring of current thought
+            # (indicating the current thought extends the previous one)
+            if prev_thought and thought_text.startswith(prev_thought):
+                # Add a "thought" edge to show this relationship
+                self.G.add_edge(prev_node_key, node_key, type="thought", label="")
+        
+        # Add to history
+        self.thought_history.append((node_key, thought_text))
+
+    def finalize_and_save(self, output_dir, instance_id, eval_report_path, template_dir=None, metadata_comment=""):
         """Build hierarchical edges, add metadata, and save graph.
 
         Args:
             output_dir: Base output directory
             instance_id: Instance identifier
             eval_report_path: Path to evaluation report
+            template_dir: Optional path to template directory for visualizer
+            metadata_comment: Optional comment about model/plan
 
         Returns:
-            tuple: (json_path, pdf_path) paths to saved files
+            tuple: (json_path, html_path) paths to saved files
         """
         build_hierarchical_edges(self.G, self.localization_nodes)
 
@@ -165,22 +281,31 @@ class GraphBuilder:
         self.G.graph["instance_name"] = instance_id
         self.G.graph["debug_difficulty"] = difficulty_lookup.get(instance_id, "unknown")
 
-        # Construct output paths: output_dir/{instance_id}/{instance_id}.{json,pdf}
+        # Construct output paths: output_dir/{instance_id}/{instance_id}.{json,html}
         instance_dir = os.path.join(output_dir, instance_id)
         os.makedirs(instance_dir, exist_ok=True)
 
         json_path = os.path.join(instance_dir, f"{instance_id}.json")
-        pdf_path = os.path.join(instance_dir, f"{instance_id}.pdf")
+        html_path = os.path.join(instance_dir, f"{instance_id}.html")
 
+        # Save JSON
         with open(json_path, "w") as f:
             json.dump(json_graph.node_link_data(self.G, edges="edges"), f, indent=2)
 
-        GraphVisualizer.draw_with_timeout(self.G, pdf_path, timeout_sec=60)
+        # Save HTML using refactored visualizer
+        GraphVisualizer.draw_with_timeout(
+            self.G, 
+            html_path, 
+            timeout_sec=60,
+            template_dir=template_dir,
+            metadata_comment=metadata_comment
+        )
 
-        return json_path, pdf_path
+        return json_path, html_path
+
 
 # -------------------- Build graph --------------------
-def build_graph_from_sa_trajectory(traj_data, parser: CommandParser, instance_id, output_dir, eval_report_path):
+def build_graph_from_sa_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path, template_dir=None, metadata_comment=""):
     """Build graph from SWE-agent trajectory data.
 
     Args:
@@ -189,33 +314,50 @@ def build_graph_from_sa_trajectory(traj_data, parser: CommandParser, instance_id
         instance_id: Instance identifier (e.g., 'django__django-12345')
         output_dir: Base output directory for saving graphs
         eval_report_path: Path to evaluation report JSON file
+        template_dir: Optional path to template directory for visualizer
+        metadata_comment: Optional comment about model/plan
 
     Returns:
-        tuple: (json_path, pdf_path) paths to the saved graph files
+        tuple: (json_path, html_path) paths to the saved graph files
 
     Output Structure:
         {output_dir}/{instance_id}/{instance_id}.json
-        {output_dir}/{instance_id}/{instance_id}.pdf
+        {output_dir}/{instance_id}/{instance_id}.html
     """
+    from mapPhase import get_phase
+    
     builder = GraphBuilder()
     trajectory = traj_data.get("trajectory", [])
 
     for step_idx, step in enumerate(trajectory):
         action_str = step.get("action", "")
+        thought = step.get("thought", "") or ""
+        observation = step.get("observation", "") or ""
+
+        thought_len_raw   = compute_thought_length_raw(thought)
+        thought_len_clean = compute_thought_length_clean(thought)
 
         # Handle explicit "think" steps (blank action)
         if action_str.strip() == "":
             node_key = builder.add_or_update_node(
                 node_label="think",
-                args={},
+                args={"thought_len": thought_len_raw},
                 flags={},
                 phase="general",
                 step_idx=step_idx,
                 tool=None,
                 command=None,
-                subcommand=None
+                subcommand=None,
+                thought_length=thought_len_raw
             )
-            builder.add_execution_edge(node_key, step_idx)
+            builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
+            builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+            builder.G.nodes[node_key]["observation_length"]  = len(observation)
+            builder.G.nodes[node_key]["observation_outcome"] = detect_observation_outcome(observation)
+            builder.add_execution_edge(node_key, step_idx,
+                                       is_first_in_step=True,
+                                       thought_length_raw=thought_len_raw,
+                                       thought_length_clean=thought_len_clean)
             builder.update_previous_node(node_key)
             builder.add_phase("general")
             continue
@@ -225,7 +367,25 @@ def build_graph_from_sa_trajectory(traj_data, parser: CommandParser, instance_id
         if not parsed_commands:
             continue
 
-        for parsed in parsed_commands:
+        # Filter out cd commands if there are other commands in the same step
+        # and mark remaining nodes as having cd prefix
+        has_cd = False
+        filtered_commands = []
+        
+        if len(parsed_commands) > 1:
+            first_cmd = parsed_commands[0]
+            if first_cmd.get("command", "").strip().lower() == "cd":
+                has_cd = True
+                filtered_commands = parsed_commands[1:]
+            else:
+                filtered_commands = parsed_commands
+        else:
+            filtered_commands = parsed_commands
+        
+        is_first_in_step = True
+        node_keys_in_step = []
+        
+        for parsed in filtered_commands:
             tool = parsed.get("tool", "").strip() if parsed.get("tool") else ""
             subcommand = parsed.get("subcommand", "").strip() if parsed.get("subcommand") else ""
             command = parsed.get("command", "").strip() if parsed.get("command") else ""
@@ -239,7 +399,7 @@ def build_graph_from_sa_trajectory(traj_data, parser: CommandParser, instance_id
 
             phase = get_phase(tool, subcommand, command, args, builder.prev_phases)
 
-            edit_status = check_edit_status(tool, subcommand, args, step.get("observation", ""))
+            edit_status = check_edit_status(tool, subcommand, args, observation)
             if edit_status and isinstance(args, dict):
                 args["edit_status"] = edit_status
 
@@ -251,15 +411,34 @@ def build_graph_from_sa_trajectory(traj_data, parser: CommandParser, instance_id
                 step_idx=step_idx,
                 tool=tool,
                 command=command,
-                subcommand=subcommand
+                subcommand=subcommand,
+                thought_length=thought_len_raw,
+                has_cd=has_cd
             )
-            builder.add_execution_edge(node_key, step_idx)
+            builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
+            builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+            node_keys_in_step.append(node_key)
+
+            builder.add_execution_edge(
+                node_key, step_idx,
+                is_first_in_step=is_first_in_step,
+                thought_length_raw=thought_len_raw if is_first_in_step else 0,
+                thought_length_clean=thought_len_clean if is_first_in_step else 0,
+            )
             builder.update_previous_node(node_key)
             builder.add_phase(phase)
+            is_first_in_step = False
 
-    return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
+        # Mark last node of this step with observation info
+        if node_keys_in_step:
+            last_node = node_keys_in_step[-1]
+            builder.G.nodes[last_node]["observation_length"]  = len(observation)
+            builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(observation)
 
-def build_graph_from_oh_trajectory(traj_data, parser: CommandParser, instance_id, output_dir, eval_report_path):
+    return builder.finalize_and_save(output_dir, instance_id, eval_report_path, template_dir, metadata_comment)
+
+
+def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path, template_dir=None, metadata_comment=""):
     """Build graph from OpenHands trajectory data.
 
     Args:
@@ -268,14 +447,18 @@ def build_graph_from_oh_trajectory(traj_data, parser: CommandParser, instance_id
         instance_id: Instance identifier (e.g., 'django__django-12345')
         output_dir: Base output directory for saving graphs
         eval_report_path: Path to evaluation report JSON file
+        template_dir: Optional path to template directory for visualizer
+        metadata_comment: Optional comment about model/plan
 
     Returns:
-        tuple: (json_path, pdf_path) paths to the saved graph files
+        tuple: (json_path, html_path) paths to the saved graph files
 
     Output Structure:
         {output_dir}/{instance_id}/{instance_id}.json
-        {output_dir}/{instance_id}/{instance_id}.pdf
+        {output_dir}/{instance_id}/{instance_id}.html
     """
+    from mapPhase import get_phase
+    
     builder = GraphBuilder()
     step_idx = 0
 
@@ -286,6 +469,10 @@ def build_graph_from_oh_trajectory(traj_data, parser: CommandParser, instance_id
 
         # Use action text only as a fallback when command string is empty
         action_str = action or ""
+        thought = step.get("content", "") or ""
+
+        thought_len_raw   = compute_thought_length_raw(thought)
+        thought_len_clean = compute_thought_length_clean(thought)
 
         tool_calls = step.get("tool_call_metadata", {}).get("model_response", {}).get("choices", [])
         if not tool_calls and "tool_call_metadata" in step:
@@ -329,23 +516,49 @@ def build_graph_from_oh_trajectory(traj_data, parser: CommandParser, instance_id
         if not parsed_commands:
             continue
 
-        for parsed in parsed_commands:
+        # Filter out cd commands if there are other commands in the same step
+        has_cd = False
+        filtered_commands = []
+        
+        if len(parsed_commands) > 1:
+            first_cmd = parsed_commands[0]
+            if first_cmd.get("command", "").strip().lower() == "cd":
+                has_cd = True
+                filtered_commands = parsed_commands[1:]
+            else:
+                filtered_commands = parsed_commands
+        else:
+            filtered_commands = parsed_commands
+        
+        is_first_in_step = True
+        node_keys_in_step = []
+
+        for parsed in filtered_commands:
             tool = parsed.get("tool", "").strip()
+            
             # ---- THINK NODES ----
             if tool == "think":
                 node_key = builder.add_or_update_node(
                     node_label="think",
-                    args={},
+                    args={"thought_len": thought_len_raw},
                     flags={},
                     phase="general",
                     step_idx=step_idx,
                     tool=None,
                     command=None,
-                    subcommand=None
+                    subcommand=None,
+                    thought_length=thought_len_raw
                 )
-                builder.add_execution_edge(node_key, step_idx)
+                builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
+                builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+                node_keys_in_step.append(node_key)
+                builder.add_execution_edge(node_key, step_idx,
+                                           is_first_in_step=is_first_in_step,
+                                           thought_length_raw=thought_len_raw if is_first_in_step else 0,
+                                           thought_length_clean=thought_len_clean if is_first_in_step else 0)
                 builder.update_previous_node(node_key)
                 builder.add_phase("general")
+                is_first_in_step = False
                 continue
 
             subcommand = parsed.get("subcommand", "").strip() if parsed.get("subcommand") else ""
@@ -360,7 +573,8 @@ def build_graph_from_oh_trajectory(traj_data, parser: CommandParser, instance_id
 
             phase = get_phase(tool, subcommand, command, args, builder.prev_phases)
 
-            edit_status = check_edit_status(tool, subcommand, args, step.get("content", ""))
+            observation = step.get("content", "") or ""
+            edit_status = check_edit_status(tool, subcommand, args, observation)
             if edit_status and isinstance(args, dict):
                 args["edit_status"] = edit_status
 
@@ -372,588 +586,106 @@ def build_graph_from_oh_trajectory(traj_data, parser: CommandParser, instance_id
                 step_idx=step_idx,
                 tool=tool,
                 command=command,
-                subcommand=subcommand
+                subcommand=subcommand,
+                thought_length=thought_len_raw,
+                has_cd=has_cd
             )
-            builder.add_execution_edge(node_key, step_idx)
+            builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
+            builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+            node_keys_in_step.append(node_key)
+            builder.add_execution_edge(node_key, step_idx,
+                                       is_first_in_step=is_first_in_step,
+                                       thought_length_raw=thought_len_raw if is_first_in_step else 0,
+                                       thought_length_clean=thought_len_clean if is_first_in_step else 0)
             builder.update_previous_node(node_key)
             builder.add_phase(phase)
+            is_first_in_step = False
+
+        # Mark last node of this step with observation info
+        if node_keys_in_step:
+            last_node = node_keys_in_step[-1]
+            obs_text = step.get("content", "") or ""
+            builder.G.nodes[last_node]["observation_length"]  = len(obs_text)
+            builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(obs_text)
 
         step_idx += 1
 
-    return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
+    return builder.finalize_and_save(output_dir, instance_id, eval_report_path, template_dir, metadata_comment)
+
 
 def build_hierarchical_edges(G: nx.MultiDiGraph, localization_nodes):
-    path_nodes = []  # [(node_id, Path)]
-    range_nodes_by_path = defaultdict(list)  # path_str -> [(node_id, [start, end])]
+    """Add 'hier' edges between str_replace_editor view nodes based on file-path
+    containment and view-range nesting.
 
-    for node in localization_nodes:
-        data = G.nodes[node]
-        path = data.get("args", {}).get("path")
-        view_range = data.get("args", {}).get("view_range")
+    Hierarchy rules
+    ---------------
+    1. Directory containment: if node A views a directory (or file) that is a
+       prefix of the path viewed by node B, add A → B.
+    2. Range nesting within the same file: if node A views a range [a1, a2] and
+       node B views [b1, b2] with b1 >= a1 and b2 <= a2, add A → B.
+    3. Whole-file view → ranged view of the same file: if node A has no range
+       and node B views a range of the same file, add A → B.
+    """
+    path_nodes: list[tuple[str, list | None]] = []  # (node_key, view_range_or_None)
 
-        if path:
-            path_obj = Path(path)
-            if view_range is None:
-                path_nodes.append((node, path_obj))
-            elif (
-                isinstance(view_range, (list, tuple)) and
-                len(view_range) == 2 and
-                all(isinstance(x, int) for x in view_range)
-            ):
-                range_nodes_by_path[str(path_obj)].append((node, view_range))
-            else:
-                print(f"[WARN] Skipping invalid view_range for node {node}: {view_range}")
+    for node_key in localization_nodes:
+        data = G.nodes.get(node_key, {})
+        args = data.get("args", {}) or {}
+        if not isinstance(args, dict):
+            continue
+        path = args.get("path")
+        if not path:
+            continue
+        vr = args.get("view_range")
+        if isinstance(vr, (list, tuple)) and len(vr) == 2:
+            try:
+                vr = [int(vr[0]), int(vr[1])]
+            except (TypeError, ValueError):
+                vr = None
+        else:
+            vr = None
+        path_nodes.append((node_key, str(path), vr))
 
-    # --- 1) Path hierarchy by folder containment ---
-    for child_node, child_path in path_nodes:
-        best_parent_node = None
-        best_parent_path = None
-        for parent_node, parent_path in path_nodes:
-            if parent_node == child_node:
-                continue
-            if (len(parent_path.parts) < len(child_path.parts) and
-                child_path.parts[:len(parent_path.parts)] == parent_path.parts):
-                if best_parent_path is None or len(parent_path.parts) > len(best_parent_path.parts):
-                    best_parent_node = parent_node
-                    best_parent_path = parent_path
-        if best_parent_node:
-            G.add_edge(best_parent_node, child_node, type="hier")
+    added: set[tuple] = set()
 
-    # --- 2) Range nodes: handle nesting + link outermost ---
-    path_to_node = {str(p): n for n, p in path_nodes}
+    def _add(src, dst):
+        if src != dst and (src, dst) not in added:
+            G.add_edge(src, dst, type="hier", label="")
+            added.add((src, dst))
 
-    for path_str, range_nodes in range_nodes_by_path.items():
-        is_nested = {n: False for n, _ in range_nodes}
+    # Group by normalised path for range comparisons
+    by_path: dict[str, list] = defaultdict(list)
+    for node_key, path, vr in path_nodes:
+        by_path[path].append((node_key, vr))
 
-        # detect nesting: mark inner ranges
-        for i, (node_i, r_i) in enumerate(range_nodes):
-            for j, (node_j, r_j) in enumerate(range_nodes):
+    for path, entries in by_path.items():
+        whole  = [(nk, vr) for nk, vr in entries if vr is None]
+        ranged = [(nk, vr) for nk, vr in entries if vr is not None]
+
+        # Whole-file → ranged views of same file
+        for w_nk, _ in whole:
+            for r_nk, _ in ranged:
+                _add(w_nk, r_nk)
+
+        # Range nesting: outer range → inner range
+        for i, (nk_a, vr_a) in enumerate(ranged):
+            for j, (nk_b, vr_b) in enumerate(ranged):
                 if i == j:
                     continue
-                try:
-                    a1, a2 = r_i
-                    b1, b2 = r_j
-                    if b1 >= a1 and b2 <= a2:
-                        G.add_edge(node_i, node_j, type="hier")
-                        is_nested[node_j] = True
-                except Exception as e:
-                    print(f"[WARN] Failed to unpack ranges for nesting check: {r_i}, {r_j} ({e})")
+                if vr_b[0] >= vr_a[0] and vr_b[1] <= vr_a[1]:
+                    _add(nk_a, nk_b)
 
-        # link outermost ranges to:
-        #   - exact path node if exists
-        #   - else closest parent path node whose path contains this path
-        path_node = path_to_node.get(path_str)
-        if path_node:
-            for node, _ in range_nodes:
-                if not is_nested[node]:
-                    G.add_edge(path_node, node, type="hier")
-        else:
-            # No exact path node → find nearest ancestor
-            path_parts = Path(path_str).parts
-            best_ancestor_node = None
-            best_ancestor_depth = -1
-            for pn, pp in path_nodes:
-                if len(pp.parts) < len(path_parts) and path_parts[:len(pp.parts)] == pp.parts:
-                    if len(pp.parts) > best_ancestor_depth:
-                        best_ancestor_node = pn
-                        best_ancestor_depth = len(pp.parts)
-            for node, _ in range_nodes:
-                if not is_nested[node] and best_ancestor_node:
-                    G.add_edge(best_ancestor_node, node, type="hier")
-
-# ==================== Visualization Class ====================
-class GraphVisualizer:
-    """Encapsulates all plot-related helpers and renderers."""
-
-    phase_colors = {
-        "localization": "#C5B3F0",  # light purple
-        "patch":        "#FCC9B0",  # light coral
-        "validation": "#A8E6F0",  # light cyan
-        "general":      "#CFE0F6",  # light sky
-    }
-
-    def __init__(self):
-        # Built at draw time: maps each unique string to a stable ID "str_#"
-        self._str_id_map = {}
-    
-    def _node_phase_colors(self, node_data):
-        """Return an ordered list of color hexes for this node based on its phases list."""
-        phases = node_data.get("phases") or ["general"]
-        uniq = []
-        seen = set()
-        # stable, human-friendly ordering for stripes
-        order = ["localization", "patch", "validation", "general"]
-        for ph in order:
-            if ph in phases and ph not in seen:
-                seen.add(ph); uniq.append(ph)
-        # append any remaining unknowns in their first-seen order
-        for ph in phases:
-            if ph not in seen:
-                seen.add(ph); uniq.append(ph)
-        return [self.phase_colors.get(ph, self.phase_colors["general"]) for ph in uniq]
-
-    def _draw_node_with_stripes(self, ax, x, y, label, colors, font_size=25):
-        """
-        Matplotlib: draw a rounded box at (x,y) with vertical color stripes behind text.
-        Keep existing styling (rounded, black border). 'colors' is a list of hexes.
-        """
-        # Measure text size by creating a temporary, invisible text object
-        t = ax.text(x, y, label, fontsize=font_size, fontweight='bold',
-                    ha="center", va="center", alpha=0.0)
-        fig = ax.figure
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-        bbox = t.get_window_extent(renderer=renderer).transformed(ax.transData.inverted())
-        t.remove()
-
-        pad_x, pad_y = 0.35, 0.28  # similar to previous bbox padding
-        width = bbox.width * 1.0 + pad_x
-        height = bbox.height * 1.0 + pad_y
-        left = x - width / 2.0
-        bottom = y - height / 2.0
-
-        # Stripes (equal widths)
-        n = max(1, len(colors))
-        for i, c in enumerate(colors):
-            w_i = width / n
-            ax.add_patch(
-                FancyBboxPatch(
-                    (left + i * w_i, bottom),
-                    w_i, height,
-                    boxstyle="round,pad=0.0,rounding_size=0.2",
-                    linewidth=0.0,  # no inner borders between stripes
-                    facecolor=c,
-                    edgecolor="none",
-                    zorder=0.5,
-                )
-            )
-
-        # Border on top
-        ax.add_patch(
-            FancyBboxPatch(
-                (left, bottom),
-                width, height,
-                boxstyle="round,pad=0.0,rounding_size=0.2",
-                linewidth=1.2,
-                facecolor="none",
-                edgecolor="black",
-                zorder=0.8,
-            )
-        )
-
-        # Foreground text
-        ax.text(x, y, label, fontsize=font_size, fontweight='bold',
-                ha="center", va="center", color="black", zorder=1.0)
-
-    def draw_graph_pdf(self, G: nx.MultiDiGraph, pdf_path: str):
-        # Build the mapping once per graph (JSON graph remains unchanged)
-        self._str_id_map = self._build_str_id_map(G)
-
-        if _HAS_PYGRAPHVIZ:
-            try:
-                self._draw_graph_graphviz_with_compact_legend(G, pdf_path)
-                return
-            except OSError as e:
-                print("[WARN] Graphviz failed, falling back to Matplotlib:", e)
-        self._draw_graph_matplotlib_with_compact_legend(G, pdf_path)
-    
-    # ----- TIMEOUT WRAPPER -----
-    @staticmethod
-    def _pdf_worker(G: nx.MultiDiGraph, pdf_path: str):
-        gv = GraphVisualizer()
-        gv.draw_graph_pdf(G, pdf_path)
-
-    @classmethod
-    def draw_with_timeout(cls, G: nx.MultiDiGraph, pdf_path: str, timeout_sec: int = 100) -> bool:
-        """
-        Try to render PDF via GraphVisualizer; if it takes longer than timeout_sec
-        (default 5 min) or fails, terminate and fall back to the simple graph drawer.
-        Returns True if PDF succeeded; False if fell back to simple graph.
-        """
-        p = multiprocessing.Process(target=cls._pdf_worker, args=(G, pdf_path))
-        p.start()
-        p.join(timeout_sec)
-
-        if p.exitcode is None:
-            # Timed out: terminate and fall back.
-            try:
-                p.terminate()
-                p.join(5)
-                if p.is_alive():
-                    try:
-                        p.kill()
-                    except Exception:
-                        pass
-            finally:
-                pass
-            print(f"[WARN] GraphVisualizer exceeded {timeout_sec}s. Too large to display.")
-            return False
-
-        if p.exitcode != 0:
-            # Crashed: fall back.
-            print(f"[WARN] GraphVisualizer failed (exit {p.exitcode}). Too large to display.")
-            return False
-
-        return True
-
-    # ---- Mapping helpers for str_replace display ----
-    def _build_str_id_map(self, G: nx.MultiDiGraph) -> dict:
-        """
-        Deduplicate all strings seen in str_replace actions (both old_str and new_str)
-        and assign stable IDs: str_1, str_2, ...
-        """
-        mapping = {}
-        next_id = 1
-        for _, d in G.nodes(data=True):
-            if d.get("subcommand") == "str_replace" and isinstance(d.get("args"), dict):
-                for key in ("old_str", "new_str"):
-                    s = d["args"].get(key)
-                    if isinstance(s, str) and s not in mapping:
-                        mapping[s] = f"str_{next_id}"
-                        next_id += 1
-        return mapping
-
-    def _str_ids_for_node(self, node_data):
-        """Return 'str_i, str_j' for str_replace nodes, else ''."""
-        if node_data.get("subcommand") != "str_replace":
-            return ""
-        args = node_data.get("args", {})
-        if not isinstance(args, dict):
-            return ""
-        old_s = args.get("old_str")
-        new_s = args.get("new_str")
-        if not isinstance(old_s, str) or not isinstance(new_s, str):
-            return ""
-        old_id = self._str_id_map.get(old_s)
-        new_id = self._str_id_map.get(new_s)
-        if not old_id or not new_id:
-            return ""
-        return f"{old_id}, {new_id}"
-
-    # ---- Label helpers ----
-    @staticmethod
-    def _shorten_path(p: str, maxlen: int = 18) -> str:
-        p = (p or "").replace("\\", "/")
-        if len(p) <= maxlen:
-            return p
-        parts = [x for x in p.split("/") if x]
-        base = parts[-1] if parts else p
-        return f".../{base}"
-
-    @staticmethod
-    def _first_script_arg(args_list):
-        for tok in args_list:
-            if not isinstance(tok, str):
+    # Directory/path prefix containment across different paths
+    path_list = list(by_path.keys())
+    for path_a in path_list:
+        for path_b in path_list:
+            if path_a == path_b:
                 continue
-            if tok.startswith("-"):
-                continue
-            if "/" in tok or tok.endswith(".py"):
-                return tok
-        for tok in args_list:
-            if isinstance(tok, str) and not tok.startswith("-"):
-                return tok
-        return None
-
-    @staticmethod
-    def _escape_html(s: str) -> str:
-        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    @staticmethod
-    def _format_view_range(args) -> str:
-        """Return a pretty 'Lstart–end' if args has a valid view_range."""
-        if isinstance(args, dict) and isinstance(args.get("view_range"), (list, tuple)) and len(args["view_range"]) == 2:
-            a, b = args["view_range"]
-            if isinstance(a, int) and isinstance(b, int):
-                return f"L{a}–{b}"
-        return ""
-
-    def _make_display_label_plain(self, node_data):
-        """Text label for Matplotlib fallback (includes view_range and str_#,# for str_replace)."""
-        base = (node_data.get("command") or node_data.get("subcommand") or node_data.get("label") or "").strip()
-        tool = (node_data.get("tool") or "").strip()
-        if base == tool:
-            base = ""
-        args = node_data.get("args", {})
-        cmd = (node_data.get("command") or "").lower()
-        path_lc = ""
-        if isinstance(args, dict):
-            p = args.get("path")
-            path_lc = self._shorten_path(str(p).lower()) if p else ""
-        elif isinstance(args, (list, tuple)) and cmd in {"python", "python3"}:
-            cand = self._first_script_arg(args)
-            path_lc = self._shorten_path(cand.lower()) if cand else ""
-
-        vr = self._format_view_range(args)
-
-        # Status badge
-        badge = ""
-        if isinstance(args, dict):
-            status = args.get("edit_status")
-            if status == "success":
-                badge = " ✓"
-            elif status and str(status).startswith("failure"):
-                badge = " ✗"
-
-        # 'str_i, str_j' for str_replace nodes
-        str_pair = self._str_ids_for_node(node_data)
-
-        lines = []
-        if base or badge:
-            lines.append((base or node_data.get("label", "")).strip() + (badge or ""))
-        # --- CHANGED ORDER: path first, then str_pair ---
-        if path_lc:
-            lines.append(path_lc)
-        if str_pair:
-            lines.append(str_pair)
-        if vr:
-            lines.append(vr)
-
-        text = "\n".join([l for l in lines if l]).strip()
-        return text if text else (node_data.get("label", "") or "")
-
-    def _make_display_label_html(self, node_data):
-        """
-        HTML-like label for Graphviz: first line command (+badge),
-        then path, then 'str_i, str_j' for str_replace, then view_range.
-        """
-        base = (node_data.get("command") or node_data.get("subcommand") or node_data.get("label") or "").strip()
-        tool = (node_data.get("tool") or "").strip()
-        if base == tool:
-            base = ""
-        args = node_data.get("args", {})
-        cmd = (node_data.get("command") or "").lower()
-        path_lc = ""
-        if isinstance(args, dict):
-            p = args.get("path")
-            path_lc = self._shorten_path(str(p).lower()) if p else ""
-        elif isinstance(args, (list, tuple)) and cmd in {"python", "python3"}:
-            cand = self._first_script_arg(args)
-            path_lc = self._shorten_path(cand.lower()) if cand else ""
-
-        vr = self._format_view_range(args)
-
-        # Badge
-        badge = ""
-        if isinstance(args, dict):
-            status = args.get("edit_status")
-            if status == "success":
-                badge = " ✓"
-            elif status and str(status).startswith("failure"):
-                badge = " ✗"
-
-        # 'str_i, str_j' for str_replace nodes
-        str_pair = self._str_ids_for_node(node_data)
-
-        lines = []
-        if base or badge:
-            lines.append(f"<B>{self._escape_html((base or node_data.get('label','')) + (f' {badge}' if badge else ''))}</B>")
-        # --- CHANGED ORDER: path first, then str_pair ---
-        if path_lc:
-            lines.append(self._escape_html(path_lc))
-        if str_pair:
-            lines.append(self._escape_html(str_pair))
-        if vr:
-            lines.append(self._escape_html(vr))
-        if not lines:
-            lines.append(self._escape_html(node_data.get("label", "")))
-
-        inner = "<BR/>".join(lines)
-        html = f'<FONT FACE="{FONT_FAMILY}" POINT-SIZE="20">{inner}</FONT>'
-        return f"<{html}>"
-
-
-    # ---- Graphviz path (main graph) + COMPACT LEGEND placed INSIDE near center ----
-    def _draw_graph_graphviz_with_compact_legend(self, G: nx.MultiDiGraph, pdf_path: str):
-        A = pgv.AGraph(directed=True, strict=False)
-        A.graph_attr.update(
-            rankdir="LR",
-            overlap="false",
-            splines="true",
-            nodesep="0.9",
-            ranksep="1.15",
-            margin="0.15",
-            ratio="compress",
-            newrank="true",
-            fontname=FONT_FAMILY
-        )
-        A.node_attr.update(
-            shape="box",
-            style="rounded,filled",
-            fontsize="25",
-            color="black",
-            penwidth="1.0",
-            fontname=FONT_FAMILY
-        )
-        A.edge_attr.update(
-            fontsize="20",
-            arrowsize="1.3",
-            arrowhead="normal",
-            color="#808080",
-            fontname=FONT_FAMILY
-        )
-
-        # Nodes
-        for n, d in G.nodes(data=True):
-            label = self._make_display_label_html(d)
-            colors = self._node_phase_colors(d)  # list of hex colors
-            if len(colors) <= 1:
-                fill = colors[0] if colors else self.phase_colors["general"]
-                A.add_node(n, label=label, fillcolor=fill, style="rounded,filled")
-            else:
-                # striped fill with equal slices
-                fill = ":".join(colors)
-                A.add_node(n, label=label, fillcolor=fill, style="rounded,striped")
-
-
-        # Edges with staggered labels
-        grouped = defaultdict(list)
-        for u, v, k, d in G.edges(keys=True, data=True):
-            grouped[(u, v)].append((k, d))
-
-        for (u, v), lst in grouped.items():
-            for idx, (k, d) in enumerate(lst):
-                etype = d.get("type", "exec")
-                atr = {"style": "solid", "color": "#808080", "minlen": "1"}
-                if etype == "hier":
-                    atr["style"] = "dashed"
-                    atr["color"] = "#2E8B57"
-                if etype == "exec" and "label" in d:
-                    atr["label"] = str(d["label"])
-                    atr["labelfontsize"] = "20"
-                    atr["labeldistance"] = str(1.0 + 0.4 * idx)
-                    sign = 1 if (str(u) < str(v)) else -1
-                    atr["labelangle"] = str(sign * (20 + 12 * (idx % 3)))
-                A.add_edge(u, v, **atr)
-
-        # Compact legend
-        # row1, row2 = phases[:3], phases[3:]
-        phases = ["localization", "patch", "validation", "general"]
-
-        def _legend_row(items):
-            cells = []
-            for ph in items:
-                color = self.phase_colors[ph]
-                swatch = (
-                    "<TABLE BORDER='0' CELLBORDER='1' COLOR='#C8C8C8' CELLPADDING='0' CELLSPACING='0'>"
-                    f"<TR><TD BGCOLOR='{color}' WIDTH='24' HEIGHT='12' FIXEDSIZE='TRUE'></TD></TR>"
-                    "</TABLE>"
-                )
-                cells.append(f"<TD>{swatch}</TD>")
-                cells.append(f"<TD ALIGN='LEFT'><FONT FACE='{FONT_FAMILY}' POINT-SIZE='18' COLOR='#333333'>{ph}</FONT></TD>")
-                cells.append("<TD WIDTH='10'></TD>")
-            return "<TR>" + "".join(cells) + "</TR>"
-
-        legend_label = (
-            "<"
-            "<TABLE BORDER='0' CELLBORDER='0' CELLSPACING='6'>"
-            f"{_legend_row(phases)}"
-            # f"{_legend_row(row1)}"
-            # f"{_legend_row(row2)}"
-            "</TABLE>"
-            ">"
-        )
-        A.graph_attr.update(labelloc="b", labeljust="l", label=legend_label)
-        A.draw(pdf_path, prog="dot")
-
-    # ---- Matplotlib fallback ----
-    def _draw_graph_matplotlib_with_compact_legend(self, G: nx.MultiDiGraph, pdf_path: str):
-        plt.rcParams['pdf.fonttype'] = 42
-        plt.rcParams['ps.fonttype'] = 42
-        plt.rcParams['font.family'] = FONT_FAMILY
-
-        fig_w = max(16, min(36, 1.0 + 0.8 * G.number_of_nodes()))
-        fig_h = max(11, 13)
-        fig = plt.figure(figsize=(fig_w, fig_h))
-
-        ax = fig.add_axes([0.05, 0.16, 0.90, 0.78])
-
-        try:
-            from networkx.drawing.nx_agraph import graphviz_layout
-            pos = graphviz_layout(
-                G, prog="dot",
-                args="-Grankdir=LR -Goverlap=false -Gsplines=true -Granksep=1.3 -Gnodesep=0.9 -Gmargin=0.2"
-            )
-        except Exception:
-            pos = nx.spring_layout(G, seed=42, k=2.5 / max(1, G.number_of_nodes()), iterations=300)
-
-        labels = {n: self._make_display_label_plain(d) for n, d in G.nodes(data=True)}
-
-        # Nodes
-        for n, (x, y) in pos.items():
-            label = labels[n]
-            colors = self._node_phase_colors(G.nodes[n])
-            self._draw_node_with_stripes(ax, x, y, label, colors, font_size=25)
-
-        # Edges
-        exec_edges, hier_edges = [], []
-        for u, v, k, d in G.edges(keys=True, data=True):
-            (hier_edges if d.get("type") == "hier" else exec_edges).append((u, v, k, d))
-
-        def draw_edges_group(edges, solid=True, color="gray", base=0.22, step=0.15):
-            group = defaultdict(list)
-            for u, v, k, d in edges:
-                group[(u, v)].append((k, d))
-            for (u, v), lst in group.items():
-                for i, (k, d) in enumerate(lst):
-                    sign = 1 if str(u) < str(v) else -1
-                    rad = (base + step * i) * sign
-                    nx.draw_networkx_edges(
-                        G, pos,
-                        edgelist=[(u, v, k)],
-                        connectionstyle=f"arc3,rad={rad}",
-                        style="solid" if solid else "dashed",
-                        edge_color=color,
-                        width=1.8,
-                        arrows=True,
-                        arrowstyle="-|>",
-                        arrowsize=22,
-                        min_source_margin=18,
-                        min_target_margin=18,
-                        alpha=1.0,
-                        ax=ax
-                    )
-                    if d.get("type") == "exec" and "label" in d:
-                        x1, y1 = pos[u]; x2, y2 = pos[v]
-                        mx, my = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-                        cx = mx - rad * (y2 - y1)
-                        cy = my + rad * (x2 - x1)
-                        t = 0.5
-                        bx = (1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t ** 2 * x2
-                        by = (1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2
-                        ax.text(bx, by, str(d["label"]), fontsize=25, color="black",
-                                ha="center", va="center", zorder=5)
-
-        draw_edges_group(exec_edges, solid=True, color="gray")
-        draw_edges_group(hier_edges, solid=False, color="#2E8B57")
-
-        # Legend
-        legend_ax = fig.add_axes([0.05, 0.05, 0.90, 0.07])
-        legend_ax.axis("off")
-        phases_order = ["localization", "patch", "validation", "general"]
-        x = 0.01
-        y = 0.55
-        rect_w = 0.016
-        rect_h = 0.20
-        gap_after_rect = 0.045
-        font_size = 25
-        fig.canvas.draw()
-        for ph in phases_order:
-            color = self.phase_colors[ph]
-            t = legend_ax.text(x, y, f"{ph}:", ha="left", va="center",
-                               fontsize=font_size, fontweight="bold",
-                               transform=legend_ax.transAxes)
-            fig.canvas.draw()
-            renderer = fig.canvas.get_renderer()
-            bbox_disp = t.get_window_extent(renderer=renderer)
-            bbox_axes = bbox_disp.transformed(legend_ax.transAxes.inverted())
-            text_w = bbox_axes.width
-            rx = x + text_w + 0.01
-            ry = y - rect_h/2
-            legend_ax.add_patch(Rectangle((rx, ry), rect_w, rect_h,
-                                          transform=legend_ax.transAxes,
-                                          facecolor=color, edgecolor="black", linewidth=1.0))
-            x = rx + rect_w + gap_after_rect
-
-        ax.axis("off")
-        plt.savefig(pdf_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
+            parts_a = [p for p in path_a.replace("\\", "/").split("/") if p]
+            parts_b = [p for p in path_b.replace("\\", "/").split("/") if p]
+            if (len(parts_a) < len(parts_b) and
+                    parts_b[:len(parts_a)] == parts_a):
+                # path_a is a parent dir of path_b
+                for nk_a, _ in by_path[path_a]:
+                    for nk_b, _ in by_path[path_b]:
+                        _add(nk_a, nk_b)

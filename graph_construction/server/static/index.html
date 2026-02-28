@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trajectory Graph Browser</title>
+    <link rel="stylesheet" href="/static/browser.css">
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h1>📊 Trajectory Viewer</h1>
+            <p class="subtitle">Graph representations of agent trajectories</p>
+        </div>
+
+        <div class="controls">
+            <input
+                type="text"
+                id="searchInput"
+                class="search-input"
+                placeholder="Search instances…"
+                autofocus
+            >
+            <label class="toggle-row">
+                <span class="toggle-label">Verbose node labels</span>
+                <div class="toggle-wrap">
+                    <input type="checkbox" id="nodeVerbosityToggle" checked>
+                    <span class="toggle-slider"></span>
+                </div>
+            </label>
+            <label class="toggle-row">
+                <span class="toggle-label">Exclude quotes in thought length</span>
+                <div class="toggle-wrap">
+                    <input type="checkbox" id="thoughtQuotesToggle" checked>
+                    <span class="toggle-slider"></span>
+                </div>
+            </label>
+            <label class="toggle-row">
+                <span class="toggle-label">Filter cd (show ▲ hat)</span>
+                <div class="toggle-wrap">
+                    <input type="checkbox" id="filterCdToggle">
+                    <span class="toggle-slider"></span>
+                </div>
+            </label>
+            <label class="toggle-row">
+                <span class="toggle-label">Show observation indicators</span>
+                <div class="toggle-wrap">
+                    <input type="checkbox" id="observationToggle">
+                    <span class="toggle-slider"></span>
+                </div>
+            </label>
+            <label class="toggle-row">
+                <span class="toggle-label">Unique think nodes (by thought)</span>
+                <div class="toggle-wrap">
+                    <input type="checkbox" id="uniqueThinkToggle">
+                    <span class="toggle-slider"></span>
+                </div>
+            </label>
+        </div>
+
+        <div class="stats" id="stats">Loading…</div>
+
+        <div class="graph-list" id="graphList">
+            <div class="placeholder">
+                <div class="spinner"></div>
+                Loading graphs…
+            </div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div id="graphPane" class="graph-pane">
+            <div class="placeholder">
+                <span class="placeholder-icon">📊</span>
+                <p>Select a graph from the list</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/browser.js"></script>
+</body>
+</html>
