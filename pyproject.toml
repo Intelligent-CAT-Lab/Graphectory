@@ -10,14 +10,17 @@ requires-python = ">=3.12"
 dependencies = [
     "bashlex>=0.18",
     "datasets>=4.6.0",
-    "matplotlib>=3.10.0",
+    "matplotlib>=3.10.3",
     "networkx>=3.5",
     "numpy>=2.3.0",
     "pandas>=2.3.0",
     "pygraphviz>=1.7",
     "pyyaml>=6.0.2",
-    "scipy>=1.16.0",
+    "scipy>=1.16.3",
     "seaborn>=0.13.2",
+    "requests>=2.32.3",
+    "tqdm>=4.67.1",
+    "sympy>=1.14.0",
 ]
 
 [tool.setuptools]
@@ -29,18 +32,21 @@ ml = [
     "transformers>=4.52.4",
     "tokenizers>=0.21.1",
     "safetensors>=0.5.3",
+    "jax>=0.8.0",
+    "jaxlib>=0.8.0",
+    "huggingface-hub>=0.32.4",
 ]
 notebook = [
     "jupyter>=1.1.1",
     "jupyterlab>=4.4.3",
     "ipywidgets>=8.1.7",
     "nbconvert>=7.16.6",
+    "ipykernel>=6.29.5",
 ]
 dev = [
     "pytest>=7.0",
     "black>=22.0",
     "flake8>=4.0",
     "mypy>=0.950",
+    "pyinstaller>=6.11.1",
 ]
-
-# Note: dagre@0.8.5 (JS) loaded from unpkg.com at render time
