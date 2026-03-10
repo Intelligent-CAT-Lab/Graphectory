@@ -26,6 +26,19 @@ We recommend using conda or virtual environments (python>=3.12) to manage depend
 
 ---
 
+Note on PyGraphviz (Required for Live Visualization)
+The live_graph_server.py tool requires pygraphviz. On Windows, a standard pip install often fails with a cgraph.h error because it cannot find the Graphviz C-libraries.
+
+If you use Conda, we recommend installing the pre-compiled version from conda-forge to handle these dependencies automatically:
+
+Bash
+# 1. Install pygraphviz and its C-dependencies via Conda
+conda install -c conda-forge pygraphviz
+
+# 2. Complete the local project installation
+python -m pip install -e .
+If you are not using Conda, you must install the Graphviz system binaries manually and ensure they are added to your system PATH before running the pip install.
+
 ## Quick Start
 
 Graphectory provides two tools for working with agent trajectories:
