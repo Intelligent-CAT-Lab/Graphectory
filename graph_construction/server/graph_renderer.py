@@ -10,8 +10,11 @@ The public surface is a single function:
 """
 
 import json
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_json(obj) -> str:
@@ -35,17 +38,64 @@ PHASE_COLORS = {
 }
 
 
+# ── Dagre script tag resolution ─────────────────────────────────────────────
+
+_DAGRE_CDN = "https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"
+_DAGRE_LOCAL_NAMES = ["dagre.min.js", "dagre.js"]
+
+
+def _dagre_script_tag(assets_dir: Path) -> str:
+    """Return a <script> tag for dagre, preferring a local copy over the CDN.
+
+    If ``dagre.min.js`` (or ``dagre.js``) exists in *assets_dir*, it is served
+    via the ``/static/`` route (the file must therefore also be inside the
+    ``static/`` sub-directory that the handler already serves).  Otherwise we
+    fall back to the CDN with ``onerror`` reporting.
+    """
+    for name in _DAGRE_LOCAL_NAMES:
+        local = assets_dir / name
+        if local.exists():
+            logger.info("[renderer] Using local dagre: %s", local)
+            return f'<script src="/static/{name}"></script>'
+
+    # Also check assets_dir/static/ sub-directory (common layout)
+    for name in _DAGRE_LOCAL_NAMES:
+        local = assets_dir / "static" / name
+        if local.exists():
+            logger.info("[renderer] Using local dagre: %s", local)
+            return f'<script src="/static/{name}"></script>'
+
+    logger.warning(
+        "[renderer] dagre not found locally in %s — falling back to CDN (%s). "
+        "Run `python download_dagre.py` to cache it locally.",
+        assets_dir, _DAGRE_CDN,
+    )
+    # onerror logs a console message; the JS retry loop will surface the UI error
+    return (
+        f'<script src="{_DAGRE_CDN}" '
+        f'onerror="console.error(\'[graph] Failed to load dagre from CDN: {_DAGRE_CDN}\')"></script>'
+    )
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 def render_graph_html(G: nx.MultiDiGraph, filter_cd: bool,
                       thought_quotes: bool, node_verbosity: bool,
                       show_observation: bool, assets_dir: Path) -> str:
     """Return a complete, self-contained HTML string for the graph."""
-    nodes_data = _prepare_nodes(G)
-    edges_data = _prepare_edges(G)
+    instance_name = G.graph.get("instance_name", "Unknown")
+    logger.info("[renderer] Rendering graph for '%s' (%d nodes, %d edges)",
+                instance_name, G.number_of_nodes(), G.number_of_edges())
+
+    try:
+        nodes_data = _prepare_nodes(G)
+        edges_data = _prepare_edges(G)
+    except Exception:
+        logger.exception("[renderer] Failed to prepare graph data for '%s'", instance_name)
+        raise
 
     meta = {
-        "instance_name":     G.graph.get("instance_name", "Unknown"),
+        "instance_name":     instance_name,
         "resolution_status": G.graph.get("resolution_status", "unknown"),
         "difficulty":        str(G.graph.get("debug_difficulty", "unknown")),
         "node_count":        str(len(nodes_data)),
@@ -60,11 +110,18 @@ def render_graph_html(G: nx.MultiDiGraph, filter_cd: bool,
         "showObservation": show_observation,
     }
 
-    template = _load(assets_dir / "graph_template.html")
-    css      = _load(assets_dir / "styles.css").replace("{{FONT_FAMILY}}", FONT_FAMILY)
-    js       = _load(assets_dir / "graph_renderer.js")
+    try:
+        template = _load(assets_dir / "graph_template.html")
+        css      = _load(assets_dir / "styles.css").replace("{{FONT_FAMILY}}", FONT_FAMILY)
+        js       = _load(assets_dir / "graph_renderer.js")
+    except OSError:
+        logger.exception("[renderer] Failed to load template assets from '%s'", assets_dir)
+        raise
 
     html = template
+
+    # Dagre script tag — local file if available, CDN otherwise
+    html = html.replace("{{DAGRE_SCRIPT_TAG}}", _dagre_script_tag(assets_dir))
 
     # Metadata substitutions
     html = html.replace("{{INSTANCE_NAME}}",     _esc(meta["instance_name"]))
@@ -90,6 +147,8 @@ def render_graph_html(G: nx.MultiDiGraph, filter_cd: bool,
         f'<script>{js}</script>',
     )
 
+    logger.info("[renderer] HTML rendered successfully for '%s' (%d bytes)",
+                instance_name, len(html))
     return html
 
 

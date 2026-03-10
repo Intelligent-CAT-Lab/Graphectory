@@ -894,39 +894,95 @@ function setupSidebarResize() {
 
 // ==================== Initialization ====================
 function initializeGraph() {
-    graphEl = document.getElementById('graph');
-    
-    const layoutResult = layoutGraph();
-    const g = layoutResult.g;
-    graphWidth = layoutResult.graphWidth;
-    graphHeight = layoutResult.graphHeight;
-    
-    svg = createSVG(graphWidth, graphHeight);
-    const defs = createMarkers(svg);
-    
-    renderEdges(svg, g, defs);
-    renderNodes(svg, g, defs);
-    
-    graphEl.appendChild(svg);
-    
-    setupTooltips();
-    setupWheelZoom();
-    setupPanning();
-    setupSidebarResize();
+    // Guard: dagre must be fully loaded before we attempt layout.
+    // This can fail silently when the CDN script hasn't finished loading.
+    if (typeof dagre === 'undefined' || !dagre.graphlib || !dagre.layout) {
+        console.error('[graph] dagre is not loaded. Cannot render graph.');
+        const graphEl = document.getElementById('graph');
+        if (graphEl) {
+            graphEl.innerHTML =
+                '<div style="padding:32px;color:#e74c3c;font-family:monospace;">' +
+                '<strong>⚠ dagre library not loaded</strong><br><br>' +
+                'The graph layout library (dagre) failed to load from the CDN.<br><br>' +
+                '<strong>Fix:</strong> Download <code>dagre.min.js</code> locally by running:<br>' +
+                '<code style="display:block;margin-top:8px;background:#1a1a2a;padding:8px;border-radius:4px;">' +
+                'python download_dagre.py</code><br>' +
+                'Then reload this page.' +
+                '</div>';
+        }
+        return;
+    }
 
-    
-    setTimeout(fitToScreen, 150);
+    try {
+        graphEl = document.getElementById('graph');
+
+        console.log('[graph] Starting layout for', nodesData.length, 'nodes,', edgesData.length, 'edges');
+
+        const layoutResult = layoutGraph();
+        const g = layoutResult.g;
+        graphWidth = layoutResult.graphWidth;
+        graphHeight = layoutResult.graphHeight;
+
+        console.log('[graph] Layout complete. Graph size:', graphWidth.toFixed(0), 'x', graphHeight.toFixed(0));
+
+        svg = createSVG(graphWidth, graphHeight);
+        const defs = createMarkers(svg);
+
+        renderEdges(svg, g, defs);
+        renderNodes(svg, g, defs);
+
+        graphEl.appendChild(svg);
+
+        setupTooltips();
+        setupWheelZoom();
+        setupPanning();
+        setupSidebarResize();
+
+        setTimeout(fitToScreen, 150);
+        console.log('[graph] Render complete.');
+    } catch (err) {
+        console.error('[graph] initializeGraph failed:', err);
+        // Re-throw so the window error handler can show it in the UI
+        throw err;
+    }
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        initializeGraph();
-        _wireSidebarClose();
-    });
-} else {
-    initializeGraph();
-    _wireSidebarClose();
+// Wait for DOMContentLoaded AND confirm dagre is available.
+// If dagre is loaded via a <script> tag before this file, it will already
+// be present. If it loaded asynchronously (e.g. CDN with defer/async),
+// we poll briefly before giving up.
+function _tryInit(attemptsLeft) {
+    if (typeof dagre !== 'undefined' && dagre.graphlib && dagre.layout) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () {
+                initializeGraph();
+                _wireSidebarClose();
+            });
+        } else {
+            initializeGraph();
+            _wireSidebarClose();
+        }
+    } else if (attemptsLeft > 0) {
+        // Dagre script is still loading — wait 100ms and retry
+        console.warn('[graph] dagre not ready, retrying... (' + attemptsLeft + ' attempts left)');
+        setTimeout(function () { _tryInit(attemptsLeft - 1); }, 100);
+    } else {
+        // Exhausted retries — call initializeGraph which will show the error UI
+        console.error('[graph] dagre failed to load after all retries.');
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () {
+                initializeGraph();
+                _wireSidebarClose();
+            });
+        } else {
+            initializeGraph();
+            _wireSidebarClose();
+        }
+    }
 }
+
+// Start: allow up to 30 retries × 100ms = 3 seconds for CDN to load
+_tryInit(30);
 
 function _wireSidebarClose() {
     const btn = document.getElementById('sidebarCloseBtn');

@@ -13,6 +13,7 @@ GET /api/graph?id=X&filter_cd=true  → on-demand graph HTML fragment
 """
 
 import json
+import logging
 import mimetypes
 import traceback
 from http.server import BaseHTTPRequestHandler
@@ -29,6 +30,8 @@ MIME = {
     ".css":  "text/css; charset=utf-8",
     ".js":   "application/javascript; charset=utf-8",
 }
+
+logger = logging.getLogger(__name__)
 
 
 class GraphHandler(BaseHTTPRequestHandler):
@@ -81,6 +84,7 @@ class GraphHandler(BaseHTTPRequestHandler):
                 self._error(404, "Not found")
 
         except Exception as exc:
+            logger.exception("[handler] Unhandled error for %s %s", self.command, self.path)
             traceback.print_exc()
             self._error(500, str(exc))
 
@@ -94,18 +98,27 @@ class GraphHandler(BaseHTTPRequestHandler):
     def _api_graph(self, instance_id: str, filter_cd: bool,
                    thought_quotes: bool, node_verbosity: bool, show_observation: bool,
                    unique_think: bool = True):
-        traj_data = load_trajectory(self.graphs_dir, instance_id,
-                                    agent_type=self.agent_type)
+        logger.info("[handler] Building graph for '%s' (filter_cd=%s)", instance_id, filter_cd)
+        try:
+            traj_data = load_trajectory(self.graphs_dir, instance_id,
+                                        agent_type=self.agent_type)
+        except Exception:
+            logger.exception("[handler] Failed to load trajectory for '%s'", instance_id)
+            raise
 
-        G = build_graph(
-            traj_data         = traj_data,
-            instance_id       = instance_id,
-            eval_report_path  = self.eval_report_path,
-            cmd_parser        = self.cmd_parser,
-            filter_cd         = filter_cd,
-            agent_type        = self.agent_type,
-            unique_think      = unique_think,
-        )
+        try:
+            G = build_graph(
+                traj_data         = traj_data,
+                instance_id       = instance_id,
+                eval_report_path  = self.eval_report_path,
+                cmd_parser        = self.cmd_parser,
+                filter_cd         = filter_cd,
+                agent_type        = self.agent_type,
+                unique_think      = unique_think,
+            )
+        except Exception:
+            logger.exception("[handler] Failed to build graph for '%s'", instance_id)
+            raise
 
         html = render_graph_html(G, filter_cd, thought_quotes, node_verbosity,
                                  show_observation, self.assets_dir)

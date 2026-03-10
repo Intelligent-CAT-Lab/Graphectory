@@ -14,6 +14,7 @@ cd-as-separate-node mode in real time.
 """
 
 import argparse
+import logging
 import sys
 from http.server import HTTPServer
 from pathlib import Path
@@ -95,6 +96,12 @@ def setup_cmd_parser():
 
 def main() -> int:
     args = parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-7s  %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     trajs = Path(args.trajs)
     if not trajs.exists():

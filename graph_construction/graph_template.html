@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trajectory Graph: {{INSTANCE_NAME}}</title>
-    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    {{DAGRE_SCRIPT_TAG}}
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -120,12 +120,27 @@
         const edgesData = {{EDGES_DATA}};
         const phaseColors = {{PHASE_COLORS}};
         const settings = {{SETTINGS}};
-        
+
         // Show metadata comment if present
         const metadataComment = document.getElementById('metadataCommentText').textContent;
         if (metadataComment && metadataComment.trim() !== '') {
             document.getElementById('metadataComment').style.display = 'block';
         }
+
+        // Global error handler: surface JS failures visibly rather than blank page
+        window.addEventListener('error', function(e) {
+            console.error('[graph] Uncaught error:', e.message, e.filename, e.lineno);
+            const graphEl = document.getElementById('graph');
+            if (graphEl && !graphEl.querySelector('.render-error')) {
+                graphEl.innerHTML =
+                    '<div class="render-error" style="padding:32px;color:#e74c3c;font-family:monospace;">' +
+                    '<strong>⚠ Rendering error</strong><br><br>' +
+                    '<code>' + (e.message || 'Unknown error') + '</code><br><br>' +
+                    '<small style="color:#aaa;">Check the browser console (F12) for details. ' +
+                    'This may indicate a Dagre loading failure — try reloading, or ensure dagre.min.js is available locally.</small>' +
+                    '</div>';
+            }
+        });
     </script>
     <script src="graph_renderer.js"></script>
 </body>
