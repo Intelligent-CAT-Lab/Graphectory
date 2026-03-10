@@ -1,98 +1,68 @@
 """
 server/graph_renderer.py
 
-Converts a NetworkX MultiDiGraph into a self-contained HTML string
-by filling in the graph_template.html with inlined CSS/JS and graph data.
+Converts a NetworkX MultiDiGraph into a self-contained HTML page by filling
+in graph_template.html with inlined CSS, JS, and serialised graph data.
 
-The public surface is a single function:
+Public surface:
 
-    html = render_graph_html(G, filter_cd, assets_dir)
+    html: str = render_graph_html(G, filter_cd, thought_quotes,
+                                   node_verbosity, show_observation, assets_dir)
 """
 
 import json
 import logging
 import os
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-
-
-def _safe_json(obj) -> str:
-    """Serialize obj to JSON, escaping '</' so observation text containing
-    '</script>' cannot terminate the surrounding <script> tag in the HTML.
-    This is the standard technique for embedding JSON in HTML script blocks.
-    """
-    return json.dumps(obj).replace('</', r'<\/')
 from typing import Any
 
 import networkx as nx
 
+logger = logging.getLogger(__name__)
 
-FONT_FAMILY = os.environ.get("GRAPH_FONT", "DejaVu Sans, Arial, sans-serif")
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
-PHASE_COLORS = {
+FONT_FAMILY: str = os.environ.get("GRAPH_FONT", "DejaVu Sans, Arial, sans-serif")
+
+PHASE_COLORS: dict[str, str] = {
     "localization": "#C5B3F0",
     "patch":        "#FCC9B0",
     "validation":   "#A8E6F0",
     "general":      "#CFE0F6",
 }
 
-
-# ── Dagre script tag resolution ─────────────────────────────────────────────
-
-_DAGRE_CDN = "https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"
-_DAGRE_LOCAL_NAMES = ["dagre.min.js", "dagre.js"]
+_DAGRE_VERSION    = "0.8.5"
+_DAGRE_CDN_URL    = f"https://unpkg.com/dagre@{_DAGRE_VERSION}/dist/dagre.min.js"
+_DAGRE_LOCAL_NAME = "dagre.min.js"
 
 
-def _dagre_script_tag(assets_dir: Path) -> str:
-    """Return a <script> tag for dagre, preferring a local copy over the CDN.
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
-    If ``dagre.min.js`` (or ``dagre.js``) exists in *assets_dir*, it is served
-    via the ``/static/`` route (the file must therefore also be inside the
-    ``static/`` sub-directory that the handler already serves).  Otherwise we
-    fall back to the CDN with ``onerror`` reporting.
+def render_graph_html(
+    G: nx.MultiDiGraph,
+    filter_cd: bool,
+    thought_quotes: bool,
+    node_verbosity: bool,
+    show_observation: bool,
+    assets_dir: Path,
+) -> str:
+    """Return a complete, self-contained HTML page for *G*.
+
+    All CSS, JS, and graph data are inlined so the page has no runtime
+    dependencies beyond the dagre script tag (local copy preferred over CDN).
     """
-    for name in _DAGRE_LOCAL_NAMES:
-        local = assets_dir / name
-        if local.exists():
-            logger.info("[renderer] Using local dagre: %s", local)
-            return f'<script src="/static/{name}"></script>'
-
-    # Also check assets_dir/static/ sub-directory (common layout)
-    for name in _DAGRE_LOCAL_NAMES:
-        local = assets_dir / "static" / name
-        if local.exists():
-            logger.info("[renderer] Using local dagre: %s", local)
-            return f'<script src="/static/{name}"></script>'
-
-    logger.warning(
-        "[renderer] dagre not found locally in %s — falling back to CDN (%s). "
-        "Run `python download_dagre.py` to cache it locally.",
-        assets_dir, _DAGRE_CDN,
-    )
-    # onerror logs a console message; the JS retry loop will surface the UI error
-    return (
-        f'<script src="{_DAGRE_CDN}" '
-        f'onerror="console.error(\'[graph] Failed to load dagre from CDN: {_DAGRE_CDN}\')"></script>'
-    )
-
-
-# ── Public API ──────────────────────────────────────────────────────────────
-
-def render_graph_html(G: nx.MultiDiGraph, filter_cd: bool,
-                      thought_quotes: bool, node_verbosity: bool,
-                      show_observation: bool, assets_dir: Path) -> str:
-    """Return a complete, self-contained HTML string for the graph."""
     instance_name = G.graph.get("instance_name", "Unknown")
-    logger.info("[renderer] Rendering graph for '%s' (%d nodes, %d edges)",
-                instance_name, G.number_of_nodes(), G.number_of_edges())
+    logger.info(
+        "[renderer] Rendering '%s'  nodes=%d  edges=%d",
+        instance_name, G.number_of_nodes(), G.number_of_edges(),
+    )
 
-    try:
-        nodes_data = _prepare_nodes(G)
-        edges_data = _prepare_edges(G)
-    except Exception:
-        logger.exception("[renderer] Failed to prepare graph data for '%s'", instance_name)
-        raise
+    nodes_data = _prepare_nodes(G)
+    edges_data = _prepare_edges(G)
 
     meta = {
         "instance_name":     instance_name,
@@ -103,27 +73,22 @@ def render_graph_html(G: nx.MultiDiGraph, filter_cd: bool,
         "metadata_comment":  f"Mode: {'cd filtered (▲ hat)' if filter_cd else 'cd as node'}",
     }
 
-    # Render settings for JS
     settings = {
         "thoughtQuotes":   thought_quotes,
         "nodeVerbosity":   node_verbosity,
         "showObservation": show_observation,
     }
 
-    try:
-        template = _load(assets_dir / "graph_template.html")
-        css      = _load(assets_dir / "styles.css").replace("{{FONT_FAMILY}}", FONT_FAMILY)
-        js       = _load(assets_dir / "graph_renderer.js")
-    except OSError:
-        logger.exception("[renderer] Failed to load template assets from '%s'", assets_dir)
-        raise
+    template = _load(assets_dir / "graph_template.html")
+    css      = _load(assets_dir / "styles.css").replace("{{FONT_FAMILY}}", FONT_FAMILY)
+    js       = _load(assets_dir / "graph_renderer.js")
 
     html = template
 
-    # Dagre script tag — local file if available, CDN otherwise
+    # Dagre — serve from local static/ when available, otherwise fall back to CDN.
     html = html.replace("{{DAGRE_SCRIPT_TAG}}", _dagre_script_tag(assets_dir))
 
-    # Metadata substitutions
+    # Metadata
     html = html.replace("{{INSTANCE_NAME}}",     _esc(meta["instance_name"]))
     html = html.replace("{{RESOLUTION_STATUS}}", meta["resolution_status"])
     html = html.replace("{{DIFFICULTY}}",        _esc(meta["difficulty"]))
@@ -131,123 +96,144 @@ def render_graph_html(G: nx.MultiDiGraph, filter_cd: bool,
     html = html.replace("{{EDGE_COUNT}}",        meta["edge_count"])
     html = html.replace("{{METADATA_COMMENT}}",  _esc(meta["metadata_comment"]))
 
-    # Data substitutions
+    # Graph data
     html = html.replace("{{NODES_DATA}}",   _safe_json(nodes_data))
     html = html.replace("{{EDGES_DATA}}",   _safe_json(edges_data))
     html = html.replace("{{PHASE_COLORS}}", _safe_json(PHASE_COLORS))
     html = html.replace("{{SETTINGS}}",     _safe_json(settings))
 
-    # Inline CSS and JS so the response is fully self-contained
+    # Inline assets so the rendered page is fully self-contained.
     html = html.replace(
         '<link rel="stylesheet" href="styles.css">',
-        f'<style>{css}</style>',
+        f"<style>{css}</style>",
     )
     html = html.replace(
         '<script src="graph_renderer.js"></script>',
-        f'<script>{js}</script>',
+        f"<script>{js}</script>",
     )
 
-    logger.info("[renderer] HTML rendered successfully for '%s' (%d bytes)",
-                instance_name, len(html))
+    logger.info("[renderer] Done — %d bytes", len(html))
     return html
 
 
-# ── Node preparation ────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Dagre script tag
+# ---------------------------------------------------------------------------
+
+def _dagre_script_tag(assets_dir: Path) -> str:
+    """Return a ``<script>`` tag for dagre, preferring a local copy over the CDN.
+
+    Searches for ``dagre.min.js`` in *assets_dir* and in its ``static/``
+    sub-directory (the path already served by the HTTP handler).  If found,
+    the file is referenced via ``/static/dagre.min.js``; otherwise the CDN
+    URL is used with an ``onerror`` console warning.
+    """
+    for search_path in (assets_dir, assets_dir / "static"):
+        if (search_path / _DAGRE_LOCAL_NAME).exists():
+            logger.debug("[renderer] Using local dagre at '%s'", search_path)
+            return f'<script src="/static/{_DAGRE_LOCAL_NAME}"></script>'
+
+    logger.warning(
+        "[renderer] dagre.min.js not found locally in '%s' — falling back to CDN.",
+        assets_dir,
+    )
+    return (
+        f'<script src="{_DAGRE_CDN_URL}" '
+        f"onerror=\"console.error('[graph] Failed to load dagre from CDN.')\"></script>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Node preparation
+# ---------------------------------------------------------------------------
 
 def _prepare_nodes(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
     nodes = []
     for node_id, data in G.nodes(data=True):
-        colors        = _node_colors(data)
-        primary_color = colors[0] if colors else PHASE_COLORS["general"]
-
-        has_cd = bool(data.get("has_cd", False))
-
-        # Observation data (for last node of each step)
-        obs_length = data.get("observation_length", 0)
-
+        colors = _node_colors(data)
         nodes.append({
-            "id":                  node_id,
-            "label":               _make_label(data),
-            "label_minimal":       _make_label_minimal(data),
-            "tooltip":             _make_tooltip(data),
-            "color":               primary_color,
-            "colors":              colors,
-            "has_cd":              has_cd,
-            "observation_length":  obs_length,
-            "tool":                data.get("tool", ""),
-            "subcommand":          data.get("subcommand", ""),
-            "step_data":           data.get("step_data", []),
+            "id":                 node_id,
+            "label":              _make_label(data),
+            "label_minimal":      _make_label_minimal(data),
+            "tooltip":            _make_tooltip(data),
+            "color":              colors[0] if colors else PHASE_COLORS["general"],
+            "colors":             colors,
+            "has_cd":             bool(data.get("has_cd", False)),
+            "observation_length": int(data.get("observation_length", 0)),
+            "tool":               data.get("tool", ""),
+            "subcommand":         data.get("subcommand", ""),
+            "step_data":          data.get("step_data", []),
         })
     return nodes
 
 
 def _node_colors(data: dict) -> list[str]:
-    """Return ordered list of phase colour hexes for a node."""
+    """Return an ordered list of phase colour hex strings for a node.
+
+    Colours are emitted in canonical phase order so that gradient rendering
+    is consistent across nodes that share the same set of phases.
+    """
     phases = data.get("phases") or ["general"]
     order  = ["localization", "patch", "validation", "general"]
-    seen, result = set(), []
+    seen:   set[str]  = set()
+    result: list[str] = []
+
     for ph in order:
         if ph in phases and ph not in seen:
-            seen.add(ph); result.append(ph)
+            seen.add(ph)
+            result.append(ph)
     for ph in phases:
         if ph not in seen:
-            seen.add(ph); result.append(ph)
+            seen.add(ph)
+            result.append(ph)
+
     return [PHASE_COLORS.get(ph, PHASE_COLORS["general"]) for ph in result]
 
 
 def _make_label_minimal(data: dict) -> str:
-    """Minimal label: the action verb extracted from the stored label.
+    """Single-token label used when verbose node labels are disabled.
 
-    The stored ``label`` is the canonical title set during node creation
-    (e.g. ``"str_replace_editor: view"``, ``"grep -r foo src/"``).
-    For compact display we extract just the leading verb/subcommand:
-      - ``str_replace_editor: view``  → ``view``
-      - ``grep -r foo src/``          → ``grep``
-      - ``python``                    → ``python``
+    Examples::
+
+        "str_replace_editor: view"  →  "view"
+        "grep -r foo src/"          →  "grep"
+        "python"                    →  "python"
     """
-    raw_label = (data.get("label") or "").strip()
-    if not raw_label:
+    raw = (data.get("label") or "").strip()
+    if not raw:
         return "action"
-
-    # For "tool: subcommand" format, the subcommand is the meaningful part
-    if ": " in raw_label:
-        return raw_label.split(": ", 1)[1].split()[0][:20]
-
-    # Otherwise take the first token (the command verb)
-    return raw_label.split()[0][:20] if raw_label.split() else raw_label[:20]
+    if ": " in raw:
+        return raw.split(": ", 1)[1].split()[0][:20]
+    tokens = raw.split()
+    return tokens[0][:20] if tokens else raw[:20]
 
 
 def _make_label(data: dict) -> str:
-    """Verbose node label: title + subtitle lines for step/path/range.
+    """Multi-line verbose label: action title, step index, file path, view range.
 
-    Line 1 (title): for tool nodes, just the subcommand (e.g. ``view``);
-                    for bare commands, the verb (e.g. ``python``).
-    Line 2: step index(es).
-    Line 3: shortened file path (args["path"] for tool nodes;
-            first positional arg for python/pytest nodes).
-    Line 4: view range (when present in args).
+    Line 1 — action title (subcommand for tool nodes; command verb otherwise).
+    Line 2 — step index(es).
+    Line 3 — shortened file path or first positional argument.
+    Line 4 — view range when present.
     """
-    lines = []
-    args = data.get("args", {}) or {}
-
+    lines: list[str] = []
+    args       = data.get("args", {}) or {}
     tool       = (data.get("tool")       or "").strip()
     subcommand = (data.get("subcommand") or "").strip()
     command    = (data.get("command")    or "").strip()
     raw_label  = (data.get("label")      or "").strip()
 
-    # ── Line 1: clean action title ────────────────────────────────────────────
-    # For tool nodes (str_replace_editor, etc.) show only the subcommand.
-    # For bare shell commands show just the verb.
+    # Line 1 — clean action title
     if tool and subcommand:
-        title = subcommand                          # e.g. "view", "str_replace"
+        title = subcommand
     elif tool:
         title = tool
     elif command:
-        title = command.split()[0][:20]             # verb only, e.g. "python"
+        title = command.split()[0][:20]
     else:
-        title = raw_label.split()[0][:20] if raw_label.split() else "action"
+        tokens = raw_label.split()
+        title  = tokens[0][:20] if tokens else "action"
 
-    # Outcome badge
     if isinstance(args, dict):
         status = args.get("edit_status", "") or args.get("command_outcome", "")
         if status == "success":
@@ -257,7 +243,7 @@ def _make_label(data: dict) -> str:
 
     lines.append(title)
 
-    # ── Line 2: step index(es) ───────────────────────────────────────────────
+    # Line 2 — step index(es)
     step_indices = data.get("step_indices", [])
     if step_indices:
         if len(step_indices) == 1:
@@ -267,31 +253,22 @@ def _make_label(data: dict) -> str:
         else:
             lines.append(f"steps {step_indices[0]}–{step_indices[-1]} (×{len(step_indices)})")
 
-    # ── Line 3: key argument info ────────────────────────────────────────────
-    path = None
-
-    if isinstance(args, dict):
-        # Tool nodes (str_replace_editor, etc.) store path as a dict key
-        path = args.get("path")
+    # Line 3 — key path argument
+    path = args.get("path") if isinstance(args, dict) else None
 
     if path is None:
-        # Python/pytest nodes: commandParser puts the script as the first
-        # positional arg in a list, e.g. args = ["tests/test_foo.py", "-v"]
         _PY_CMDS = {"python", "python3", "python2", "pytest"}
-        verb = command.split()[0].lower() if command.split() else ""
+        verb     = command.split()[0].lower() if command.split() else ""
         if verb in _PY_CMDS:
-            # args may be a list of positional arguments
             candidates = args if isinstance(args, list) else []
             for tok in candidates:
                 tok = str(tok)
-                if not tok.startswith("-") and (
-                    tok.endswith(".py") or "/" in tok or "\\" in tok
-                ):
+                if not tok.startswith("-") and (tok.endswith(".py") or "/" in tok or "\\" in tok):
                     path = tok
                     break
 
     if path:
-        p = str(path).replace("\\", "/")
+        p     = str(path).replace("\\", "/")
         parts = [pt for pt in p.split("/") if pt]
         short = ("…/" + "/".join(parts[-2:])) if len(parts) > 2 else p
         lines.append(short[:35] + ("…" if len(short) > 35 else ""))
@@ -299,7 +276,7 @@ def _make_label(data: dict) -> str:
         raw = str(args["_raw"])
         lines.append(raw[:28] + ("…" if len(raw) > 28 else ""))
 
-    # ── Line 4: view range ───────────────────────────────────────────────────
+    # Line 4 — view range
     if isinstance(args, dict):
         vr = args.get("view_range")
         if isinstance(vr, (list, tuple)) and len(vr) == 2:
@@ -309,117 +286,84 @@ def _make_label(data: dict) -> str:
 
 
 def _make_tooltip(data: dict) -> str:
-    """Rich HTML tooltip for a node.
-
-    Matches the reference format:
-        <Title line>
-        Tool: …        Subcommand: …
-        Phase(s): …
-        Step: …        Thought len: …
-        --- Arguments ---
-        path: …
-        view_range: …
-        …
-    """
+    """Rich HTML tooltip shown on node hover."""
     parts: list[str] = []
 
-    # ── helpers ──────────────────────────────────────────────────────────────
     def _row(label: str, value: str) -> str:
         return (
-            f'<div style="display:flex;gap:8px;margin:2px 0;">'
+            '<div style="display:flex;gap:8px;margin:2px 0;">'
             f'<span style="color:#a0c4ff;min-width:110px;flex-shrink:0;">{_esc(label)}</span>'
             f'<span style="word-break:break-all;">{_esc(value)}</span>'
-            f'</div>'
+            "</div>"
         )
 
     def _section(title: str) -> str:
         return (
-            f'<div style="margin-top:10px;margin-bottom:3px;'
-            f'font-weight:700;color:#f0c27f;'
-            f'border-bottom:1px solid #555;padding-bottom:2px;">'
-            f'{_esc(title)}</div>'
+            '<div style="margin-top:10px;margin-bottom:3px;font-weight:700;'
+            f'color:#f0c27f;border-bottom:1px solid #555;padding-bottom:2px;">{_esc(title)}</div>'
         )
 
-    # ── Header: use the stored label as the canonical title ──────────────────
+    # Header
     raw_label = (data.get("label") or "").strip()
-    header_title = raw_label[:80] + ("…" if len(raw_label) > 80 else "")
+    header    = raw_label[:80] + ("…" if len(raw_label) > 80 else "")
+    parts.append(
+        '<div style="font-weight:700;font-size:14px;margin-bottom:8px;'
+        f'color:#fff;border-bottom:1px solid #666;padding-bottom:5px;">{_esc(header)}</div>'
+    )
 
-    # Re-read tool/subcommand/command for the identity rows below
     tool       = (data.get("tool")       or "").strip()
     subcommand = (data.get("subcommand") or "").strip()
     command    = (data.get("command")    or "").strip()
 
-    parts.append(
-        f'<div style="font-weight:700;font-size:14px;margin-bottom:8px;'
-        f'color:#fff;border-bottom:1px solid #666;padding-bottom:5px;">'
-        f'{_esc(header_title)}</div>'
-    )
-
-    # ── Identity section ─────────────────────────────────────────────────────
     if tool:
         parts.append(_row("Tool", tool))
     if subcommand:
         parts.append(_row("Subcommand", subcommand))
     if command and not tool:
-        # For shell commands show the full command (truncated) when no tool
         cmd_display = command if len(command) <= 150 else command[:150] + "…"
         parts.append(_row("Command", cmd_display))
 
     phases = data.get("phases") or ["general"]
     parts.append(_row("Phase(s)", ", ".join(sorted(set(phases)))))
 
-    # ── Execution section ────────────────────────────────────────────────────
     step_indices    = data.get("step_indices", [])
     thought_lengths = data.get("thought_lengths", [])
 
-    if step_indices:
-        if len(step_indices) == 1:
-            parts.append(_row("Step", str(step_indices[0])))
-        else:
-            parts.append(_row("Steps", ", ".join(map(str, step_indices))))
+    if len(step_indices) == 1:
+        parts.append(_row("Step", str(step_indices[0])))
+    elif step_indices:
+        parts.append(_row("Steps", ", ".join(map(str, step_indices))))
 
-    if thought_lengths:
-        if len(thought_lengths) == 1:
-            parts.append(_row("Thought len", str(thought_lengths[0])))
-        else:
-            # Show as compact comma-separated list
-            parts.append(_row("Thought lens", ", ".join(map(str, thought_lengths))))
+    if len(thought_lengths) == 1:
+        parts.append(_row("Thought len", str(thought_lengths[0])))
+    elif thought_lengths:
+        parts.append(_row("Thought lens", ", ".join(map(str, thought_lengths))))
 
-    # ── Observation section ──────────────────────────────────────────────────
     obs_lengths = data.get("observation_lengths", [])
     obs_length  = data.get("observation_length",  0)
-
-    if obs_lengths and len(obs_lengths) > 1:
+    if len(obs_lengths) > 1:
         parts.append(_row("Observation lens", ", ".join(map(str, obs_lengths))))
     elif obs_length:
         parts.append(_row("Observation len", str(obs_length)))
 
-    # ── Outcome (shown before arguments for visibility) ──────────────────────
+    # Outcome badge
     args = data.get("args", {}) or {}
     if isinstance(args, dict):
-        edit_status     = args.get("edit_status", "")
-        command_outcome = args.get("command_outcome", "")
-        outcome_display = edit_status or command_outcome
-        if outcome_display:
-            color = "#7defa7" if outcome_display == "success" else "#ff8080"
+        outcome = args.get("edit_status", "") or args.get("command_outcome", "")
+        if outcome:
+            color = "#7defa7" if outcome == "success" else "#ff8080"
             parts.append(
-                f'<div style="display:flex;gap:8px;margin:4px 0;">'
-                f'<span style="color:#a0c4ff;min-width:110px;flex-shrink:0;">Outcome</span>'
-                f'<span style="color:{color};font-weight:600;">{_esc(outcome_display)}</span>'
-                f'</div>'
+                '<div style="display:flex;gap:8px;margin:4px 0;">'
+                '<span style="color:#a0c4ff;min-width:110px;flex-shrink:0;">Outcome</span>'
+                f'<span style="color:{color};font-weight:600;">{_esc(outcome)}</span>'
+                "</div>"
             )
 
-    # ── Arguments section ────────────────────────────────────────────────────
-    # Internal bookkeeping keys that shouldn't be shown to the user
+    # Arguments
     _SKIP_KEYS = {"edit_status", "command_outcome"}
-
     if isinstance(args, dict) and args:
-        visible = {k: v for k, v in args.items()
-                   if k not in _SKIP_KEYS and v is not None}
-
+        visible = {k: v for k, v in args.items() if k not in _SKIP_KEYS and v is not None}
         if visible:
-            # If the only arg is _raw (fallback-parsed shell command remainder),
-            # surface it as "Args" directly without a section header
             if list(visible.keys()) == ["_raw"]:
                 raw_val = str(visible["_raw"])
                 if raw_val:
@@ -429,21 +373,22 @@ def _make_tooltip(data: dict) -> str:
                 for k, v in visible.items():
                     if k == "_raw":
                         continue
-                    v_str = str(v)
+                    v_str   = str(v)
                     display = (v_str[:300].replace("\n", "↵") + "…") if len(v_str) > 300 \
                               else v_str.replace("\n", "↵")
                     parts.append(_row(k, display))
-                # Show _raw at the bottom if it exists alongside structured args
                 if "_raw" in visible and visible["_raw"]:
                     parts.append(_row("raw args", str(visible["_raw"])[:200]))
 
     return "".join(parts)
 
 
-# ── Edge preparation ────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Edge preparation
+# ---------------------------------------------------------------------------
 
 def _prepare_edges(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
-    """Serialise edges for the JS renderer with both thought length variants."""
+    """Serialise edges for the JS renderer, including both thought-length variants."""
     edges = []
 
     for u, v, _k, d in G.edges(keys=True, data=True):
@@ -452,21 +397,15 @@ def _prepare_edges(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
         is_first_in_step = bool(d.get("is_first_in_step", False))
 
         if etype == "exec":
-            thought_len_raw   = int(d.get("thought_length_raw", 0))
-            thought_len_clean = int(d.get("thought_length_clean", 0))
-
-            u_steps = set(G.nodes[u].get("step_indices", []))
-            v_steps = set(G.nodes[v].get("step_indices", []))
-            is_multi_node = bool(u_steps & v_steps) and not is_first_in_step
+            thought_len_raw         = int(d.get("thought_length_raw",   0))
+            thought_len_clean       = int(d.get("thought_length_clean", 0))
+            u_steps                 = set(G.nodes[u].get("step_indices", []))
+            v_steps                 = set(G.nodes[v].get("step_indices", []))
+            is_multi_node           = bool(u_steps & v_steps) and not is_first_in_step
             is_thought_continuation = bool(d.get("is_thought_continuation", False))
-
-            # For first-in-step edges, carry the source node's observation
-            # length so the edge body thickness can encode it.
-            if is_first_in_step:
-                src_data   = G.nodes[u]
-                obs_length = int(src_data.get("observation_length", 0))
-            else:
-                obs_length = 0
+            # Carry the source node's observation length on first-in-step edges
+            # so the JS renderer can encode it as a visual indicator.
+            obs_length = int(G.nodes[u].get("observation_length", 0)) if is_first_in_step else 0
         else:
             thought_len_raw         = 0
             thought_len_clean       = 0
@@ -490,13 +429,24 @@ def _prepare_edges(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
     return edges
 
 
-# ── Helpers ─────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _safe_json(obj: Any) -> str:
+    """Serialise *obj* to JSON, escaping ``</`` so embedded text cannot
+    inadvertently close a surrounding ``<script>`` tag.
+    """
+    return json.dumps(obj).replace("</", r"<\/")
+
 
 def _load(path: Path) -> str:
-    with open(path, encoding="utf-8") as f:
-        return f.read()
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
 
 
-def _esc(s: str) -> str:
-    return (str(s) if s else "").replace("&", "&amp;").replace("<", "&lt;") \
-                                 .replace(">", "&gt;").replace('"', "&quot;")
+def _esc(s: Any) -> str:
+    """Minimal HTML escaping for attribute values and text content."""
+    return (
+        str(s) if s else ""
+    ).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")

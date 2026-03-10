@@ -1,5 +1,4 @@
-// Graph rendering with Dagre layout and normalized coordinates
-// Updated to use edge thickness for thought length instead of node size
+// graph_renderer.js — SVG graph rendering with Dagre layout.
 
 // ==================== Layout and Coordinate Normalization ====================
 function layoutGraph() {
@@ -893,37 +892,31 @@ function setupSidebarResize() {
 }
 
 // ==================== Initialization ====================
+
 function initializeGraph() {
-    // Guard: dagre must be fully loaded before we attempt layout.
-    // This can fail silently when the CDN script hasn't finished loading.
+    // Dagre must be present before we attempt layout.  The guard below catches
+    // the case where the script tag failed to load (CDN timeout, etc.) and
+    // renders a clear error rather than a blank canvas.
     if (typeof dagre === 'undefined' || !dagre.graphlib || !dagre.layout) {
-        console.error('[graph] dagre is not loaded. Cannot render graph.');
         const graphEl = document.getElementById('graph');
         if (graphEl) {
             graphEl.innerHTML =
-                '<div style="padding:32px;color:#e74c3c;font-family:monospace;">' +
-                '<strong>⚠ dagre library not loaded</strong><br><br>' +
-                'The graph layout library (dagre) failed to load from the CDN.<br><br>' +
-                '<strong>Fix:</strong> Download <code>dagre.min.js</code> locally by running:<br>' +
-                '<code style="display:block;margin-top:8px;background:#1a1a2a;padding:8px;border-radius:4px;">' +
-                'python download_dagre.py</code><br>' +
-                'Then reload this page.' +
-                '</div>';
+                '<div style="padding:32px;font-family:monospace;color:#e74c3c;">'
+                + '<strong>⚠ dagre failed to load</strong><br><br>'
+                + 'The graph layout library did not initialise correctly. '
+                + 'Check the browser console (F12) for details, then reload the page.'
+                + '</div>';
         }
+        console.error('[graph] dagre is not defined — cannot render graph.');
         return;
     }
 
     try {
         graphEl = document.getElementById('graph');
 
-        console.log('[graph] Starting layout for', nodesData.length, 'nodes,', edgesData.length, 'edges');
-
-        const layoutResult = layoutGraph();
-        const g = layoutResult.g;
-        graphWidth = layoutResult.graphWidth;
-        graphHeight = layoutResult.graphHeight;
-
-        console.log('[graph] Layout complete. Graph size:', graphWidth.toFixed(0), 'x', graphHeight.toFixed(0));
+        const { g, graphWidth: gw, graphHeight: gh } = layoutGraph();
+        graphWidth  = gw;
+        graphHeight = gh;
 
         svg = createSVG(graphWidth, graphHeight);
         const defs = createMarkers(svg);
@@ -939,57 +932,40 @@ function initializeGraph() {
         setupSidebarResize();
 
         setTimeout(fitToScreen, 150);
-        console.log('[graph] Render complete.');
     } catch (err) {
         console.error('[graph] initializeGraph failed:', err);
-        // Re-throw so the window error handler can show it in the UI
-        throw err;
+        throw err;  // Propagate to the window error handler for UI display.
     }
 }
 
-// Wait for DOMContentLoaded AND confirm dagre is available.
-// If dagre is loaded via a <script> tag before this file, it will already
-// be present. If it loaded asynchronously (e.g. CDN with defer/async),
-// we poll briefly before giving up.
-function _tryInit(attemptsLeft) {
+// Dagre is loaded via a synchronous <script> tag injected by the Python
+// renderer, so it will always be available by the time this script runs.
+// The _tryInit poll exists as a safety net for any async-load edge case.
+function _tryInit(retriesLeft) {
     if (typeof dagre !== 'undefined' && dagre.graphlib && dagre.layout) {
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function () {
-                initializeGraph();
-                _wireSidebarClose();
-            });
+            document.addEventListener('DOMContentLoaded', () => { initializeGraph(); _wireSidebarClose(); });
         } else {
             initializeGraph();
             _wireSidebarClose();
         }
-    } else if (attemptsLeft > 0) {
-        // Dagre script is still loading — wait 100ms and retry
-        console.warn('[graph] dagre not ready, retrying... (' + attemptsLeft + ' attempts left)');
-        setTimeout(function () { _tryInit(attemptsLeft - 1); }, 100);
+    } else if (retriesLeft > 0) {
+        setTimeout(() => _tryInit(retriesLeft - 1), 100);
     } else {
-        // Exhausted retries — call initializeGraph which will show the error UI
-        console.error('[graph] dagre failed to load after all retries.');
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function () {
-                initializeGraph();
-                _wireSidebarClose();
-            });
-        } else {
-            initializeGraph();
-            _wireSidebarClose();
-        }
+        // All retries exhausted — call initializeGraph so the error UI is shown.
+        console.error('[graph] dagre did not become available after maximum retries.');
+        initializeGraph();
+        _wireSidebarClose();
     }
 }
 
-// Start: allow up to 30 retries × 100ms = 3 seconds for CDN to load
-_tryInit(30);
+_tryInit(30);  // Up to 3 s of polling before surfacing the error UI.
 
 function _wireSidebarClose() {
     const btn = document.getElementById('sidebarCloseBtn');
-    if (btn) {
-        // Belt-and-suspenders: both click and mouseup so the event fires
-        // even if something upstream cancelled the click.
-        btn.addEventListener('click',   closeSidebar);
-        btn.addEventListener('mouseup', (e) => { e.stopPropagation(); closeSidebar(); });
-    }
+    if (!btn) return;
+    // Belt-and-suspenders: both click and mouseup so the event fires even if
+    // something upstream cancelled the synthetic click (e.g. drag-end logic).
+    btn.addEventListener('click',   closeSidebar);
+    btn.addEventListener('mouseup', (e) => { e.stopPropagation(); closeSidebar(); });
 }

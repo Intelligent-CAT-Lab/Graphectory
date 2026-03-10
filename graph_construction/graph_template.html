@@ -116,30 +116,27 @@
     <div class="tooltip" id="tooltip"></div>
 
     <script>
-        const nodesData = {{NODES_DATA}};
-        const edgesData = {{EDGES_DATA}};
+        const nodesData  = {{NODES_DATA}};
+        const edgesData  = {{EDGES_DATA}};
         const phaseColors = {{PHASE_COLORS}};
-        const settings = {{SETTINGS}};
+        const settings   = {{SETTINGS}};
 
-        // Show metadata comment if present
-        const metadataComment = document.getElementById('metadataCommentText').textContent;
-        if (metadataComment && metadataComment.trim() !== '') {
+        // Show the metadata comment banner when content is present.
+        const _commentText = document.getElementById('metadataCommentText').textContent;
+        if (_commentText && _commentText.trim()) {
             document.getElementById('metadataComment').style.display = 'block';
         }
 
-        // Global error handler: surface JS failures visibly rather than blank page
-        window.addEventListener('error', function(e) {
-            console.error('[graph] Uncaught error:', e.message, e.filename, e.lineno);
+        // Surface rendering errors visibly rather than leaving a blank canvas.
+        window.addEventListener('error', (e) => {
             const graphEl = document.getElementById('graph');
-            if (graphEl && !graphEl.querySelector('.render-error')) {
-                graphEl.innerHTML =
-                    '<div class="render-error" style="padding:32px;color:#e74c3c;font-family:monospace;">' +
-                    '<strong>⚠ Rendering error</strong><br><br>' +
-                    '<code>' + (e.message || 'Unknown error') + '</code><br><br>' +
-                    '<small style="color:#aaa;">Check the browser console (F12) for details. ' +
-                    'This may indicate a Dagre loading failure — try reloading, or ensure dagre.min.js is available locally.</small>' +
-                    '</div>';
-            }
+            if (!graphEl || graphEl.querySelector('.render-error')) return;
+            graphEl.innerHTML =
+                '<div class="render-error" style="padding:32px;font-family:monospace;color:#e74c3c;">'
+                + '<strong>⚠ Rendering error</strong><br><br>'
+                + '<code>' + (e.message || 'Unknown error') + '</code><br><br>'
+                + '<small style="color:#999;">Check the browser console (F12) for the full stack trace.</small>'
+                + '</div>';
         });
     </script>
     <script src="graph_renderer.js"></script>
