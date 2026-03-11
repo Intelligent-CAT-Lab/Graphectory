@@ -14,7 +14,7 @@ cd-as-separate-node mode in real time.
 """
 
 import argparse
-import socket
+import logging
 import sys
 from http.server import HTTPServer
 from pathlib import Path
@@ -57,13 +57,7 @@ Examples
     p.add_argument("--assets_dir",    default=None,
                    help="Directory with graph_template.html / styles.css / "
                         "graph_renderer.js  (defaults to same dir as this script)")
-    p.add_argument("--port", type=int, default=8000)
-    p.add_argument(
-        "--host", default="",
-        help="Interface to bind to. Defaults to all interfaces (''). "
-             "Use '127.0.0.1' to restrict to IPv4 localhost only, "
-             "or '::1' for IPv6 localhost.",
-    )
+    p.add_argument("--port",          type=int, default=8000)
     return p.parse_args()
 
 
@@ -100,46 +94,14 @@ def setup_cmd_parser():
         return None
 
 
-def _pick_address_family(host: str) -> socket.AddressFamily:
-    """Return AF_INET6 if *host* is an IPv6 address or empty string, else AF_INET.
-
-    Binding to '::' (AF_INET6) with IPV6_V6ONLY=0 accepts both IPv4 and IPv6
-    connections on most platforms, which is what we want when host=''.
-    Falling back to AF_INET when IPv6 is unavailable keeps the server working
-    on IPv4-only systems.
-    """
-    if host and ":" not in host:
-        return socket.AF_INET           # explicit IPv4 address supplied
-    if socket.has_ipv6:
-        return socket.AF_INET6
-    return socket.AF_INET
-
-
-class _DualStackServer(HTTPServer):
-    """HTTPServer that binds on IPv6 (and accepts IPv4 via dual-stack) when possible.
-
-    On macOS, ``localhost`` resolves to ``::1`` (IPv6) by default, so a plain
-    ``HTTPServer(('', port))`` — which uses AF_INET — never receives those
-    connections, leaving the browser with a blank page.  Binding on AF_INET6
-    with IPV6_V6ONLY disabled accepts both address families in one socket.
-    """
-
-    address_family = socket.AF_INET6
-
-    def server_bind(self):
-        # Disable IPV6_V6ONLY so the single socket accepts IPv4 connections too.
-        if self.address_family == socket.AF_INET6:
-            try:
-                self.socket.setsockopt(
-                    socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0,
-                )
-            except (AttributeError, OSError):
-                pass  # Platform doesn't support it; IPv6-only is still fine.
-        super().server_bind()
-
-
 def main() -> int:
     args = parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-7s  %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     trajs = Path(args.trajs)
     if not trajs.exists():
@@ -172,20 +134,15 @@ def main() -> int:
     GraphHandler.cmd_parser       = setup_cmd_parser()
     GraphHandler.assets_dir       = assets_dir
 
-    # Bind on both IPv4 and IPv6 so `localhost` works regardless of whether
-    # the OS resolver returns 127.0.0.1 (Linux default) or ::1 (macOS default).
-    _DualStackServer.address_family = _pick_address_family(args.host)
-    httpd = _DualStackServer((args.host, args.port), GraphHandler)
+    httpd = HTTPServer(("", args.port), GraphHandler)
 
-    host_display = args.host or "0.0.0.0 + ::1 (dual-stack)"
     print(f"\n{'─'*60}")
-    print( "  Trajectory Graph Server")
+    print(f"  Trajectory Graph Server")
     print(f"{'─'*60}")
     print(f"  Agent type   : {agent_type.upper()} ({'OpenHands (.jsonl)' if agent_type == 'oh' else 'SWE-agent (directory)'})")
     print(f"  Trajs path   : {trajs.absolute()}")
     print(f"  Eval report  : {eval_report.absolute()}")
     print(f"  Assets dir   : {assets_dir.absolute()}")
-    print(f"  Listening on : {host_display}:{args.port}")
     print(f"  URL          : http://localhost:{args.port}")
     print(f"{'─'*60}\n")
     print("  Press Ctrl+C to stop.\n")
