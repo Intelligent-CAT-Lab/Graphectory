@@ -13,6 +13,40 @@
             <p class="subtitle">Graph representations of agent trajectories</p>
         </div>
 
+        <!-- ── Data source configurator ────────────────────────────── -->
+        <div class="data-source" id="dataSource">
+            <button class="data-source-toggle" id="dataSourceToggle" onclick="toggleDataSource()">
+                <span id="dataSourceLabel">Data source</span>
+                <span class="ds-chevron" id="dsChevron">▾</span>
+            </button>
+
+            <div class="data-source-body" id="dataSourceBody">
+                <label class="ds-label" for="trajsInput">Trajectories path</label>
+                <input
+                    type="text"
+                    id="trajsInput"
+                    class="ds-input"
+                    placeholder="/path/to/trajectories  or  output.jsonl"
+                    spellcheck="false"
+                    autocomplete="off"
+                >
+                <label class="ds-label" for="reportInput">Eval report path</label>
+                <input
+                    type="text"
+                    id="reportInput"
+                    class="ds-input"
+                    placeholder="/path/to/report.json"
+                    spellcheck="false"
+                    autocomplete="off"
+                >
+                <div id="dsError" class="ds-error" style="display:none;"></div>
+                <button class="ds-apply-btn" id="dsApplyBtn" onclick="applyDataSource()">
+                    Load
+                </button>
+            </div>
+        </div>
+
+        <!-- ── View toggles + search ───────────────────────────────── -->
         <div class="controls">
             <input
                 type="text"
@@ -58,12 +92,14 @@
             </label>
         </div>
 
-        <div class="stats" id="stats">Loading…</div>
+        <div class="stats" id="stats">—</div>
 
         <div class="graph-list" id="graphList">
-            <div class="placeholder">
-                <div class="spinner"></div>
-                Loading graphs…
+            <div class="placeholder" style="position:relative;padding:40px;text-align:center;">
+                <span style="font-size:36px;opacity:.25;">📂</span>
+                <p style="margin-top:12px;color:#aaa;font-size:13px;">
+                    Set a data source above to load trajectories.
+                </p>
             </div>
         </div>
     </div>

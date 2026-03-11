@@ -40,6 +40,100 @@ body {
 
 .subtitle { font-size: 12px; opacity: .85; }
 
+/* ── Data source panel ──────────────────────────────────── */
+.data-source {
+    flex-shrink: 0;
+    border-bottom: 1px solid #e8eaed;
+}
+
+.data-source-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    background: #f8f9fa;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: #444;
+    text-align: left;
+    transition: background .15s;
+    box-shadow: none;
+}
+
+.data-source-toggle:hover { background: #eef0ff; color: #667eea; }
+
+.ds-chevron {
+    font-size: 11px;
+    color: #999;
+    transition: color .15s;
+}
+
+.data-source-toggle:hover .ds-chevron { color: #667eea; }
+
+.data-source-body {
+    display: none;   /* toggled by JS */
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px 12px;
+    background: #fafafa;
+    border-top: 1px solid #eee;
+}
+
+.ds-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #777;
+    margin-top: 4px;
+}
+
+.ds-input {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1.5px solid #d1d5db;
+    border-radius: 7px;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    outline: none;
+    background: #fff;
+    color: #222;
+    transition: border-color .2s;
+}
+
+.ds-input:focus { border-color: #667eea; }
+
+.ds-error {
+    font-size: 11px;
+    color: #c0392b;
+    background: #fdf0ee;
+    border: 1px solid #f5c6c0;
+    border-radius: 6px;
+    padding: 7px 10px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ds-apply-btn {
+    align-self: flex-end;
+    padding: 7px 20px;
+    border: none;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity .15s, transform .1s;
+    box-shadow: none;
+    margin-top: 2px;
+}
+
+.ds-apply-btn:hover:not(:disabled) { opacity: .88; transform: translateY(-1px); }
+.ds-apply-btn:disabled { opacity: .55; cursor: default; transform: none; }
+
 /* ── Controls ───────────────────────────────────────────── */
 .controls {
     padding: 12px;

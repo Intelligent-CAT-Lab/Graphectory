@@ -2,100 +2,130 @@
 """
 live_graph_server.py
 
-Single entry point.  Run:
+Entry point for the trajectory graph browser.  Run:
 
-    python live_graph_server.py --trajs <dir> --eval_report <file>
+    python live_graph_server.py --trajs <dir-or-jsonl> --eval_report <file>
 
 Then open http://localhost:8000 in your browser.
 
-All graph data is rendered on the fly; no HTML files are pre-generated.
-Use the toggle in the sidebar to switch between cd-filtered (▲ hat) and
-cd-as-separate-node mode in real time.
+--trajs and --eval_report can also be omitted; the data source can be set or
+changed at any time from the browser UI without restarting the server.
+
+Graphs are rendered on demand — no HTML files are pre-generated.  Each HTTP
+request is handled in its own thread, so navigating quickly between instances
+or changing toggle settings never blocks the UI.  The agent type (SWE-agent or
+OpenHands) is inferred automatically from the path passed to --trajs.
 """
 
 import argparse
 import logging
 import sys
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-# Allow sibling imports (buildGraph, mapPhase, commandParser…)
+# Allow sibling imports (buildGraph, mapPhase, commandParser, …).
 sys.path.insert(0, str(Path(__file__).parent))
 
 from server.handler import GraphHandler
 
+logger = logging.getLogger(__name__)
 
-def parse_args() -> argparse.Namespace:
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Live trajectory graph browser (on-demand rendering)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples
 --------
-  # SWE-agent: pass a directory containing .traj files
+  # SWE-agent — pass a directory of .traj files:
   python live_graph_server.py \\
-      --trajs output/SWE-agent/graphs/deepseek-v3 \\
+      --trajs path/to/trajectories \\
       --eval_report report.json
 
-  # OpenHands: pass the output.jsonl file directly
+  # OpenHands — pass the output.jsonl file directly:
   python live_graph_server.py \\
-      --trajs trajectories/OpenHands/output.jsonl \\
+      --trajs path/to/output.jsonl \\
       --eval_report report.json
 
+  # Start without paths and configure via the browser UI:
+  python live_graph_server.py --port 8080
+
+  # Custom assets directory:
   python live_graph_server.py \\
       --trajs trajectories \\
       --eval_report report.json \\
-      --assets_dir custom_templates \\
-      --port 8080
+      --assets_dir custom_templates
         """,
     )
-    p.add_argument("--trajs",    required=True,
-                   help="Directory that contains .traj files (SWE-agent), "
-                        "or path to an output.jsonl file (OpenHands)")
-    p.add_argument("--eval_report",   required=True,
-                   help="Evaluation report JSON used for resolution status")
-    p.add_argument("--assets_dir",    default=None,
-                   help="Directory with graph_template.html / styles.css / "
-                        "graph_renderer.js  (defaults to same dir as this script)")
-    p.add_argument("--port",          type=int, default=8000)
+    p.add_argument(
+        "--trajs", default=None,
+        help="Directory of .traj files (SWE-agent) or path to output.jsonl (OpenHands). "
+             "Can be omitted and set later from the browser UI.",
+    )
+    p.add_argument(
+        "--eval_report", default=None,
+        help="Evaluation report JSON with 'resolved_ids' and 'unresolved_ids' arrays. "
+             "Can be omitted and set later from the browser UI.",
+    )
+    p.add_argument(
+        "--assets_dir", default=None,
+        help="Directory containing graph_template.html, styles.css, and graph_renderer.js. "
+             "Defaults to the directory containing this script.",
+    )
+    p.add_argument("--port", type=int, default=8000)
     return p.parse_args()
 
 
-def setup_cmd_parser():
-    """Return a CommandParser loaded with all available SWE-agent tool configs.
+# ---------------------------------------------------------------------------
+# Command parser setup
+# ---------------------------------------------------------------------------
 
-    Each config file defines a distinct set of tools (editor, reviewer, registry),
-    so all present configs are loaded — not just the first one found.
-    Returns None only if commandParser cannot be imported.
+def _setup_cmd_parser():
+    """Load a CommandParser with all available SWE-agent tool configs.
+
+    All present config files are loaded (each defines a distinct tool set),
+    so tool parsing covers editor, reviewer, and registry variants in one pass.
+    Returns ``None`` if commandParser is not importable.
     """
     try:
         from commandParser import CommandParser
-        parser = CommandParser()
-
-        tool_configs = [
-            "data/SWE-agent/tools/edit_anthropic/config.yaml",
-            "data/SWE-agent/tools/review_on_submit_m/config.yaml",
-            "data/SWE-agent/tools/registry/config.yaml",
-        ]
-        loaded = []
-        for cfg in tool_configs:
-            cfg_path = Path(cfg)
-            if cfg_path.exists():
-                parser.load_tool_yaml_files([str(cfg_path)])
-                loaded.append(cfg_path.name)
-
-        if loaded:
-            print(f"  [parser] Loaded tool configs: {', '.join(loaded)}")
-
-        return parser
-
     except ImportError:
-        print("[WARN] commandParser not found – install it or add it to the Python path")
+        logger.warning("commandParser not found — tool actions will use fallback parsing.")
         return None
 
+    parser = CommandParser()
+
+    tool_configs = [
+        "data/SWE-agent/tools/edit_anthropic/config.yaml",
+        "data/SWE-agent/tools/review_on_submit_m/config.yaml",
+        "data/SWE-agent/tools/registry/config.yaml",
+    ]
+    loaded = []
+    for cfg in tool_configs:
+        cfg_path = Path(cfg)
+        if cfg_path.exists():
+            parser.load_tool_yaml_files([str(cfg_path)])
+            loaded.append(cfg_path.name)
+
+    if loaded:
+        logger.info("Loaded tool configs: %s", ", ".join(loaded))
+    else:
+        logger.debug("No tool config files found; CommandParser using defaults.")
+
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> int:
-    args = parse_args()
+    args = _parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
@@ -103,48 +133,69 @@ def main() -> int:
         datefmt="%H:%M:%S",
     )
 
-    trajs = Path(args.trajs)
-    if not trajs.exists():
-        print(f"[ERROR] trajs does not exist: {trajs}")
-        return 1
-
-    eval_report = Path(args.eval_report)
-    if not eval_report.exists():
-        print(f"[ERROR] eval_report does not exist: {eval_report}")
-        return 1
-
     assets_dir = Path(args.assets_dir) if args.assets_dir else Path(__file__).parent
     if not assets_dir.exists():
-        print(f"[ERROR] assets_dir does not exist: {assets_dir}")
+        logger.error("--assets_dir does not exist: %s", assets_dir)
         return 1
 
-    # Detect agent type: a .jsonl file → OpenHands; a directory → SWE-agent
-    if trajs.is_file() and trajs.suffix == ".jsonl":
-        agent_type = "oh"
-    elif trajs.is_dir():
-        agent_type = "sa"
-    else:
-        print(f"[ERROR] --trajs must be a directory (SWE-agent) or a .jsonl file (OpenHands): {trajs}")
-        return 1
+    # Validate CLI-supplied paths when provided.
+    trajs: Path | None       = None
+    eval_report: Path | None = None
+    agent_type: str          = "sa"
 
-    # Inject configuration into the handler class
-    GraphHandler.graphs_dir       = trajs        # may be a file (OH) or dir (SA)
+    if args.trajs or args.eval_report:
+        # If either is supplied, both are required.
+        if not args.trajs:
+            logger.error("--trajs is required when --eval_report is provided.")
+            return 1
+        if not args.eval_report:
+            logger.error("--eval_report is required when --trajs is provided.")
+            return 1
+
+        trajs = Path(args.trajs)
+        if not trajs.exists():
+            logger.error("--trajs path does not exist: %s", trajs)
+            return 1
+
+        eval_report = Path(args.eval_report)
+        if not eval_report.exists():
+            logger.error("--eval_report path does not exist: %s", eval_report)
+            return 1
+
+        if trajs.is_file() and trajs.suffix == ".jsonl":
+            agent_type = "oh"
+        elif trajs.is_dir():
+            agent_type = "sa"
+        else:
+            logger.error(
+                "--trajs must be a directory (SWE-agent) or a .jsonl file (OpenHands): %s", trajs,
+            )
+            return 1
+
+    # Inject configuration into the handler class before the server starts.
+    GraphHandler.graphs_dir       = trajs
     GraphHandler.agent_type       = agent_type
-    GraphHandler.eval_report_path = str(eval_report)
-    GraphHandler.cmd_parser       = setup_cmd_parser()
+    GraphHandler.eval_report_path = str(eval_report) if eval_report else None
+    GraphHandler.cmd_parser       = _setup_cmd_parser()
     GraphHandler.assets_dir       = assets_dir
 
-    httpd = HTTPServer(("", args.port), GraphHandler)
+    # ThreadingHTTPServer handles each request in its own thread, so slow
+    # graph builds never block the browser UI or subsequent requests.
+    httpd = ThreadingHTTPServer(("", args.port), GraphHandler)
 
-    print(f"\n{'─'*60}")
-    print(f"  Trajectory Graph Server")
-    print(f"{'─'*60}")
-    print(f"  Agent type   : {agent_type.upper()} ({'OpenHands (.jsonl)' if agent_type == 'oh' else 'SWE-agent (directory)'})")
-    print(f"  Trajs path   : {trajs.absolute()}")
-    print(f"  Eval report  : {eval_report.absolute()}")
-    print(f"  Assets dir   : {assets_dir.absolute()}")
-    print(f"  URL          : http://localhost:{args.port}")
-    print(f"{'─'*60}\n")
+    agent_label = "OpenHands (.jsonl)" if agent_type == "oh" else "SWE-agent (directory)"
+    print(f"\n{'─' * 60}")
+    print( "  Trajectory Graph Server")
+    print(f"{'─' * 60}")
+    if trajs:
+        print(f"  Agent      : {agent_type.upper()}  ({agent_label})")
+        print(f"  Trajs      : {trajs.absolute()}")
+        print(f"  Report     : {eval_report.absolute()}")
+    else:
+        print( "  Data source: not set — configure via the browser UI")
+    print(f"  Assets     : {assets_dir.absolute()}")
+    print(f"  URL        : http://localhost:{args.port}")
+    print(f"{'─' * 60}\n")
     print("  Press Ctrl+C to stop.\n")
 
     try:
