@@ -19,7 +19,6 @@ Graphectory transforms agent execution traces into structured graphs that captur
 ```bash
 git clone git@github.com:Intelligent-CAT-Lab/Graphectory.git
 cd Graphectory
-python -m pip install -e .
 ```
 
 We recommend using conda or virtual environments (python>=3.12) to manage dependencies.
@@ -31,12 +30,11 @@ The live_graph_server.py tool requires pygraphviz. On Windows, a standard pip in
 
 If you use Conda, we recommend installing the pre-compiled version from conda-forge to handle these dependencies automatically:
 
-Bash
-# 1. Install pygraphviz and its C-dependencies via Conda
+```bash
 conda install -c conda-forge pygraphviz
-
-# 2. Complete the local project installation
 python -m pip install -e .
+```
+
 If you are not using Conda, you must install the Graphviz system binaries manually and ensure they are added to your system PATH before running the pip install.
 
 ## Quick Start
