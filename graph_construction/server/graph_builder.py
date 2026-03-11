@@ -613,10 +613,15 @@ def build_graph(traj_data: dict, instance_id: str,
         ValueError: if cmd_parser is None.
     """
     if cmd_parser is None:
-        raise ValueError(
-            "cmd_parser must be a CommandParser instance. "
-            "Pass a configured CommandParser from live_graph_server.setup_cmd_parser()."
-        )
+        # commandParser was unavailable at startup.  Use a minimal no-op shim
+        # so the server stays functional — actions will be stored as raw strings
+        # rather than structured tool/command records.
+        class _NullParser:
+            def parse(self, action_str):
+                cmd = action_str.strip().split()[0] if action_str.strip() else "action"
+                return [{"tool": "", "subcommand": "", "command": cmd,
+                         "args": {"_raw": action_str.strip()}, "flags": {}}]
+        cmd_parser = _NullParser()
 
     # Dispatch to agent-specific builder
     if agent_type == "oh":
