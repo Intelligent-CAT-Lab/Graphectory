@@ -64,13 +64,13 @@ def render_graph_html(
     nodes_data = _prepare_nodes(G)
     edges_data = _prepare_edges(G)
 
+    resolution_status = G.graph.get("resolution_status", "none") or "none"
     meta = {
         "instance_name":     instance_name,
-        "resolution_status": G.graph.get("resolution_status", "unknown"),
+        "resolution_status": resolution_status,
         "difficulty":        str(G.graph.get("debug_difficulty", "unknown")),
         "node_count":        str(len(nodes_data)),
         "edge_count":        str(len(edges_data)),
-        "metadata_comment":  f"Mode: {'cd filtered (▲ hat)' if filter_cd else 'cd as node'}",
     }
 
     settings = {
@@ -88,13 +88,24 @@ def render_graph_html(
     # Dagre — serve from local static/ when available, otherwise fall back to CDN.
     html = html.replace("{{DAGRE_SCRIPT_TAG}}", _dagre_script_tag(assets_dir))
 
+    # Status item — omit entirely when no report was provided
+    if resolution_status in ("none", "unknown", ""):
+        status_item_html = ""
+    else:
+        status_item_html = (
+            '<div class="metadata-item">'
+            "<strong>Status:</strong>"
+            f' <span class="status-badge status-{_esc(resolution_status)}">'
+            f"{_esc(resolution_status)}</span>"
+            "</div>"
+        )
+
     # Metadata
+    html = html.replace("{{STATUS_ITEM}}",       status_item_html)
     html = html.replace("{{INSTANCE_NAME}}",     _esc(meta["instance_name"]))
-    html = html.replace("{{RESOLUTION_STATUS}}", meta["resolution_status"])
     html = html.replace("{{DIFFICULTY}}",        _esc(meta["difficulty"]))
     html = html.replace("{{NODE_COUNT}}",        meta["node_count"])
     html = html.replace("{{EDGE_COUNT}}",        meta["edge_count"])
-    html = html.replace("{{METADATA_COMMENT}}",  _esc(meta["metadata_comment"]))
 
     # Graph data
     html = html.replace("{{NODES_DATA}}",   _safe_json(nodes_data))
@@ -143,9 +154,47 @@ def _dagre_script_tag(assets_dir: Path) -> str:
     )
 
 
+
 # ---------------------------------------------------------------------------
 # Node preparation
 # ---------------------------------------------------------------------------
+
+def _sanitize_text(s: str) -> str:
+    """Remove or replace control characters that break JSON/HTML rendering.
+
+    Keeps common whitespace (newline, tab, carriage return) and strips all
+    other C0/C1 control characters (U+0000–U+001F excluding \\t \\n \\r,
+    and U+007F–U+009F).  Surrogate code points that can't be JSON-encoded
+    are also replaced with the Unicode replacement character (U+FFFD).
+    """
+    if not s:
+        return s
+    # Replace surrogates
+    try:
+        s = s.encode("utf-16", "surrogatepass").decode("utf-16")
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        s = s.encode("utf-8", "replace").decode("utf-8")
+    # Strip non-printable control chars except \\t \\n \\r
+    return "".join(
+        ch if (ch in ("\t", "\n", "\r") or (ord(ch) >= 0x20 and ord(ch) != 0x7F and ord(ch) < 0x9F)
+               or ord(ch) >= 0xA0)
+        else "\ufffd"
+        for ch in s
+    )
+
+
+def _sanitize_step_data(step_data: list) -> list:
+    """Return a copy of step_data with all text fields sanitized."""
+    cleaned = []
+    for entry in step_data:
+        cleaned.append({
+            "step_idx":    entry.get("step_idx", 0),
+            "thought":     _sanitize_text(entry.get("thought",     "") or ""),
+            "action":      _sanitize_text(entry.get("action",      "") or ""),
+            "observation": _sanitize_text(entry.get("observation", "") or ""),
+        })
+    return cleaned
+
 
 def _prepare_nodes(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
     nodes = []
@@ -162,7 +211,7 @@ def _prepare_nodes(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
             "observation_length": int(data.get("observation_length", 0)),
             "tool":               data.get("tool", ""),
             "subcommand":         data.get("subcommand", ""),
-            "step_data":          data.get("step_data", []),
+            "step_data":          _sanitize_step_data(data.get("step_data", [])),
         })
     return nodes
 

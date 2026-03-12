@@ -61,8 +61,8 @@ async function applyDataSource() {
 
     errEl.style.display = 'none';
 
-    if (!trajs || !evalReport) {
-        showDsError('Both paths are required.');
+    if (!trajs) {
+        showDsError('Trajectories path is required.');
         return;
     }
 
@@ -139,8 +139,10 @@ function renderStats(graphs) {
     const total      = graphs.length;
     const resolved   = graphs.filter(g => g.status === 'resolved').length;
     const unresolved = graphs.filter(g => g.status === 'unresolved').length;
-    document.getElementById('stats').textContent =
-        `${total} total · ${resolved} resolved · ${unresolved} unresolved`;
+    const hasReport  = graphs.some(g => g.status !== 'none' && g.status !== 'unknown');
+    document.getElementById('stats').textContent = hasReport
+        ? `${total} total · ${resolved} resolved · ${unresolved} unresolved`
+        : `${total} total`;
 }
 
 function renderList(graphs) {
@@ -156,6 +158,7 @@ function renderList(graphs) {
         const status     = g.status || 'unknown';
         const badgeClass = ['resolved', 'unresolved', 'unsubmitted'].includes(status)
                            ? status : 'unknown';
+        const showBadge  = status !== 'none' && status !== 'unknown';
         const steps      = g.step_count != null ? `${g.step_count} steps` : '';
         const diff       = g.difficulty && g.difficulty !== 'unknown'
                            ? escHtml(g.difficulty) : '';
@@ -167,7 +170,7 @@ function renderList(graphs) {
              onclick="selectGraph('${escHtml(g.instance_id)}')">
             <div class="item-title" title="${escHtml(g.instance_id)}">${escHtml(g.instance_id)}</div>
             <div class="item-meta">
-                <span class="badge badge-${badgeClass}">${escHtml(status)}</span>
+                ${showBadge ? `<span class="badge badge-${badgeClass}">${escHtml(status)}</span>` : ''}
                 ${metaParts ? `<span>${metaParts}</span>` : ''}
             </div>
         </div>`;

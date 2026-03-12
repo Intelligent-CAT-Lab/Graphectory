@@ -119,8 +119,10 @@ def scan_trajectories(graphs_dir: Path,
                     status = "resolved"
                 elif instance_id in unresolved_set:
                     status = "unresolved"
-                else:
+                elif eval_report_path:
                     status = "unsubmitted"
+                else:
+                    status = "none"
 
                 # Count action steps (non-system, non-message observations)
                 step_count = sum(
@@ -146,6 +148,8 @@ def scan_trajectories(graphs_dir: Path,
             status = "resolved"
         elif instance_id in unresolved_set:
             status = "unresolved"
+        elif not eval_report_path:
+            status = "none"
         else:
             status = "unsubmitted"
             json_file = traj_file.with_suffix(".json")
@@ -570,7 +574,8 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
     # Post-processing
     build_hierarchical_edges(builder.G, builder.localization_nodes)
 
-    resolution_status = determine_resolution_status(instance_id, eval_report_path)
+    resolution_status = determine_resolution_status(instance_id, eval_report_path) \
+        if eval_report_path else "none"
     builder.G.graph["resolution_status"] = resolution_status
     builder.G.graph["instance_name"]     = instance_id
 
@@ -794,7 +799,8 @@ def build_graph(traj_data: dict, instance_id: str,
     # ── Post-processing ────────────────────────────────────────────────
     build_hierarchical_edges(builder.G, builder.localization_nodes)
 
-    resolution_status = determine_resolution_status(instance_id, eval_report_path)
+    resolution_status = determine_resolution_status(instance_id, eval_report_path) \
+        if eval_report_path else "none"
     builder.G.graph["resolution_status"] = resolution_status
     builder.G.graph["instance_name"]     = instance_id
 

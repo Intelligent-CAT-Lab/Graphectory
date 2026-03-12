@@ -143,23 +143,10 @@ def main() -> int:
     eval_report: Path | None = None
     agent_type: str          = "sa"
 
-    if args.trajs or args.eval_report:
-        # If either is supplied, both are required.
-        if not args.trajs:
-            logger.error("--trajs is required when --eval_report is provided.")
-            return 1
-        if not args.eval_report:
-            logger.error("--eval_report is required when --trajs is provided.")
-            return 1
-
+    if args.trajs:
         trajs = Path(args.trajs)
         if not trajs.exists():
             logger.error("--trajs path does not exist: %s", trajs)
-            return 1
-
-        eval_report = Path(args.eval_report)
-        if not eval_report.exists():
-            logger.error("--eval_report path does not exist: %s", eval_report)
             return 1
 
         if trajs.is_file() and trajs.suffix == ".jsonl":
@@ -171,6 +158,12 @@ def main() -> int:
                 "--trajs must be a directory (SWE-agent) or a .jsonl file (OpenHands): %s", trajs,
             )
             return 1
+
+        if args.eval_report:
+            eval_report = Path(args.eval_report)
+            if not eval_report.exists():
+                logger.error("--eval_report path does not exist: %s", eval_report)
+                return 1
 
     # Inject configuration into the handler class before the server starts.
     GraphHandler.graphs_dir       = trajs
@@ -190,7 +183,10 @@ def main() -> int:
     if trajs:
         print(f"  Agent      : {agent_type.upper()}  ({agent_label})")
         print(f"  Trajs      : {trajs.absolute()}")
-        print(f"  Report     : {eval_report.absolute()}")
+        if eval_report:
+            print(f"  Report     : {eval_report.absolute()}")
+        else:
+            print( "  Report     : (none — status badges will not be shown)")
     else:
         print( "  Data source: not set — configure via the browser UI")
     print(f"  Assets     : {assets_dir.absolute()}")
