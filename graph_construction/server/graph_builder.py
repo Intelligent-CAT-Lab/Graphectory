@@ -426,25 +426,29 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
             except (json.JSONDecodeError, TypeError):
                 args_loaded = {}
 
-            # Build a human-readable action string for this call
             if tool_name == "execute_bash":
                 cmd_str = args_loaded.get("command", "").strip()
+                # Action shown in sidebar is the raw bash command
                 action_str_parts.append(cmd_str if cmd_str else tool_name)
                 cmds = cmd_parser.parse(cmd_str) if cmd_str else []
                 if cmds:
                     parsed_commands.extend(cmds)
+                else:
+                    parsed_commands.append({
+                        "tool":       "",
+                        "subcommand": "",
+                        "args":       {"_raw": cmd_str} if cmd_str else {},
+                        "flags":      {},
+                        "command":    cmd_str or tool_name,
+                    })
             else:
+                # Capture the raw args string before any mutation for faithful sidebar display
+                raw_for_display = args_raw if isinstance(args_raw, str) else json.dumps(args_raw)
                 subcommand = args_loaded.pop("command", None)
-                # Reconstruct a readable representation: tool [subcommand] [key=val ...]
-                parts = [tool_name]
-                if subcommand:
-                    parts.append(subcommand)
-                for k, v in (args_loaded.items() if isinstance(args_loaded, dict) else []):
-                    if k.startswith("_"):
-                        continue
-                    v_str = str(v)
-                    parts.append(f"{k}={v_str[:120]}" if len(v_str) > 120 else f"{k}={v_str}")
-                action_str_parts.append(" ".join(parts))
+                # Action shown in sidebar: tool [subcommand] then the verbatim args JSON,
+                # so the user sees exactly what the model called (path, file_text, old_str, etc.)
+                header = tool_name + (" " + subcommand if subcommand else "")
+                action_str_parts.append(f"{header}\n{raw_for_display}")
                 parsed_commands.append({
                     "tool":       tool_name,
                     "subcommand": subcommand,
@@ -457,8 +461,15 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
         action_str = "\n".join(action_str_parts)
 
         if not parsed_commands:
-            step_idx += 1
-            continue
+            # No tool calls found — still create a node so thought/observation
+            # are visible in the sidebar rather than being silently dropped.
+            parsed_commands = [{
+                "tool":       "",
+                "subcommand": "",
+                "args":       {},
+                "flags":      {},
+                "command":    "",
+            }]
 
         # Optional cd filtering
         has_cd = False
