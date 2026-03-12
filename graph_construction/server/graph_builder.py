@@ -403,6 +403,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
             tool_calls = [tool_call_meta]
 
         parsed_commands = []
+        action_str_parts = []   # collect per-call action text for the sidebar
         for call in tool_calls:
             function_call = None
             if isinstance(call, dict):
@@ -425,13 +426,25 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
             except (json.JSONDecodeError, TypeError):
                 args_loaded = {}
 
+            # Build a human-readable action string for this call
             if tool_name == "execute_bash":
                 cmd_str = args_loaded.get("command", "").strip()
+                action_str_parts.append(cmd_str if cmd_str else tool_name)
                 cmds = cmd_parser.parse(cmd_str) if cmd_str else []
                 if cmds:
                     parsed_commands.extend(cmds)
             else:
                 subcommand = args_loaded.pop("command", None)
+                # Reconstruct a readable representation: tool [subcommand] [key=val ...]
+                parts = [tool_name]
+                if subcommand:
+                    parts.append(subcommand)
+                for k, v in (args_loaded.items() if isinstance(args_loaded, dict) else []):
+                    if k.startswith("_"):
+                        continue
+                    v_str = str(v)
+                    parts.append(f"{k}={v_str[:120]}" if len(v_str) > 120 else f"{k}={v_str}")
+                action_str_parts.append(" ".join(parts))
                 parsed_commands.append({
                     "tool":       tool_name,
                     "subcommand": subcommand,
@@ -439,6 +452,9 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
                     "flags":      {},
                     "command":    "",
                 })
+
+        # Full action text shown verbatim in the sidebar
+        action_str = "\n".join(action_str_parts)
 
         if not parsed_commands:
             step_idx += 1
@@ -484,7 +500,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
                 builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
                 _accumulate_observation(builder.G.nodes[node_key], observation)
                 _accumulate_step_data(builder.G.nodes[node_key], step_idx,
-                                      thought, "", observation)
+                                      thought, action_str, observation)
                 builder.add_execution_edge(
                     node_key, step_idx,
                     is_first_in_step=is_first_in_step,
@@ -539,7 +555,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
             builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
             builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
             _accumulate_step_data(builder.G.nodes[node_key], step_idx,
-                                  thought, f"{tool} {subcommand}".strip(), observation)
+                                  thought, action_str, observation)
 
             node_keys_in_step.append(node_key)
             if step_first_node is None:
