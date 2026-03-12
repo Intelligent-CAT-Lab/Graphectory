@@ -494,7 +494,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
                 # When unique_think is on, use the thought text in the node
                 # signature so each distinct thought gets its own node.
                 # When off, all think steps collapse into one node (old behaviour).
-                think_args = {"_thought": thought} if unique_think else {}
+                think_args = {"_thought": thought, "_action": action_str} if unique_think else {}
                 node_key = builder.add_or_update_node(
                     node_label     = "think",
                     args           = think_args,
