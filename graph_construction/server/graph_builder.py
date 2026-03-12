@@ -88,7 +88,7 @@ def scan_trajectories(graphs_dir: Path,
     unresolved_set: set[str] = set()
     if eval_report_path:
         try:
-            with open(eval_report_path) as f:
+            with open(eval_report_path, encoding="utf-8", errors="replace") as f:
                 report = json.load(f)
             resolved_set   = set(report.get("resolved_ids",   []))
             unresolved_set = set(report.get("unresolved_ids", []))
@@ -102,7 +102,7 @@ def scan_trajectories(graphs_dir: Path,
         jsonl_path = graphs_dir
         if not jsonl_path.is_file():
             return results
-        with open(jsonl_path) as f:
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -155,7 +155,7 @@ def scan_trajectories(graphs_dir: Path,
             json_file = traj_file.with_suffix(".json")
             if json_file.exists():
                 try:
-                    with open(json_file) as f:
+                    with open(json_file, encoding="utf-8", errors="replace") as f:
                         meta = json.load(f)
                     s = meta.get("graph", {}).get("resolution_status", "")
                     if s in ("resolved", "unresolved", "unsubmitted"):
@@ -167,7 +167,7 @@ def scan_trajectories(graphs_dir: Path,
         json_file = traj_file.with_suffix(".json")
         if json_file.exists():
             try:
-                with open(json_file) as f:
+                with open(json_file, encoding="utf-8", errors="replace") as f:
                     meta = json.load(f)
                 difficulty = meta.get("graph", {}).get("debug_difficulty", "unknown")
             except Exception:
@@ -175,7 +175,7 @@ def scan_trajectories(graphs_dir: Path,
 
         step_count = 0
         try:
-            with open(traj_file) as f:
+            with open(traj_file, encoding="utf-8", errors="replace") as f:
                 traj = json.load(f)
             step_count = len(traj.get("trajectory", []))
         except Exception:
@@ -208,7 +208,7 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
             raise FileNotFoundError(
                 f"OpenHands output.jsonl not found: {jsonl_path}"
             )
-        with open(jsonl_path) as f:
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -225,7 +225,7 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
 
     # SWE-agent: search for .traj file
     for traj_file in graphs_dir.rglob(f"{instance_id}.traj"):
-        with open(traj_file) as f:
+        with open(traj_file, encoding="utf-8", errors="replace") as f:
             return json.load(f)
 
     raise FileNotFoundError(
