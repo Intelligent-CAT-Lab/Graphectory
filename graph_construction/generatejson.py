@@ -15,22 +15,20 @@ Output Structure:
 """
 
 import argparse
-import hashlib
 import json
 import os
 import sys
-from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 
-import networkx as nx
 from datasets import load_dataset
 from networkx.readwrite import json_graph
 
 from commandParser import CommandParser
-from mapPhase import get_phase
+# Reuse graph construction logic from buildGraph (returns json_path, html_path)
+from buildGraph import build_graph_from_sa_trajectory, build_graph_from_oh_trajectory
 
 
 # ==================== Configuration ====================
@@ -62,384 +60,6 @@ class ProcessingResult:
     status: str           # "success" or "error"
     json_path: Optional[str] = None
     error: Optional[str] = None
-
-
-# ==================== Helpers ====================
-def hash_node_signature(label, args, flags):
-    normalized = json.dumps({"label": label, "args": args, "flags": flags}, sort_keys=True)
-    return hashlib.md5(normalized.encode("utf-8")).hexdigest()
-
-
-def check_edit_status(tool, subcommand, args, observation):
-    def check_str_edit_status(obs):
-        if not obs:
-            return None
-        if "has been edited." in obs:
-            return "success"
-        if "did not appear verbatim" in obs:
-            return "failure: not found"
-        if "Multiple occurrences of old_str" in obs:
-            return "failure: multiple occurrences"
-        if "old_str" in obs and "is the same as new_str" in obs:
-            return "failure: no change"
-        return "failure: unknown"
-
-    if tool == "str_replace_editor" and subcommand in {"str_replace"}:
-        return check_str_edit_status(observation)
-    return None
-
-
-def determine_resolution_status(instance_id: str, eval_report_path: str) -> str:
-    """Determine resolution status from eval report given an instance ID."""
-    if not os.path.isfile(eval_report_path):
-        return "N/A"
-    with open(eval_report_path, "r") as f:
-        report = json.load(f)
-    if instance_id in report.get("resolved_ids", []):
-        return "resolved"
-    elif instance_id in report.get("unresolved_ids", []):
-        return "unresolved"
-    return "unsubmitted"
-
-
-# ==================== Graph Builder ====================
-class GraphBuilder:
-    """Utility class for managing graph construction operations."""
-
-    def __init__(self):
-        self.G = nx.MultiDiGraph()
-        self.node_signature_to_key = {}
-        self.localization_nodes = []
-        self.prev_phases = set()
-        self.previous_node = None
-
-    def add_or_update_node(self, node_label, args, flags, phase, step_idx,
-                           tool=None, command=None, subcommand=None):
-        node_signature = hash_node_signature(node_label, args, flags)
-
-        if node_signature in self.node_signature_to_key:
-            node_key = self.node_signature_to_key[node_signature]
-            self.G.nodes[node_key]["step_indices"].append(step_idx)
-            if "phases" not in self.G.nodes[node_key]:
-                self.G.nodes[node_key]["phases"] = []
-            self.G.nodes[node_key]["phases"].append(phase)
-        else:
-            node_key = f"{len(self.G.nodes)}:{node_label}"
-            self.G.add_node(
-                node_key,
-                label=node_label,
-                args=args,
-                flags=flags,
-                phases=[phase],
-                step_indices=[step_idx],
-                tool=tool,
-                command=command,
-                subcommand=subcommand,
-            )
-            self.node_signature_to_key[node_signature] = node_key
-
-            if tool == "str_replace_editor" and subcommand == "view":
-                self.localization_nodes.append(node_key)
-
-        return node_key
-
-    def add_execution_edge(self, node_key, step_idx):
-        if self.previous_node:
-            self.G.add_edge(self.previous_node, node_key, label=str(step_idx), type="exec")
-
-    def update_previous_node(self, node_key):
-        self.previous_node = node_key
-
-    def add_phase(self, phase):
-        self.prev_phases.add(phase)
-
-    def finalize_and_save(self, output_dir, instance_id, eval_report_path):
-        """Build hierarchical edges, add metadata, and save JSON graph.
-
-        Returns:
-            json_path: path to the saved JSON file
-        """
-        build_hierarchical_edges(self.G, self.localization_nodes)
-
-        resolution_status = determine_resolution_status(instance_id, eval_report_path)
-        self.G.graph["resolution_status"] = resolution_status
-        self.G.graph["instance_name"] = instance_id
-        self.G.graph["debug_difficulty"] = difficulty_lookup.get(instance_id, "unknown")
-
-        instance_dir = os.path.join(output_dir, instance_id)
-        os.makedirs(instance_dir, exist_ok=True)
-
-        json_path = os.path.join(instance_dir, f"{instance_id}.json")
-
-        with open(json_path, "w") as f:
-            json.dump(json_graph.node_link_data(self.G, edges="edges"), f, indent=2)
-
-        return json_path
-
-
-# ==================== Hierarchical Edges ====================
-def build_hierarchical_edges(G: nx.MultiDiGraph, localization_nodes):
-    """Add 'hier' edges with transitive reduction: only immediate parent relationships.
-
-    Avoids redundancy: if A→B and B→C exist, A→C is not added.
-    """
-    path_nodes = []
-    range_nodes_by_path = defaultdict(list)
-
-    for node in localization_nodes:
-        data = G.nodes[node]
-        path = data.get("args", {}).get("path")
-        view_range = data.get("args", {}).get("view_range")
-
-        if path:
-            path_obj = Path(path)
-            if view_range is None:
-                path_nodes.append((node, path_obj))
-            elif (
-                isinstance(view_range, (list, tuple))
-                and len(view_range) == 2
-                and all(isinstance(x, int) for x in view_range)
-            ):
-                range_nodes_by_path[str(path_obj)].append((node, view_range))
-            else:
-                print(f"[WARN] Skipping invalid view_range for node {node}: {view_range}")
-
-    # Path hierarchy: connect only to closest parent
-    for child_node, child_path in path_nodes:
-        best_parent_node = None
-        best_parent_path = None
-        for parent_node, parent_path in path_nodes:
-            if parent_node == child_node:
-                continue
-            if len(parent_path.parts) < len(child_path.parts) and \
-                    child_path.parts[:len(parent_path.parts)] == parent_path.parts:
-                if best_parent_path is None or len(parent_path.parts) > len(best_parent_path.parts):
-                    best_parent_node = parent_node
-                    best_parent_path = parent_path
-        if best_parent_node:
-            G.add_edge(best_parent_node, child_node, type="hier")
-
-    path_to_node = {str(p): n for n, p in path_nodes}
-
-    for path_str, range_nodes in range_nodes_by_path.items():
-        is_nested = {n: False for n, _ in range_nodes}
-
-        # Range nesting: connect only immediate outer→inner, not all ancestors
-        for i, (node_i, r_i) in enumerate(range_nodes):
-            for j, (node_j, r_j) in enumerate(range_nodes):
-                if i == j:
-                    continue
-                try:
-                    a1, a2 = r_i
-                    b1, b2 = r_j
-                    # node_j nested inside node_i
-                    if b1 >= a1 and b2 <= a2:
-                        # Check if immediate (no intermediate range between i and j)
-                        is_immediate = True
-                        for k, (node_k, r_k) in enumerate(range_nodes):
-                            if k == i or k == j:
-                                continue
-                            c1, c2 = r_k
-                            # node_k is between node_i and node_j if both conditions hold
-                            if (c1 >= a1 and c2 <= a2 and b1 >= c1 and b2 <= c2):
-                                is_immediate = False
-                                break
-                        if is_immediate:
-                            G.add_edge(node_i, node_j, type="hier")
-                            is_nested[node_j] = True
-                except Exception as e:
-                    print(f"[WARN] Failed to unpack ranges for nesting check: {r_i}, {r_j} ({e})")
-
-        # Link outermost ranges to path node or closest ancestor
-        path_node = path_to_node.get(path_str)
-        if path_node:
-            for node, _ in range_nodes:
-                if not is_nested[node]:
-                    G.add_edge(path_node, node, type="hier")
-        else:
-            path_parts = Path(path_str).parts
-            best_ancestor_node = None
-            best_ancestor_depth = -1
-            for pn, pp in path_nodes:
-                if len(pp.parts) < len(path_parts) and path_parts[:len(pp.parts)] == pp.parts:
-                    if len(pp.parts) > best_ancestor_depth:
-                        best_ancestor_node = pn
-                        best_ancestor_depth = len(pp.parts)
-            for node, _ in range_nodes:
-                if not is_nested[node] and best_ancestor_node:
-                    G.add_edge(best_ancestor_node, node, type="hier")
-
-
-# ==================== Graph Build Functions ====================
-def build_graph_from_sa_trajectory(traj_data, parser: CommandParser, instance_id, output_dir, eval_report_path):
-    """Build graph from SWE-agent trajectory data and save JSON.
-
-    Args:
-        traj_data: SWE-agent trajectory dictionary containing 'trajectory' key
-        parser: CommandParser instance for parsing action strings
-        instance_id: Instance identifier (e.g., 'django__django-12345')
-        output_dir: Base output directory for saving graphs
-        eval_report_path: Path to evaluation report JSON file
-
-    Returns:
-        json_path: path to the saved JSON file
-
-    Output Structure:
-        {output_dir}/{instance_id}/{instance_id}.json
-    """
-    builder = GraphBuilder()
-    trajectory = traj_data.get("trajectory", [])
-
-    for step_idx, step in enumerate(trajectory):
-        action_str = step.get("action", "")
-
-        if action_str.strip() == "":
-            node_key = builder.add_or_update_node(
-                node_label="think", args={}, flags={}, phase="general",
-                step_idx=step_idx, tool=None, command=None, subcommand=None,
-            )
-            builder.add_execution_edge(node_key, step_idx)
-            builder.update_previous_node(node_key)
-            builder.add_phase("general")
-            continue
-
-        parsed_commands = parser.parse(action_str)
-        if not parsed_commands:
-            continue
-
-        for parsed in parsed_commands:
-            tool = parsed.get("tool", "").strip() if parsed.get("tool") else ""
-            subcommand = parsed.get("subcommand", "").strip() if parsed.get("subcommand") else ""
-            command = parsed.get("command", "").strip() if parsed.get("command") else ""
-            args = parsed.get("args", {})
-            flags = parsed.get("flags", {})
-
-            if tool:
-                node_label = f"{tool}: {subcommand}" if subcommand else tool
-            else:
-                node_label = command.strip() or action_str.strip()
-
-            phase = get_phase(tool, subcommand, command, args, builder.prev_phases)
-
-            edit_status = check_edit_status(tool, subcommand, args, step.get("observation", ""))
-            if edit_status and isinstance(args, dict):
-                args["edit_status"] = edit_status
-
-            node_key = builder.add_or_update_node(
-                node_label=node_label, args=args, flags=flags, phase=phase,
-                step_idx=step_idx, tool=tool, command=command, subcommand=subcommand,
-            )
-            builder.add_execution_edge(node_key, step_idx)
-            builder.update_previous_node(node_key)
-            builder.add_phase(phase)
-
-    return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
-
-
-def build_graph_from_oh_trajectory(traj_data, parser: CommandParser, instance_id, output_dir, eval_report_path):
-    """Build graph from OpenHands trajectory data and save JSON.
-
-    Args:
-        traj_data: OpenHands trajectory dictionary containing 'history' key
-        parser: CommandParser instance for parsing action strings
-        instance_id: Instance identifier (e.g., 'django__django-12345')
-        output_dir: Base output directory for saving graphs
-        eval_report_path: Path to evaluation report JSON file
-
-    Returns:
-        json_path: path to the saved JSON file
-
-    Output Structure:
-        {output_dir}/{instance_id}/{instance_id}.json
-    """
-    builder = GraphBuilder()
-    step_idx = 0
-
-    for step in traj_data.get("history", []):
-        action = step.get("observation") if step.get("observation") else None
-        if action in ("system", "message") or action is None:
-            continue
-
-        action_str = action or ""
-
-        tool_calls = step.get("tool_call_metadata", {}).get("model_response", {}).get("choices", [])
-        if not tool_calls and "tool_call_metadata" in step:
-            tool_calls = [step["tool_call_metadata"]]
-
-        parsed_commands = []
-        for call in tool_calls:
-            function_call = None
-            if isinstance(call, dict):
-                if "function" in call:
-                    function_call = call["function"]
-                elif "message" in call and "tool_calls" in call["message"]:
-                    for tc in call["message"]["tool_calls"]:
-                        if "function" in tc:
-                            function_call = tc["function"]
-
-            if not function_call:
-                continue
-
-            tool_name = function_call.get("name")
-            args_raw = function_call.get("arguments", "{}")
-
-            try:
-                args_loaded = json.loads(args_raw)
-            except json.JSONDecodeError:
-                args_loaded = {}
-
-            if tool_name == "execute_bash":
-                cmd = args_loaded.get("command", "").strip()
-                parsed_commands = parser.parse(cmd)
-                if not parsed_commands:
-                    continue
-            else:
-                subcommand = args_loaded.pop("command", None)
-                parsed_commands = [{"tool": tool_name, "subcommand": subcommand, "args": args_loaded}]
-
-        if not parsed_commands:
-            continue
-
-        for parsed in parsed_commands:
-            tool = parsed.get("tool", "").strip()
-
-            if tool == "think":
-                node_key = builder.add_or_update_node(
-                    node_label="think", args={}, flags={}, phase="general",
-                    step_idx=step_idx, tool=None, command=None, subcommand=None,
-                )
-                builder.add_execution_edge(node_key, step_idx)
-                builder.update_previous_node(node_key)
-                builder.add_phase("general")
-                continue
-
-            subcommand = parsed.get("subcommand", "").strip() if parsed.get("subcommand") else ""
-            command = parsed.get("command", "").strip() if parsed.get("command") else ""
-            args = parsed.get("args", {})
-            flags = parsed.get("flags", {})
-
-            if tool:
-                node_label = f"{tool}: {subcommand}" if subcommand else tool
-            else:
-                node_label = command.strip() or action_str.strip()
-
-            phase = get_phase(tool, subcommand, command, args, builder.prev_phases)
-
-            edit_status = check_edit_status(tool, subcommand, args, step.get("content", ""))
-            if edit_status and isinstance(args, dict):
-                args["edit_status"] = edit_status
-
-            node_key = builder.add_or_update_node(
-                node_label=node_label, args=args, flags=flags, phase=phase,
-                step_idx=step_idx, tool=tool, command=command, subcommand=subcommand,
-            )
-            builder.add_execution_edge(node_key, step_idx)
-            builder.update_previous_node(node_key)
-            builder.add_phase(phase)
-
-        step_idx += 1
-
-    return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
 
 
 # ==================== Path Management ====================
@@ -525,7 +145,7 @@ class GraphProcessor:
         """Process a single trajectory and generate JSON graph."""
         try:
             if self.agent == "sa":
-                json_path = build_graph_from_sa_trajectory(
+                json_path, _ = build_graph_from_sa_trajectory(
                     traj_data=traj_data,
                     parser=self.parser,
                     instance_id=instance_id,
@@ -533,7 +153,7 @@ class GraphProcessor:
                     eval_report_path=self.eval_report_path,
                 )
             elif self.agent == "oh":
-                json_path = build_graph_from_oh_trajectory(
+                json_path, _ = build_graph_from_oh_trajectory(
                     traj_data=traj_data,
                     parser=self.parser,
                     instance_id=instance_id,

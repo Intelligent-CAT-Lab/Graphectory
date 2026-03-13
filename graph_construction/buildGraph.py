@@ -291,14 +291,14 @@ class GraphBuilder:
         with open(json_path, "w") as f:
             json.dump(json_graph.node_link_data(self.G, edges="edges"), f, indent=2)
 
-        # Save HTML using refactored visualizer
-        GraphVisualizer.draw_with_timeout(
-            self.G, 
-            html_path, 
-            timeout_sec=60,
-            template_dir=template_dir,
-            metadata_comment=metadata_comment
-        )
+        # Save HTML using refactored visualizer (skip)
+        # GraphVisualizer.draw_with_timeout(
+        #     self.G, 
+        #     html_path, 
+        #     timeout_sec=60,
+        #     template_dir=template_dir,
+        #     metadata_comment=metadata_comment
+        # )
 
         return json_path, html_path
 
@@ -366,30 +366,22 @@ def build_graph_from_sa_trajectory(traj_data, parser, instance_id, output_dir, e
         if not parsed_commands:
             continue
 
-        # Filter out cd commands if there are other commands in the same step
-        # and mark remaining nodes as having cd prefix
-        has_cd = False
-        filtered_commands = []
-        
-        if len(parsed_commands) > 1:
-            first_cmd = parsed_commands[0]
-            if first_cmd.get("command", "").strip().lower() == "cd":
-                has_cd = True
-                filtered_commands = parsed_commands[1:]
-            else:
-                filtered_commands = parsed_commands
-        else:
-            filtered_commands = parsed_commands
-        
+        # Process all commands including cd; mark subsequent nodes with has_cd
         is_first_in_step = True
         node_keys_in_step = []
-        
-        for parsed in filtered_commands:
+        saw_cd = False
+
+        for parsed in parsed_commands:
             tool = parsed.get("tool", "").strip() if parsed.get("tool") else ""
             subcommand = parsed.get("subcommand", "").strip() if parsed.get("subcommand") else ""
             command = parsed.get("command", "").strip() if parsed.get("command") else ""
             args = parsed.get("args", {})
             flags = parsed.get("flags", {})
+
+            # Check if this is a cd command
+            is_cd = command.lower() == "cd"
+            if is_cd:
+                saw_cd = True
 
             if tool:
                 node_label = f"{tool}: {subcommand}" if subcommand else tool
@@ -412,7 +404,7 @@ def build_graph_from_sa_trajectory(traj_data, parser, instance_id, output_dir, e
                 command=command,
                 subcommand=subcommand,
                 thought_length=thought_len_raw,
-                has_cd=has_cd
+                has_cd=(saw_cd and not is_cd)
             )
             builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
             builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
@@ -515,26 +507,14 @@ def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, e
         if not parsed_commands:
             continue
 
-        # Filter out cd commands if there are other commands in the same step
-        has_cd = False
-        filtered_commands = []
-        
-        if len(parsed_commands) > 1:
-            first_cmd = parsed_commands[0]
-            if first_cmd.get("command", "").strip().lower() == "cd":
-                has_cd = True
-                filtered_commands = parsed_commands[1:]
-            else:
-                filtered_commands = parsed_commands
-        else:
-            filtered_commands = parsed_commands
-        
+        # Process all commands including cd; mark subsequent nodes with has_cd
         is_first_in_step = True
         node_keys_in_step = []
+        saw_cd = False
 
-        for parsed in filtered_commands:
+        for parsed in parsed_commands:
             tool = parsed.get("tool", "").strip()
-            
+
             # ---- THINK NODES ----
             if tool == "think":
                 node_key = builder.add_or_update_node(
@@ -565,6 +545,11 @@ def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, e
             args = parsed.get("args", {})
             flags = parsed.get("flags", {})
 
+            # Check if this is a cd command
+            is_cd = command.lower() == "cd"
+            if is_cd:
+                saw_cd = True
+
             if tool:
                 node_label = f"{tool}: {subcommand}" if subcommand else tool
             else:
@@ -587,7 +572,7 @@ def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, e
                 command=command,
                 subcommand=subcommand,
                 thought_length=thought_len_raw,
-                has_cd=has_cd
+                has_cd=(saw_cd and not is_cd)
             )
             builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
             builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
