@@ -388,7 +388,7 @@ def build_graph_from_sa_trajectory(traj_data, parser, instance_id, output_dir, e
             else:
                 node_label = command.strip() or action_str.strip()
 
-            phase = get_phase(tool, subcommand, command, args, builder.prev_phases)
+            phase = get_phase(tool, subcommand, command, args, builder.prev_phases, flags)
 
             edit_status = check_edit_status(tool, subcommand, args, observation)
             if edit_status and isinstance(args, dict):
@@ -555,7 +555,7 @@ def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, e
             else:
                 node_label = command.strip() or action_str.strip()
 
-            phase = get_phase(tool, subcommand, command, args, builder.prev_phases)
+            phase = get_phase(tool, subcommand, command, args, builder.prev_phases, flags)
 
             observation = step.get("content", "") or ""
             edit_status = check_edit_status(tool, subcommand, args, observation)
@@ -593,6 +593,160 @@ def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, e
             builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(obs_text)
 
         step_idx += 1
+
+    return builder.finalize_and_save(output_dir, instance_id, eval_report_path, template_dir, metadata_comment)
+
+
+def build_graph_from_msa_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path, template_dir=None, metadata_comment=""):
+    """Build graph from mini-swe-agent trajectory data.
+
+    Mini-swe-agent format: messages = [system, user, assistant_resp, tool_result, ...]
+    - Assistant response contains: thought (message) + actions (function_calls)
+    - Tool result contains: observation (extra.raw_output or output string)
+
+    Args:
+        traj_data: Mini-swe-agent trajectory dictionary containing 'messages' key
+        parser: CommandParser instance for parsing action strings
+        instance_id: Instance identifier (e.g., 'astropy__astropy-12907')
+        output_dir: Base output directory for saving graphs
+        eval_report_path: Path to evaluation report JSON file
+        template_dir: Optional path to template directory for visualizer
+        metadata_comment: Optional comment about model/plan
+
+    Returns:
+        tuple: (json_path, html_path) paths to the saved graph files
+    """
+    from mapPhase import get_phase
+
+    builder = GraphBuilder()
+    messages = traj_data.get("messages", [])
+    step_idx = 0
+
+    # Process messages in pairs: assistant response (i) + tool result (i+1)
+    i = 2  # Skip system and user messages
+    while i < len(messages):
+        msg = messages[i]
+
+        # Skip if not an assistant response with output
+        if not msg.get("output") or not isinstance(msg.get("output"), list):
+            i += 1
+            continue
+
+        # Extract thought from message content
+        thought = ""
+        for item in msg.get("output", []):
+            if isinstance(item, dict) and item.get("type") == "message":
+                content = item.get("content", [])
+                if content and isinstance(content, list):
+                    thought = content[0].get("text", "")
+                    break
+
+        thought_len_raw = compute_thought_length_raw(thought)
+        thought_len_clean = compute_thought_length_clean(thought)
+
+        # Extract actions from function calls
+        actions = []
+        for item in msg.get("output", []):
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                try:
+                    args_json = json.loads(item.get("arguments", "{}"))
+                    command = args_json.get("command", "")
+                    if command:
+                        actions.append(command)
+                except json.JSONDecodeError:
+                    continue
+
+        # Get observation from next message
+        observation = ""
+        if i + 1 < len(messages):
+            next_msg = messages[i + 1]
+            # observation can be in 'output' (as string) or 'extra.raw_output'
+            if isinstance(next_msg.get("output"), str):
+                observation = next_msg["output"]
+            else:
+                observation = next_msg.get("extra", {}).get("raw_output", "")
+
+        # Process each action
+        if actions:
+            for action_str in actions:
+                if not action_str.strip():
+                    continue
+
+                parsed_commands = parser.parse(action_str)
+                if not parsed_commands:
+                    # Create generic node for unparsed commands
+                    parsed_commands = [{
+                        "tool": None,
+                        "subcommand": None,
+                        "command": action_str.split()[0] if action_str.split() else "bash",
+                        "args": {"_raw": action_str},
+                        "flags": {}
+                    }]
+
+                # Process all commands including cd
+                is_first_in_step = True
+                node_keys_in_step = []
+                saw_cd = False
+
+                for parsed in parsed_commands:
+                    tool = parsed.get("tool", "").strip() if parsed.get("tool") else ""
+                    subcommand = parsed.get("subcommand", "").strip() if parsed.get("subcommand") else ""
+                    command = parsed.get("command", "").strip() if parsed.get("command") else ""
+                    args = parsed.get("args", {})
+                    flags = parsed.get("flags", {})
+
+                    # Check if this is a cd command
+                    is_cd = command.lower() == "cd"
+                    if is_cd:
+                        saw_cd = True
+
+                    if tool:
+                        node_label = f"{tool}: {subcommand}" if subcommand else tool
+                    else:
+                        node_label = command.strip() or action_str.strip()
+
+                    phase = get_phase(tool, subcommand, command, args, builder.prev_phases, flags)
+
+                    edit_status = check_edit_status(tool, subcommand, args, observation)
+                    if edit_status and isinstance(args, dict):
+                        args["edit_status"] = edit_status
+
+                    node_key = builder.add_or_update_node(
+                        node_label=node_label,
+                        args=args,
+                        flags=flags,
+                        phase=phase,
+                        step_idx=step_idx,
+                        tool=tool,
+                        command=command,
+                        subcommand=subcommand,
+                        thought_length=thought_len_raw,
+                        has_cd=(saw_cd and not is_cd)
+                    )
+                    builder.G.nodes[node_key]["thought_len_raw"] = thought_len_raw
+                    builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+                    node_keys_in_step.append(node_key)
+
+                    builder.add_execution_edge(
+                        node_key, step_idx,
+                        is_first_in_step=is_first_in_step,
+                        thought_length_raw=thought_len_raw if is_first_in_step else 0,
+                        thought_length_clean=thought_len_clean if is_first_in_step else 0,
+                    )
+                    builder.update_previous_node(node_key)
+                    builder.add_phase(phase)
+                    is_first_in_step = False
+
+                # Mark last node with observation info
+                if node_keys_in_step:
+                    last_node = node_keys_in_step[-1]
+                    builder.G.nodes[last_node]["observation_length"] = len(observation)
+                    builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(observation)
+
+                step_idx += 1
+
+        # Skip to next assistant response
+        i += 2
 
     return builder.finalize_and_save(output_dir, instance_id, eval_report_path, template_dir, metadata_comment)
 

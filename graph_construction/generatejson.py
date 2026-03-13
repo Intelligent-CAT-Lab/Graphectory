@@ -28,23 +28,25 @@ from networkx.readwrite import json_graph
 
 from commandParser import CommandParser
 # Reuse graph construction logic from buildGraph (returns json_path, html_path)
-from buildGraph import build_graph_from_sa_trajectory, build_graph_from_oh_trajectory
+from buildGraph import build_graph_from_sa_trajectory, build_graph_from_oh_trajectory, build_graph_from_msa_trajectory
 
 
 # ==================== Configuration ====================
-SUPPORTED_AGENTS = {"sa", "oh"}
-SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4"}
+SUPPORTED_AGENTS = {"sa", "oh", "msa"}
+SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "gpt-5-mini"}
 
 MODEL_NAMES = {
     "dsk-v3": "deepseek-v3",
     "dsk-r1": "deepseek-r1-0528",
     "dev": "devstral-small",
     "cld-4": "claude-sonnet-4",
+    "gpt-5-mini": "gpt-5-mini",
 }
 
 AGENT_NAMES = {
     "sa": "SWE-agent",
     "oh": "OpenHands",
+    "msa": "mini-swe-agent",
 }
 
 # -------------------- Data lookups --------------------
@@ -130,6 +132,40 @@ class TrajectoryLoader:
 
         return trajectories
 
+    @staticmethod
+    def load_msa_trajectories(trajs_path: Path) -> List[Dict[str, Any]]:
+        """Load mini-swe-agent trajectories from directory structure.
+
+        Directory structure:
+            trajs_path/
+                ├── instance-1/
+                │   ├── instance-1.traj.json
+                │   └── ...
+                └── ...
+        """
+        trajectories = []
+        if not trajs_path.is_dir():
+            raise ValueError(f"MSA trajectories path must be a directory: {trajs_path}")
+
+        for instance_dir in sorted(trajs_path.iterdir()):
+            if not instance_dir.is_dir():
+                continue
+            instance_id = instance_dir.name
+            traj_file = instance_dir / f"{instance_id}.traj.json"
+
+            if not traj_file.exists():
+                print(f"[WARN] Missing .traj.json file for {instance_id}, skipping")
+                continue
+
+            try:
+                with open(traj_file, "r") as f:
+                    traj_data = json.load(f)
+                trajectories.append({"instance_id": instance_id, "traj_data": traj_data})
+            except json.JSONDecodeError as e:
+                print(f"[ERROR] Failed to parse {traj_file}: {e}")
+
+        return trajectories
+
 
 # ==================== Graph Processor ====================
 class GraphProcessor:
@@ -154,6 +190,14 @@ class GraphProcessor:
                 )
             elif self.agent == "oh":
                 json_path, _ = build_graph_from_oh_trajectory(
+                    traj_data=traj_data,
+                    parser=self.parser,
+                    instance_id=instance_id,
+                    output_dir=str(self.output_dir),
+                    eval_report_path=self.eval_report_path,
+                )
+            elif self.agent == "msa":
+                json_path, _ = build_graph_from_msa_trajectory(
                     traj_data=traj_data,
                     parser=self.parser,
                     instance_id=instance_id,
@@ -306,8 +350,10 @@ Supported models: dsk-v3 (deepseek-v3), dsk-r1 (deepseek-r1-0528), dev (devstral
     try:
         if args.agent == "sa":
             trajectories = TrajectoryLoader.load_sa_trajectories(trajs_path)
-        else:
+        elif args.agent == "oh":
             trajectories = TrajectoryLoader.load_oh_trajectories(trajs_path)
+        else:
+            trajectories = TrajectoryLoader.load_msa_trajectories(trajs_path)
     except Exception as e:
         print(f"[ERROR] Failed to load trajectories: {e}")
         sys.exit(1)
