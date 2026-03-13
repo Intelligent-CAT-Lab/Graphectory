@@ -21,7 +21,7 @@ Other bash commands:
       - if target is **test** → apply key rule (loc before first patch; validation after)
 
 Function:
-  get_phase(tool, subcommand, command, args, prev_phases=None)
+  get_phase(tool, subcommand, command, args, prev_phases=None, flags)
 """
 
 from __future__ import annotations

@@ -4,6 +4,8 @@ Artifact repository for the paper [**Process-centric analysis of agentic softwar
 
 Graphectory transforms agent execution traces into structured graphs that capture the problem-solving patterns of AI software engineering agents. By modeling agent actions as directed graphs with phase classification (localization, patching, validation), this tool enables systematic analysis of how agents approach and solve software engineering tasks.
 
+New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHands), the repository additionally supports **mini-swe-agent** (v2.0.0, `trajectory_format` version `mini-swe-agent-1.1`), a widely used scaffold in agentic research with over 3.3k GitHub stars.
+
 ---
 
 ## Dataset
@@ -68,6 +70,15 @@ python graph_construction/generatejson.py \
   --output_dir data/samples
 ```
 
+**mini-swe-agent with gpt-5-mini:**
+```bash
+python graph_construction/generatejson.py \
+  --agent msa --model gpt-5-mini \
+  --trajs data/samples/mini-swe-agent/trajectories/gpt-5-mini \
+  --eval_report data/samples/mini-swe-agent/reports/gpt-5-mini.json \
+  --output_dir data/samples
+```
+
 **Output**: `{output_dir}/{Agent}/graphs/{model}/{instance_id}/{instance_id}.json`
 
 ### Live Interactive Visualization (live_graph_server.py)
@@ -90,9 +101,9 @@ Then open **http://localhost:8000** to browse and visualize graphs on demand.
 
 | Argument | Description | Format |
 |----------|-------------|--------|
-| `--agent` | Agent type | `sa` (SWE-agent), `oh` (OpenHands) |
+| `--agent` | Agent type | `sa` (SWE-agent), `oh` (OpenHands), `msa` (mini-swe-agent) |
 | `--model` | Model identifier | `dsk-v3`, `dsk-r1`, `dev`, `cld-4` (extensible) |
-| `--trajs` | Trajectory path | **SWE-agent**: directory with `.traj` files<br>**OpenHands**: `output.jsonl` file |
+| `--trajs` | Trajectory path | **SWE-agent**: directory with `.traj` files<br>**OpenHands**: `output.jsonl` file<br>**mini-swe-agent**: directory with `.traj.json` files|
 | `--eval_report` | Evaluation report | JSON with `resolved_ids`/`unresolved_ids` keys |
 | `--output_dir` | Base output directory | Organized as `{agent}/graphs/{model}/{instance_id}/` |
 | `--workers` | Parallel workers (optional) | Default: 8 |
