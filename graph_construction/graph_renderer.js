@@ -571,6 +571,7 @@ function setupTooltips() {
 // ==================== Detail Sidebar ====================
 let sidebarNodeId = null;
 let sidebarStepIdx = 0;        // which step visit is being shown (0-based within step_data)
+let sidebarCustomWidth = null;  // remembers user-dragged width across open/close cycles
 
 /**
  * Open (or refresh) the sidebar for the given node data object.
@@ -581,6 +582,8 @@ function openSidebar(node) {
     sidebarStepIdx = 0;         // reset to first visit on each new node
 
     const sidebar  = document.getElementById('detailSidebar');
+    // Restore custom width if the user previously dragged the resizer
+    sidebar.style.width = sidebarCustomWidth ? sidebarCustomWidth + 'px' : '';
     const title    = document.getElementById('sidebarTitle');
     const stepTabs = document.getElementById('stepTabs');
 
@@ -619,6 +622,7 @@ function openSidebar(node) {
 
 function closeSidebar() {
     const sidebar = document.getElementById('detailSidebar');
+    sidebar.style.width = '';   // clear inline width so CSS transition to 0 takes effect
     sidebar.classList.remove('open');
     sidebarNodeId = null;
     // Clear content after the CSS transition so the DOM collapse never races
@@ -888,6 +892,8 @@ function setupSidebarResize() {
         isResizing = false;
         document.body.style.cursor    = '';
         document.body.style.userSelect = '';
+        // Persist the dragged width so it survives close/reopen
+        sidebarCustomWidth = sidebar.offsetWidth;
     });
 }
 

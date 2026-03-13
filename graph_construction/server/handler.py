@@ -155,18 +155,18 @@ class GraphHandler(BaseHTTPRequestHandler):
         raw_trajs  = (data.get("trajs")       or "").strip()
         raw_report = (data.get("eval_report") or "").strip()
 
-        if not raw_trajs or not raw_report:
-            self._error(400, "Both 'trajs' and 'eval_report' are required.")
+        if not raw_trajs:
+            self._error(400, "'trajs' is required.")
             return
 
         trajs  = Path(raw_trajs)
-        report = Path(raw_report)
+        report = Path(raw_report) if raw_report else None
 
         # ── Path existence ────────────────────────────────────────────────────
         if not trajs.exists():
             self._error(400, f"Trajectories path not found: {trajs}")
             return
-        if not report.exists():
+        if report is not None and not report.exists():
             self._error(400, f"Eval report not found: {report}")
             return
 
@@ -184,22 +184,24 @@ class GraphHandler(BaseHTTPRequestHandler):
             return
 
         # ── Report validity ───────────────────────────────────────────────────
-        try:
-            with open(report) as fh:
-                report_data = json.load(fh)
-        except (json.JSONDecodeError, OSError) as exc:
-            self._error(400, f"Could not read eval report as JSON: {exc}")
-            return
+        report_ids: set[str] = set()
+        if report is not None:
+            try:
+                with open(report) as fh:
+                    report_data = json.load(fh)
+            except (json.JSONDecodeError, OSError) as exc:
+                self._error(400, f"Could not read eval report as JSON: {exc}")
+                return
 
-        report_ids: set[str] = set(
-            report_data.get("resolved_ids", []) + report_data.get("unresolved_ids", [])
-        )
+            report_ids = set(
+                report_data.get("resolved_ids", []) + report_data.get("unresolved_ids", [])
+            )
 
-        # ── Overlap check ─────────────────────────────────────────────────────
-        error = _check_overlap(trajs, agent_type, report_ids)
-        if error:
-            self._error(400, error)
-            return
+            # ── Overlap check ─────────────────────────────────────────────────
+            error = _check_overlap(trajs, agent_type, report_ids)
+            if error:
+                self._error(400, error)
+                return
 
         # ── Apply ─────────────────────────────────────────────────────────────
         logger.info(
@@ -208,14 +210,14 @@ class GraphHandler(BaseHTTPRequestHandler):
         with self._cache_lock:
             GraphHandler.graphs_dir       = trajs
             GraphHandler.agent_type       = agent_type
-            GraphHandler.eval_report_path = str(report)
+            GraphHandler.eval_report_path = str(report) if report else None
             GraphHandler._graphs_cache    = None
             GraphHandler._render_cache    = {}
 
         self._respond_json({
             "ok":          True,
             "trajs":       str(trajs),
-            "eval_report": str(report),
+            "eval_report": str(report) if report else "",
             "agent_type":  agent_type,
         })
 

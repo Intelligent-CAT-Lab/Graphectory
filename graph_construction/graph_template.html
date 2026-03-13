@@ -12,10 +12,7 @@
         <div class="header">
             <h1>📊 Trajectory Graph: {{INSTANCE_NAME}}</h1>
             <div class="metadata">
-                <div class="metadata-item">
-                    <strong>Status:</strong>
-                    <span class="status-badge status-{{RESOLUTION_STATUS}}">{{RESOLUTION_STATUS}}</span>
-                </div>
+                {{STATUS_ITEM}}
                 <div class="metadata-item">
                     <strong>Difficulty:</strong> {{DIFFICULTY}}
                 </div>
@@ -26,9 +23,7 @@
                     <strong>Edges:</strong> {{EDGE_COUNT}}
                 </div>
             </div>
-            <div class="metadata-comment" id="metadataComment" style="display: none;">
-                <strong>Info:</strong> <span id="metadataCommentText">{{METADATA_COMMENT}}</span>
-            </div>
+
         </div>
         
         <div class="controls">
@@ -120,12 +115,6 @@
         const edgesData  = {{EDGES_DATA}};
         const phaseColors = {{PHASE_COLORS}};
         const settings   = {{SETTINGS}};
-
-        // Show the metadata comment banner when content is present.
-        const _commentText = document.getElementById('metadataCommentText').textContent;
-        if (_commentText && _commentText.trim()) {
-            document.getElementById('metadataComment').style.display = 'block';
-        }
 
         // Surface rendering errors visibly rather than leaving a blank canvas.
         window.addEventListener('error', (e) => {

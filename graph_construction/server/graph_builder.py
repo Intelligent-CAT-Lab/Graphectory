@@ -88,7 +88,7 @@ def scan_trajectories(graphs_dir: Path,
     unresolved_set: set[str] = set()
     if eval_report_path:
         try:
-            with open(eval_report_path) as f:
+            with open(eval_report_path, encoding="utf-8", errors="replace") as f:
                 report = json.load(f)
             resolved_set   = set(report.get("resolved_ids",   []))
             unresolved_set = set(report.get("unresolved_ids", []))
@@ -102,7 +102,7 @@ def scan_trajectories(graphs_dir: Path,
         jsonl_path = graphs_dir
         if not jsonl_path.is_file():
             return results
-        with open(jsonl_path) as f:
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -119,8 +119,10 @@ def scan_trajectories(graphs_dir: Path,
                     status = "resolved"
                 elif instance_id in unresolved_set:
                     status = "unresolved"
-                else:
+                elif eval_report_path:
                     status = "unsubmitted"
+                else:
+                    status = "none"
 
                 # Count action steps (non-system, non-message observations)
                 step_count = sum(
@@ -146,12 +148,14 @@ def scan_trajectories(graphs_dir: Path,
             status = "resolved"
         elif instance_id in unresolved_set:
             status = "unresolved"
+        elif not eval_report_path:
+            status = "none"
         else:
             status = "unsubmitted"
             json_file = traj_file.with_suffix(".json")
             if json_file.exists():
                 try:
-                    with open(json_file) as f:
+                    with open(json_file, encoding="utf-8", errors="replace") as f:
                         meta = json.load(f)
                     s = meta.get("graph", {}).get("resolution_status", "")
                     if s in ("resolved", "unresolved", "unsubmitted"):
@@ -163,7 +167,7 @@ def scan_trajectories(graphs_dir: Path,
         json_file = traj_file.with_suffix(".json")
         if json_file.exists():
             try:
-                with open(json_file) as f:
+                with open(json_file, encoding="utf-8", errors="replace") as f:
                     meta = json.load(f)
                 difficulty = meta.get("graph", {}).get("debug_difficulty", "unknown")
             except Exception:
@@ -171,7 +175,7 @@ def scan_trajectories(graphs_dir: Path,
 
         step_count = 0
         try:
-            with open(traj_file) as f:
+            with open(traj_file, encoding="utf-8", errors="replace") as f:
                 traj = json.load(f)
             step_count = len(traj.get("trajectory", []))
         except Exception:
@@ -204,7 +208,7 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
             raise FileNotFoundError(
                 f"OpenHands output.jsonl not found: {jsonl_path}"
             )
-        with open(jsonl_path) as f:
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -221,7 +225,7 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
 
     # SWE-agent: search for .traj file
     for traj_file in graphs_dir.rglob(f"{instance_id}.traj"):
-        with open(traj_file) as f:
+        with open(traj_file, encoding="utf-8", errors="replace") as f:
             return json.load(f)
 
     raise FileNotFoundError(
@@ -399,6 +403,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
             tool_calls = [tool_call_meta]
 
         parsed_commands = []
+        action_str_parts = []   # collect per-call action text for the sidebar
         for call in tool_calls:
             function_call = None
             if isinstance(call, dict):
@@ -423,11 +428,27 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
 
             if tool_name == "execute_bash":
                 cmd_str = args_loaded.get("command", "").strip()
+                # Action shown in sidebar is the raw bash command
+                action_str_parts.append(cmd_str if cmd_str else tool_name)
                 cmds = cmd_parser.parse(cmd_str) if cmd_str else []
                 if cmds:
                     parsed_commands.extend(cmds)
+                else:
+                    parsed_commands.append({
+                        "tool":       "",
+                        "subcommand": "",
+                        "args":       {"_raw": cmd_str} if cmd_str else {},
+                        "flags":      {},
+                        "command":    cmd_str or tool_name,
+                    })
             else:
+                # Capture the raw args string before any mutation for faithful sidebar display
+                raw_for_display = args_raw if isinstance(args_raw, str) else json.dumps(args_raw)
                 subcommand = args_loaded.pop("command", None)
+                # Action shown in sidebar: tool [subcommand] then the verbatim args JSON,
+                # so the user sees exactly what the model called (path, file_text, old_str, etc.)
+                header = tool_name + (" " + subcommand if subcommand else "")
+                action_str_parts.append(f"{header}\n{raw_for_display}")
                 parsed_commands.append({
                     "tool":       tool_name,
                     "subcommand": subcommand,
@@ -436,9 +457,19 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
                     "command":    "",
                 })
 
+        # Full action text shown verbatim in the sidebar
+        action_str = "\n".join(action_str_parts)
+
         if not parsed_commands:
-            step_idx += 1
-            continue
+            # No tool calls found — still create a node so thought/observation
+            # are visible in the sidebar rather than being silently dropped.
+            parsed_commands = [{
+                "tool":       "",
+                "subcommand": "",
+                "args":       {},
+                "flags":      {},
+                "command":    "",
+            }]
 
         # Optional cd filtering
         has_cd = False
@@ -463,7 +494,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
                 # When unique_think is on, use the thought text in the node
                 # signature so each distinct thought gets its own node.
                 # When off, all think steps collapse into one node (old behaviour).
-                think_args = {"_thought": thought} if unique_think else {}
+                think_args = {"_thought": thought, "_action": action_str} if unique_think else {}
                 node_key = builder.add_or_update_node(
                     node_label     = "think",
                     args           = think_args,
@@ -480,7 +511,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
                 builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
                 _accumulate_observation(builder.G.nodes[node_key], observation)
                 _accumulate_step_data(builder.G.nodes[node_key], step_idx,
-                                      thought, "", observation)
+                                      thought, action_str, observation)
                 builder.add_execution_edge(
                     node_key, step_idx,
                     is_first_in_step=is_first_in_step,
@@ -535,7 +566,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
             builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
             builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
             _accumulate_step_data(builder.G.nodes[node_key], step_idx,
-                                  thought, f"{tool} {subcommand}".strip(), observation)
+                                  thought, action_str, observation)
 
             node_keys_in_step.append(node_key)
             if step_first_node is None:
@@ -570,7 +601,8 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
     # Post-processing
     build_hierarchical_edges(builder.G, builder.localization_nodes)
 
-    resolution_status = determine_resolution_status(instance_id, eval_report_path)
+    resolution_status = determine_resolution_status(instance_id, eval_report_path) \
+        if eval_report_path else "none"
     builder.G.graph["resolution_status"] = resolution_status
     builder.G.graph["instance_name"]     = instance_id
 
@@ -794,7 +826,8 @@ def build_graph(traj_data: dict, instance_id: str,
     # ── Post-processing ────────────────────────────────────────────────
     build_hierarchical_edges(builder.G, builder.localization_nodes)
 
-    resolution_status = determine_resolution_status(instance_id, eval_report_path)
+    resolution_status = determine_resolution_status(instance_id, eval_report_path) \
+        if eval_report_path else "none"
     builder.G.graph["resolution_status"] = resolution_status
     builder.G.graph["instance_name"]     = instance_id
 
