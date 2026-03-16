@@ -291,15 +291,6 @@ class GraphBuilder:
         with open(json_path, "w") as f:
             json.dump(json_graph.node_link_data(self.G, edges="edges"), f, indent=2)
 
-        # Save HTML using refactored visualizer (skip)
-        # GraphVisualizer.draw_with_timeout(
-        #     self.G, 
-        #     html_path, 
-        #     timeout_sec=60,
-        #     template_dir=template_dir,
-        #     metadata_comment=metadata_comment
-        # )
-
         return json_path, html_path
 
 
