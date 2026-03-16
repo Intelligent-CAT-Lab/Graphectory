@@ -174,11 +174,15 @@ class GraphHandler(BaseHTTPRequestHandler):
         if trajs.is_file() and trajs.suffix == ".jsonl":
             agent_type = "oh"
         elif trajs.is_dir():
-            agent_type = "sa"
+            # Peek inside: .traj.json files indicate mini-swe-agent; otherwise SWE-agent
+            if any(trajs.rglob("*.traj.json")):
+                agent_type = "msa"
+            else:
+                agent_type = "sa"
         else:
             self._error(
                 400,
-                f"Trajectories path must be a directory (SWE-agent) "
+                f"Trajectories path must be a directory (SWE-agent or mini-swe-agent) "
                 f"or an output.jsonl file (OpenHands): {trajs}",
             )
             return
@@ -323,6 +327,9 @@ def _traj_instance_ids(trajs: Path, agent_type: str) -> set[str]:
                         continue
         except OSError:
             pass
+    elif agent_type == "msa":
+        for traj_file in trajs.rglob("*.traj.json"):
+            ids.add(traj_file.name[: -len(".traj.json")])
     else:
         for traj_file in trajs.rglob("*.traj"):
             ids.add(traj_file.stem)

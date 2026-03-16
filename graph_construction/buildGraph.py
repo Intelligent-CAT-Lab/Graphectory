@@ -12,8 +12,6 @@ import networkx as nx
 from pathlib import Path
 from networkx.readwrite import json_graph
 from collections import defaultdict
-# Import the refactored visualizer
-from visualizer import GraphVisualizer
 
 # Optional datasets import for difficulty lookup
 try:

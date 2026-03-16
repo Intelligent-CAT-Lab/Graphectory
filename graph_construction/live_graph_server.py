@@ -152,10 +152,15 @@ def main() -> int:
         if trajs.is_file() and trajs.suffix == ".jsonl":
             agent_type = "oh"
         elif trajs.is_dir():
-            agent_type = "sa"
+            # Peek inside: .traj.json files indicate mini-swe-agent; otherwise SWE-agent
+            if any(trajs.rglob("*.traj.json")):
+                agent_type = "msa"
+            else:
+                agent_type = "sa"
         else:
             logger.error(
-                "--trajs must be a directory (SWE-agent) or a .jsonl file (OpenHands): %s", trajs,
+                "--trajs must be a directory (SWE-agent or mini-swe-agent) "
+                "or a .jsonl file (OpenHands): %s", trajs,
             )
             return 1
 
@@ -176,7 +181,11 @@ def main() -> int:
     # graph builds never block the browser UI or subsequent requests.
     httpd = ThreadingHTTPServer(("", args.port), GraphHandler)
 
-    agent_label = "OpenHands (.jsonl)" if agent_type == "oh" else "SWE-agent (directory)"
+    agent_label = (
+        "OpenHands (.jsonl)"      if agent_type == "oh"  else
+        "mini-swe-agent (directory)" if agent_type == "msa" else
+        "SWE-agent (directory)"
+    )
     print(f"\n{'─' * 60}")
     print( "  Trajectory Graph Server")
     print(f"{'─' * 60}")
