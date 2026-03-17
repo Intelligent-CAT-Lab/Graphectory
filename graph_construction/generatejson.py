@@ -197,12 +197,17 @@ class GraphProcessor:
                     eval_report_path=self.eval_report_path,
                 )
             elif self.agent == "msa":
+                # Detect version from trajectory_format field or default to None
+                version = None
+                if traj_data.get("trajectory_format") == "mini-swe-agent-1":
+                    version = "1.0"
                 json_path, _ = build_graph_from_msa_trajectory(
                     traj_data=traj_data,
                     parser=self.parser,
                     instance_id=instance_id,
                     output_dir=str(self.output_dir),
                     eval_report_path=self.eval_report_path,
+                    version=version,
                 )
             else:
                 raise ValueError(f"Unsupported agent: {self.agent}")

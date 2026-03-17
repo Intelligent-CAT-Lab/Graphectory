@@ -586,12 +586,16 @@ def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, e
     return builder.finalize_and_save(output_dir, instance_id, eval_report_path, template_dir, metadata_comment)
 
 
-def build_graph_from_msa_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path, template_dir=None, metadata_comment=""):
+def build_graph_from_msa_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path, template_dir=None, metadata_comment="", version=None):
     """Build graph from mini-swe-agent trajectory data.
 
-    Mini-swe-agent format: messages = [system, user, assistant_resp, tool_result, ...]
+    Mini-swe-agent format (default): messages = [system, user, assistant_resp, tool_result, ...]
     - Assistant response contains: thought (message) + actions (function_calls)
     - Tool result contains: observation (extra.raw_output or output string)
+
+    Mini-swe-agent v1.0 format: messages = [system, user, assistant, user, ...]
+    - Assistant response contains: THOUGHT: ... \n\n```bash\ncommand\n```
+    - User response contains: <returncode>...</returncode>\n<output>...</output>
 
     Args:
         traj_data: Mini-swe-agent trajectory dictionary containing 'messages' key
@@ -601,6 +605,7 @@ def build_graph_from_msa_trajectory(traj_data, parser, instance_id, output_dir, 
         eval_report_path: Path to evaluation report JSON file
         template_dir: Optional path to template directory for visualizer
         metadata_comment: Optional comment about model/plan
+        version: Optional version string ("1.0" for v1.0 format, None for default)
 
     Returns:
         tuple: (json_path, html_path) paths to the saved graph files
@@ -611,6 +616,123 @@ def build_graph_from_msa_trajectory(traj_data, parser, instance_id, output_dir, 
     messages = traj_data.get("messages", [])
     step_idx = 0
 
+    # Version 1.0: text-based format with THOUGHT and bash blocks
+    if version == "1.0":
+        i = 2  # Skip system and user messages
+        while i < len(messages):
+            msg = messages[i]
+
+            # Skip if not assistant role
+            if msg.get("role") != "assistant":
+                i += 1
+                continue
+
+            content = msg.get("content", "")
+            if not content or not isinstance(content, str):
+                i += 1
+                continue
+
+            # Extract thought from THOUGHT: ... section
+            thought = ""
+            thought_match = re.search(r'THOUGHT:\s*(.*?)(?=\n\n```|\n```|$)', content, re.DOTALL)
+            if thought_match:
+                thought = thought_match.group(1).strip()
+
+            thought_len_raw = compute_thought_length_raw(thought)
+            thought_len_clean = compute_thought_length_clean(thought)
+
+            # Extract command from bash code block
+            action_str = ""
+            bash_match = re.search(r'```bash\s*(.*?)```', content, re.DOTALL)
+            if bash_match:
+                action_str = bash_match.group(1).strip()
+
+            # Get observation from next user message
+            observation = ""
+            if i + 1 < len(messages):
+                next_msg = messages[i + 1]
+                if next_msg.get("role") == "user":
+                    next_content = next_msg.get("content", "")
+                    output_match = re.search(r'<output>(.*?)</output>', next_content, re.DOTALL)
+                    if output_match:
+                        observation = output_match.group(1).strip()
+
+            # Process action
+            if action_str:
+                parsed_commands = parser.parse(action_str)
+                if not parsed_commands:
+                    parsed_commands = [{
+                        "tool": None,
+                        "subcommand": None,
+                        "command": action_str.split()[0] if action_str.split() else "bash",
+                        "args": {"_raw": action_str},
+                        "flags": {}
+                    }]
+
+                is_first_in_step = True
+                node_keys_in_step = []
+                saw_cd = False
+
+                for parsed in parsed_commands:
+                    tool = parsed.get("tool", "").strip() if parsed.get("tool") else ""
+                    subcommand = parsed.get("subcommand", "").strip() if parsed.get("subcommand") else ""
+                    command = parsed.get("command", "").strip() if parsed.get("command") else ""
+                    args = parsed.get("args", {})
+                    flags = parsed.get("flags", {})
+
+                    is_cd = command.lower() == "cd"
+                    if is_cd:
+                        saw_cd = True
+
+                    if tool:
+                        node_label = f"{tool}: {subcommand}" if subcommand else tool
+                    else:
+                        node_label = command.strip() or action_str.strip()
+
+                    phase = get_phase(tool, subcommand, command, args, builder.prev_phases, flags)
+
+                    edit_status = check_edit_status(tool, subcommand, args, observation)
+                    if edit_status and isinstance(args, dict):
+                        args["edit_status"] = edit_status
+
+                    node_key = builder.add_or_update_node(
+                        node_label=node_label,
+                        args=args,
+                        flags=flags,
+                        phase=phase,
+                        step_idx=step_idx,
+                        tool=tool,
+                        command=command,
+                        subcommand=subcommand,
+                        thought_length=thought_len_raw,
+                        has_cd=(saw_cd and not is_cd)
+                    )
+                    builder.G.nodes[node_key]["thought_len_raw"] = thought_len_raw
+                    builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+                    node_keys_in_step.append(node_key)
+
+                    builder.add_execution_edge(
+                        node_key, step_idx,
+                        is_first_in_step=is_first_in_step,
+                        thought_length_raw=thought_len_raw if is_first_in_step else 0,
+                        thought_length_clean=thought_len_clean if is_first_in_step else 0,
+                    )
+                    builder.update_previous_node(node_key)
+                    builder.add_phase(phase)
+                    is_first_in_step = False
+
+                if node_keys_in_step:
+                    last_node = node_keys_in_step[-1]
+                    builder.G.nodes[last_node]["observation_length"] = len(observation)
+                    builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(observation)
+
+                step_idx += 1
+
+            i += 2  # Skip to next assistant message (skip user response)
+
+        return builder.finalize_and_save(output_dir, instance_id, eval_report_path, template_dir, metadata_comment)
+
+    # Default format: original mini-swe-agent format
     # Process messages in pairs: assistant response (i) + tool result (i+1)
     i = 2  # Skip system and user messages
     while i < len(messages):
