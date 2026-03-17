@@ -397,6 +397,36 @@ def _mark_thought_continuation(
         edges[last_key]["is_thought_continuation"] = True
 
 
+# ── Shell no-op filter ───────────────────────────────────────────────────────
+
+def _is_shell_noop(parsed: dict) -> bool:
+    """Return True when *parsed* represents a bare shell boolean constant.
+
+    The bash commands ``true`` and ``false`` are used purely for short-circuit
+    evaluation (e.g. ``|| true`` to suppress a non-zero exit code).  They carry
+    no semantic meaning as agent actions and must NOT become graph nodes.
+
+    The check is intentionally narrow: we only suppress the command when
+      • there is no tool name  (it's a raw shell command, not a known tool)
+      • the command token is exactly "true" or "false"
+      • there are no positional args and no flags
+    If the agent ever uses ``true`` as a genuine argument to another command it
+    will appear as part of that command's args dict, not as a standalone parsed
+    entry, so this guard will not fire.
+    """
+    if parsed.get("tool"):
+        return False  # has a tool name → never a bare shell no-op
+    command = (parsed.get("command") or "").strip().lower()
+    if command not in ("true", "false"):
+        return False
+    # Only suppress when there are genuinely no args and no flags
+    args  = parsed.get("args",  [])
+    flags = parsed.get("flags", {})
+    args_empty  = (not args)  or (isinstance(args,  (list, dict)) and len(args)  == 0)
+    flags_empty = (not flags) or (isinstance(flags, dict)         and len(flags) == 0)
+    return args_empty and flags_empty
+
+
 # ── OpenHands graph construction ────────────────────────────────────────────
 
 def _build_graph_oh(traj_data: dict, instance_id: str,
@@ -531,6 +561,15 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
             if (first.get("command") or "").strip().lower() == "cd":
                 has_cd          = True
                 parsed_commands = parsed_commands[1:]
+
+       
+        parsed_commands = [p for p in parsed_commands if not _is_shell_noop(p)]
+
+        if not parsed_commands:
+            # Every command in this step was a noop — skip the step entirely
+            # so no orphaned state is left behind.
+            step_idx += 1
+            continue
 
         is_first_in_step  = True
         node_keys_in_step = []
@@ -809,6 +848,11 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
                     has_cd          = True
                     parsed_commands = parsed_commands[1:]
 
+            parsed_commands = [p for p in parsed_commands if not _is_shell_noop(p)]
+            # If every command in this action was a noop, skip it entirely.
+            if not parsed_commands:
+                continue
+
             for parsed in parsed_commands:
                 tool       = (parsed.get("tool")       or "").strip()
                 subcommand = (parsed.get("subcommand") or "").strip()
@@ -1026,6 +1070,11 @@ def build_graph(traj_data: dict, instance_id: str,
             if (first.get("command") or "").strip().lower() == "cd":
                 has_cd          = True
                 parsed_commands = parsed_commands[1:]
+
+       
+        parsed_commands = [p for p in parsed_commands if not _is_shell_noop(p)]
+        if not parsed_commands:
+            continue
 
         # ── Create nodes / edges ───────────────────────────────────────
         is_first_in_step  = True
