@@ -160,11 +160,20 @@ def scan_trajectories(graphs_dir: Path,
             try:
                 with open(traj_file, encoding="utf-8", errors="replace") as f:
                     traj = json.load(f)
-                # Count assistant-response messages (those with an 'output' list)
-                step_count = sum(
-                    1 for m in traj.get("messages", [])
-                    if isinstance(m.get("output"), list)
-                )
+                if traj.get("trajectory_format") == "mini-swe-agent-1":
+                    # v1.0: plain text messages — count assistant turns with content
+                    step_count = sum(
+                        1 for m in traj.get("messages", [])
+                        if m.get("role") == "assistant"
+                        and isinstance(m.get("content"), str)
+                        and m["content"].strip()
+                    )
+                else:
+                    # Default: count assistant-response messages (those with an 'output' list)
+                    step_count = sum(
+                        1 for m in traj.get("messages", [])
+                        if isinstance(m.get("output"), list)
+                    )
             except Exception:
                 pass
 
@@ -707,6 +716,235 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
     return builder.G
 
 
+# ── mini-swe-agent v1.0 graph construction ──────────────────────────────────
+
+def _build_graph_msa_v1(traj_data: dict, instance_id: str,
+                        eval_report_path: str, cmd_parser,
+                        filter_cd: bool = True,
+                        unique_think: bool = True):
+    """Build a NetworkX MultiDiGraph from a mini-swe-agent v1.0 trajectory.
+
+    v1.0 format: ``messages`` list of plain role/content pairs:
+      - messages[0]  : system prompt (skipped)
+      - messages[1]  : initial user problem (skipped)
+      - messages[2i] : assistant — content is a plain string:
+                         "THOUGHT: <reasoning>\\n\\n```bash\\n<command>\\n```"
+      - messages[2i+1]: user — content is:
+                         "<returncode>N</returncode>\\n<o>\\n<output>\\n</o>"
+
+    This differs from the default MSA format which uses structured ``output``
+    lists with typed blocks (message / function_call).
+    """
+    try:
+        from mapPhase import get_phase
+    except ImportError:
+        def get_phase(*_args, **_kwargs):
+            return "general"
+
+    builder = GraphBuilder()
+    prev_phases_list: list[str] = []
+    prev_thought: str = ""
+    prev_step_first_node: str | None = None
+    step_idx = 0
+
+    messages = traj_data.get("messages", [])
+    i = 2  # skip system (0) and initial user problem (1)
+
+    while i < len(messages):
+        msg = messages[i]
+
+        # Only process assistant turns
+        if msg.get("role") != "assistant":
+            i += 1
+            continue
+
+        content = msg.get("content", "")
+        if not isinstance(content, str) or not content.strip():
+            i += 2
+            continue
+
+        # ── Extract thought from THOUGHT: section ─────────────────────
+        thought = ""
+        thought_match = re.search(
+            r'THOUGHT:\s*(.*?)(?=\n\n```|\n```|$)', content, re.DOTALL
+        )
+        if thought_match:
+            thought = thought_match.group(1).strip()
+
+        thought_len_raw   = compute_thought_length_raw(thought)
+        thought_len_clean = compute_thought_length_clean(thought)
+
+        # ── Extract bash command ───────────────────────────────────────
+        action_str = ""
+        bash_match = re.search(r'```bash\s*(.*?)```', content, re.DOTALL)
+        if bash_match:
+            action_str = bash_match.group(1).strip()
+
+        # ── Extract observation from the following user message ────────
+        observation = ""
+        if i + 1 < len(messages):
+            next_msg = messages[i + 1]
+            if next_msg.get("role") == "user":
+                next_content = next_msg.get("content", "")
+                output_match = re.search(r'<o>(.*?)</o>', next_content, re.DOTALL)
+                if output_match:
+                    observation = output_match.group(1).strip()
+
+        # ── Handle steps with no bash command as pure think ───────────
+        if not action_str:
+            think_args = ({"_thought": thought} if unique_think
+                          else {"thought_len": thought_len_raw})
+            node_key = builder.add_or_update_node(
+                node_label     = "think",
+                args           = think_args,
+                flags          = {},
+                phase          = "general",
+                step_idx       = step_idx,
+                tool           = None,
+                command        = None,
+                subcommand     = None,
+                thought_length = thought_len_raw,
+                has_cd         = False,
+            )
+            builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
+            builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+            _accumulate_observation(builder.G.nodes[node_key], observation)
+            _accumulate_step_data(builder.G.nodes[node_key], step_idx,
+                                  thought, "", observation)
+            builder.add_execution_edge(
+                node_key, step_idx,
+                is_first_in_step=True,
+                thought_length_raw=thought_len_raw,
+                thought_length_clean=thought_len_clean,
+            )
+            _mark_thought_continuation(
+                builder.G, prev_step_first_node, node_key, prev_thought, thought,
+            )
+            builder.update_previous_node(node_key)
+            prev_phases_list.append("general")
+            builder.prev_phases.add("general")
+            prev_thought = thought
+            prev_step_first_node = node_key
+            step_idx += 1
+            i += 2
+            continue
+
+        # ── Parse action string ────────────────────────────────────────
+        parsed_commands = cmd_parser.parse(action_str)
+        if not parsed_commands:
+            parsed_commands = [{
+                "tool":       "",
+                "subcommand": "",
+                "command":    action_str.split()[0] if action_str.split() else "bash",
+                "args":       {"_raw": action_str},
+                "flags":      {},
+            }]
+
+        # Optional cd filtering
+        has_cd = False
+        if filter_cd and len(parsed_commands) > 1:
+            first = parsed_commands[0]
+            if (first.get("command") or "").strip().lower() == "cd":
+                has_cd          = True
+                parsed_commands = parsed_commands[1:]
+
+        parsed_commands = [p for p in parsed_commands if not _is_shell_noop(p)]
+        if not parsed_commands:
+            step_idx += 1
+            i += 2
+            continue
+
+        is_first_in_step  = True
+        node_keys_in_step: list[str] = []
+        step_first_node: str | None = None
+
+        for parsed in parsed_commands:
+            tool       = (parsed.get("tool")       or "").strip()
+            subcommand = (parsed.get("subcommand") or "").strip()
+            command    = (parsed.get("command")    or "").strip()
+            args       = parsed.get("args",  {})
+            flags      = parsed.get("flags", {})
+
+            if tool:
+                node_label = f"{tool}: {subcommand}" if subcommand else tool
+            else:
+                node_label = command or action_str.strip()
+
+            phase = get_phase(tool, subcommand, command, args, prev_phases_list, flags)
+
+            outcome = check_command_outcome(
+                command=command, observation=observation,
+                tool=tool, subcommand=subcommand,
+                args=args if isinstance(args, dict) else {},
+            )
+            edit_status = check_edit_status(tool, subcommand, args, observation)
+            if edit_status and isinstance(args, dict):
+                args["edit_status"] = edit_status
+            if outcome and isinstance(args, dict):
+                args.setdefault("command_outcome", outcome)
+
+            node_key = builder.add_or_update_node(
+                node_label     = node_label,
+                args           = args,
+                flags          = flags,
+                phase          = phase,
+                step_idx       = step_idx,
+                tool           = tool,
+                command        = command,
+                subcommand     = subcommand,
+                thought_length = thought_len_raw,
+                has_cd         = has_cd,
+            )
+            builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
+            builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+            _accumulate_step_data(builder.G.nodes[node_key], step_idx,
+                                  thought, action_str, observation)
+
+            node_keys_in_step.append(node_key)
+            if step_first_node is None:
+                step_first_node = node_key
+
+            builder.add_execution_edge(
+                node_key, step_idx,
+                is_first_in_step=is_first_in_step,
+                thought_length_raw=thought_len_raw if is_first_in_step else 0,
+                thought_length_clean=thought_len_clean if is_first_in_step else 0,
+            )
+            if is_first_in_step:
+                _mark_thought_continuation(
+                    builder.G, prev_step_first_node, node_key, prev_thought, thought,
+                )
+
+            builder.update_previous_node(node_key)
+            prev_phases_list.append(phase)
+            builder.prev_phases.add(phase)
+            is_first_in_step = False
+
+        if node_keys_in_step:
+            _accumulate_observation(builder.G.nodes[node_keys_in_step[-1]], observation)
+
+        prev_thought = thought
+        prev_step_first_node = step_first_node
+        step_idx += 1
+        i += 2  # advance past this assistant message and the following user response
+
+    # ── Post-processing ────────────────────────────────────────────────
+    build_hierarchical_edges(builder.G, builder.localization_nodes)
+
+    resolution_status = determine_resolution_status(instance_id, eval_report_path) \
+        if eval_report_path else "none"
+    builder.G.graph["resolution_status"] = resolution_status
+    builder.G.graph["instance_name"]     = instance_id
+
+    try:
+        from buildGraph import difficulty_lookup
+        builder.G.graph["debug_difficulty"] = difficulty_lookup.get(instance_id, "unknown")
+    except Exception:
+        builder.G.graph["debug_difficulty"] = "unknown"
+
+    return builder.G
+
+
 # ── mini-swe-agent graph construction ───────────────────────────────────────
 
 def _build_graph_msa(traj_data: dict, instance_id: str,
@@ -731,6 +969,15 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
     except ImportError:
         def get_phase(*_args, **_kwargs):
             return "general"
+
+    # Detect mini-swe-agent v1.0 text-based format and dispatch immediately.
+    # v1.0 uses plain role/content string messages instead of structured output
+    # blocks, identified by the top-level "trajectory_format" field.
+    if traj_data.get("trajectory_format") == "mini-swe-agent-1":
+        return _build_graph_msa_v1(
+            traj_data, instance_id, eval_report_path, cmd_parser,
+            filter_cd=filter_cd, unique_think=unique_think,
+        )
 
     builder = GraphBuilder()
     prev_phases_list: list[str] = []
