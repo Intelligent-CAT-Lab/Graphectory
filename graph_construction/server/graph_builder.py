@@ -786,7 +786,7 @@ def _build_graph_msa_v1(traj_data: dict, instance_id: str,
             next_msg = messages[i + 1]
             if next_msg.get("role") == "user":
                 next_content = next_msg.get("content", "")
-                output_match = re.search(r'<o>(.*?)</o>', next_content, re.DOTALL)
+                output_match = re.search(r'<output>(.*?)</output>', next_content, re.DOTALL)
                 if output_match:
                     observation = output_match.group(1).strip()
 
