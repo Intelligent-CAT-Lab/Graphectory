@@ -16,6 +16,12 @@ New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHan
 
 ---
 
+## Demo Video
+
+[![Graphectory Walkthrough](https://img.shields.io/badge/▶_Watch_Demo-Video-blue?style=for-the-badge&logo=github)](https://github.com/Intelligent-CAT-Lab/Graphectory/blob/main/demo/video1050646930.mp4)
+
+---
+
 ## Installation
 
 ```bash
