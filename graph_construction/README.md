@@ -28,7 +28,7 @@ python live_graph_server.py \
 
 Then open **http://localhost:8000** in your browser.
 
-![Interactive trajectory graph visualization in the browser](../figures/html_demo.png)
+![Interactive trajectory graph visualization in the browser](../demo/html_demo.png)
 *Live server interface showing instance list (left) and interactive graph visualization (right) with phase-colored nodes.*
 
 ### Arguments
