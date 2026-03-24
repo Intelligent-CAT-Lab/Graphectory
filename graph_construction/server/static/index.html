@@ -5,12 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trajectory Graph Browser</title>
     <link rel="stylesheet" href="/static/browser.css">
+    <style>
+        /* Sankey entry — styled exactly like a graph-item but always pinned above the list */
+        .sankey-item {
+            padding: 10px 14px;
+            border-bottom: 2px solid #e0e4ff;
+            cursor: pointer;
+            transition: background .15s;
+            background: #f5f7ff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .sankey-item:hover { background: #eef0ff; }
+        .sankey-item-icon { font-size: 20px; flex-shrink: 0; line-height: 1; }
+        .sankey-item-body { min-width: 0; }
+        .sankey-item-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #3b4ecc;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sankey-item-sub {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+    </style>
 </head>
 <body>
     <div class="sidebar">
         <div class="sidebar-header">
             <h1>📊 Trajectory Viewer</h1>
             <p class="subtitle">Graph representations of agent trajectories</p>
+        </div>
+
+        <!-- ── Sankey shortcut (styled like a list item) ────────────── -->
+        <div class="sankey-item" onclick="openSankey()" title="Open phase Sankey diagram in new tab">
+            <span class="sankey-item-icon">🌊</span>
+            <div class="sankey-item-body">
+                <div class="sankey-item-title">Phase Sankey Diagram</div>
+                <div class="sankey-item-sub">Aggregate phase flows across all trajectories</div>
+            </div>
         </div>
 
         <!-- ── Data source configurator ────────────────────────────── -->
@@ -114,5 +152,10 @@
     </div>
 
     <script src="/static/browser.js"></script>
+    <script>
+        function openSankey() {
+            window.open('/sankey', '_blank');
+        }
+    </script>
 </body>
 </html>
