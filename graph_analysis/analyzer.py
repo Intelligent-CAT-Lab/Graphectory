@@ -510,6 +510,7 @@ class TrajectoryGraphAnalyzer:
                 - fail_types: breakdown of all failure types encountered.
                 - fail_streaks: dict with max, average, and count of consecutive failed patch attempts.
                 - flip_flop: True if an edit is undone by a reverse change.
+                - same_patch_different_tool: Ocurrence of the same edit being attempted with different tools (e.g. str_replace → manual patch).
                 - repeat_failed_edit: True if a previously failed patch is attempted and failed again.
                 - abandonment: True if there exists a file with ≥1 attempts and no success on that file).
                 - fail_to_success_patterns: common reasoning phase transitions from a failed to successful patch.
@@ -540,6 +541,7 @@ class TrajectoryGraphAnalyzer:
         seen_edits = set()
         flip_flop = False
         repeat_failed_edit = False
+        same_patch_different_tool = False
         abandonment = False
         edit_history = []
         current_streak = 0
@@ -551,6 +553,7 @@ class TrajectoryGraphAnalyzer:
         previous_status = None
         previous_edit = None
         previous_step = None
+        prev_label = None
 
         # --- track success/failure per file path to detect "abandonment on some path" ---
         file_attempts = Counter()     # path -> #attempts
@@ -576,6 +579,7 @@ class TrajectoryGraphAnalyzer:
             new_str = args.get("new_str", "")  if isinstance(args, dict) else ""
             status_raw = args.get("edit_status", "") if isinstance(args, dict) else ""
             edit_key = (path, old_str, new_str)
+            label = data.get("label", "")
 
             # Count per-file attempts
             if path:
@@ -603,6 +607,10 @@ class TrajectoryGraphAnalyzer:
             # undo_edit
             if data.get("label", "") == "str_replace_editor: undo_edit":
                 flip_flop = True
+            # same edit different tool check
+            if edit_history and old_str == edit_history[-1][1] and new_str == edit_history[-1][2] and path == edit_history[-1][0] and label != prev_label:
+                same_patch_different_tool = True
+
 
             # Reasoning transitions from fail -> success
             if previous_status != "success" and status == "success":
@@ -623,6 +631,7 @@ class TrajectoryGraphAnalyzer:
             previous_edit = edit_key
             previous_status = status
             previous_step = step
+            prev_label = label
 
         if current_streak > 0:
             fail_streaks.append(current_streak)
