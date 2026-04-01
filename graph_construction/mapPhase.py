@@ -359,8 +359,9 @@ def get_phase(
         # Default: test/code execution → key rule
         return "validation" if has_patch else "localization"
 
-    # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl)
-    if cmd in READONLY_CMDS:
+    # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl/sed -n)
+    is_sed_readonly = (cmd == "sed" and "n" in flags)
+    if cmd in READONLY_CMDS or is_sed_readonly:
         # Piped operations without output redirection (e.g., nl file.py | sed -n '10,20p') are read-only
         if _is_piped_readonly_operation(cmd, tokens):
             # Viewing content: test-related AFTER patch → validation; otherwise → localization
@@ -378,7 +379,7 @@ def get_phase(
         return "localization"
 
     # 4) Edit/creation commands (sed/touch)
-    if cmd in EDIT_CMDS or (cmd == "sed"):
+    if cmd in EDIT_CMDS or (cmd == "sed" and "n" not in flags):
         # sed with/without -i still considered edit by config; treat targets accordingly
         return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
 
