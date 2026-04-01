@@ -5,6 +5,122 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trajectory Graph Browser</title>
     <link rel="stylesheet" href="/static/browser.css">
+    <style>
+        /* ── Sankey list-item button ─────────────────────────────── */
+        .sankey-item {
+            padding: 10px 14px;
+            border-bottom: 2px solid #dde0f5;
+            cursor: pointer;
+            transition: background .15s;
+            background: #f5f7ff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+        .sankey-item:hover { background: #eaedff; }
+        .sankey-item.active {
+            background: #eef0ff;
+            border-left: 3px solid #667eea;
+            padding-left: 11px;
+        }
+        .sankey-item-icon { font-size: 20px; flex-shrink: 0; line-height: 1; }
+        .sankey-item-title { font-size: 13px; font-weight: 700; color: #3b4ecc; }
+        .sankey-item-sub   { font-size: 11px; color: #888; margin-top: 1px; }
+
+        /* ── Sankey pane (lives alongside graphPane in .main) ─────── */
+        #sankeyPane {
+            display: none;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #f0f2f5;
+        }
+
+        /* Controls bar */
+        .sk-controls {
+            background: #fff;
+            border-bottom: 1px solid #e8eaed;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+        .sk-ctrl { display: flex; align-items: center; gap: 7px; }
+        .sk-ctrl label { font-size: 12px; font-weight: 600; color: #555; white-space: nowrap; }
+        .sk-ctrl select {
+            font-size: 12px; border: 1.5px solid #d1d5db; border-radius: 6px;
+            padding: 4px 7px; outline: none; background: #fff;
+        }
+        .sk-ctrl select:focus { border-color: #667eea; }
+
+        /* Slider + number combo */
+        .sk-combo { display: flex; align-items: center; gap: 5px; }
+        .sk-combo input[type=range] { width: 80px; accent-color: #667eea; }
+        .sk-combo input[type=number] {
+            width: 52px; font-size: 12px; font-weight: 600; color: #667eea;
+            border: 1.5px solid #d1d5db; border-radius: 6px;
+            padding: 3px 5px; outline: none; text-align: center;
+            -moz-appearance: textfield;
+        }
+        .sk-combo input[type=number]:focus { border-color: #667eea; }
+        .sk-combo input[type=number]::-webkit-inner-spin-button,
+        .sk-combo input[type=number]::-webkit-outer-spin-button { opacity: 1; }
+
+        /* Phase chips */
+        .sk-chips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+        .sk-chip {
+            padding: 3px 11px; border-radius: 20px; font-size: 11px; font-weight: 700;
+            cursor: pointer; border: 2px solid transparent;
+            transition: opacity .15s, border-color .15s; user-select: none;
+        }
+        .sk-chip.active   { border-color: #2c3e50; opacity: 1; }
+        .sk-chip.inactive { opacity: .32; }
+        .sk-chip-loc   { background: #C5B3F0; color: #2c3e50; }
+        .sk-chip-patch { background: #FCC9B0; color: #2c3e50; }
+        .sk-chip-val   { background: #A8E6F0; color: #2c3e50; }
+        .sk-chip-gen   { background: #CFE0F6; color: #2c3e50; }
+
+        /* Stats strip */
+        .sk-stats {
+            background: #fff; border-bottom: 1px solid #e8eaed;
+            padding: 6px 20px; display: flex; gap: 20px;
+            font-size: 12px; color: #666; flex-shrink: 0;
+        }
+        .sk-stats b { color: #2c3e50; }
+
+        /* SVG scroll area */
+        .sk-canvas { flex: 1; overflow: auto; padding: 20px; min-height: 0; }
+        #sk-svg {
+            display: block; background: #fff;
+            border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.08);
+        }
+
+        /* Placeholder / spinner inside sankey pane */
+        .sk-placeholder {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 12px; padding: 60px 20px;
+            color: #aaa; font-size: 14px; flex: 1;
+        }
+        .sk-spinner {
+            width: 32px; height: 32px;
+            border: 3px solid #e5e7eb; border-top-color: #667eea;
+            border-radius: 50%; animation: sk-spin .8s linear infinite;
+        }
+        @keyframes sk-spin { to { transform: rotate(360deg); } }
+
+        /* Tooltip */
+        #sk-tooltip {
+            position: fixed; background: rgba(22,28,36,.96); color: #e0e0e0;
+            padding: 10px 14px; border-radius: 8px; font-size: 12px; line-height: 1.6;
+            pointer-events: none; z-index: 9999; max-width: 300px;
+            box-shadow: 0 6px 20px rgba(0,0,0,.4); display: none;
+            border: 1px solid rgba(255,255,255,.1);
+        }
+    </style>
 </head>
 <body>
     <div class="sidebar">
@@ -13,48 +129,38 @@
             <p class="subtitle">Graph representations of agent trajectories</p>
         </div>
 
-        <!-- ── Data source configurator ────────────────────────────── -->
+        <!-- ── Sankey shortcut ──────────────────────────────────── -->
+        <div class="sankey-item" id="sankeyListItem" onclick="selectSankey()">
+            <span class="sankey-item-icon">🌊</span>
+            <div>
+                <div class="sankey-item-title">Phase Sankey Diagram</div>
+                <div class="sankey-item-sub">Aggregate phase flows across all trajectories</div>
+            </div>
+        </div>
+
+        <!-- ── Data source configurator ────────────────────────── -->
         <div class="data-source" id="dataSource">
             <button class="data-source-toggle" id="dataSourceToggle" onclick="toggleDataSource()">
                 <span id="dataSourceLabel">Data source</span>
                 <span class="ds-chevron" id="dsChevron">▾</span>
             </button>
-
             <div class="data-source-body" id="dataSourceBody">
                 <label class="ds-label" for="trajsInput">Trajectories path</label>
-                <input
-                    type="text"
-                    id="trajsInput"
-                    class="ds-input"
+                <input type="text" id="trajsInput" class="ds-input"
                     placeholder="/path/to/trajectories  or  output.jsonl"
-                    spellcheck="false"
-                    autocomplete="off"
-                >
+                    spellcheck="false" autocomplete="off">
                 <label class="ds-label" for="reportInput">Eval report path (optional)</label>
-                <input
-                    type="text"
-                    id="reportInput"
-                    class="ds-input"
-                    placeholder="/path/to/report.json"
-                    spellcheck="false"
-                    autocomplete="off"
-                >
+                <input type="text" id="reportInput" class="ds-input"
+                    placeholder="/path/to/report.json" spellcheck="false" autocomplete="off">
                 <div id="dsError" class="ds-error" style="display:none;"></div>
-                <button class="ds-apply-btn" id="dsApplyBtn" onclick="applyDataSource()">
-                    Load
-                </button>
+                <button class="ds-apply-btn" id="dsApplyBtn" onclick="applyDataSource()">Load</button>
             </div>
         </div>
 
-        <!-- ── View toggles + search ───────────────────────────────── -->
+        <!-- ── Toggles + search ─────────────────────────────────── -->
         <div class="controls">
-            <input
-                type="text"
-                id="searchInput"
-                class="search-input"
-                placeholder="Search instances…"
-                autofocus
-            >
+            <input type="text" id="searchInput" class="search-input"
+                placeholder="Search instances…" autofocus>
             <label class="toggle-row">
                 <span class="toggle-label">Verbose node labels</span>
                 <div class="toggle-wrap">
@@ -93,7 +199,6 @@
         </div>
 
         <div class="stats" id="stats">—</div>
-
         <div class="graph-list" id="graphList">
             <div class="placeholder" style="position:relative;padding:40px;text-align:center;">
                 <span style="font-size:36px;opacity:.25;">📂</span>
@@ -104,14 +209,69 @@
         </div>
     </div>
 
+    <!-- ── Main area: graph pane + sankey pane (only one shown) ─── -->
     <div class="main">
+        <!-- Graph pane (iframe) -->
         <div id="graphPane" class="graph-pane">
             <div class="placeholder">
                 <span class="placeholder-icon">📊</span>
                 <p>Select a graph from the list</p>
             </div>
         </div>
+
+        <!-- Sankey pane (inline, no iframe) -->
+        <div id="sankeyPane">
+            <!-- Controls -->
+            <div class="sk-controls">
+                <div class="sk-ctrl">
+                    <label for="skStatus">Status</label>
+                    <select id="skStatus">
+                        <option value="all">All trajectories</option>
+                        <option value="resolved">Resolved only</option>
+                        <option value="unresolved">Unresolved only</option>
+                        <option value="unsubmitted">Unsubmitted only</option>
+                    </select>
+                </div>
+                <div class="sk-ctrl">
+                    <label>Max steps</label>
+                    <div class="sk-combo">
+                        <input type="range"  id="skMaxStepsSlider" min="5" max="60" value="30" step="1">
+                        <input type="number" id="skMaxStepsNum"    min="5" max="60" value="30" step="1">
+                    </div>
+                </div>
+                <div class="sk-ctrl">
+                    <label>Min flow</label>
+                    <div class="sk-combo">
+                        <input type="range"  id="skMinFlowSlider" min="0" max="50" value="1" step="1">
+                        <input type="number" id="skMinFlowNum"    min="0" max="50" value="1" step="1">
+                    </div>
+                </div>
+                <div class="sk-ctrl">
+                    <label>Phases</label>
+                    <div class="sk-chips">
+                        <div class="sk-chip sk-chip-loc active"   data-phase="localization">Localization</div>
+                        <div class="sk-chip sk-chip-patch active" data-phase="patch">Patch</div>
+                        <div class="sk-chip sk-chip-val active"   data-phase="validation">Validation</div>
+                        <div class="sk-chip sk-chip-gen active"   data-phase="general">General</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats strip -->
+            <div class="sk-stats" id="skStats"><span>—</span></div>
+
+            <!-- Canvas -->
+            <div class="sk-canvas" id="skCanvas">
+                <div class="sk-placeholder" id="skPlaceholder">
+                    <span style="font-size:40px;opacity:.25">🌊</span>
+                    <span>Load trajectories to view the Sankey diagram</span>
+                </div>
+                <svg id="sk-svg" style="display:none;"></svg>
+            </div>
+        </div>
     </div>
+
+    <div id="sk-tooltip"></div>
 
     <script src="/static/browser.js"></script>
 </body>

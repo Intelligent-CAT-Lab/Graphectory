@@ -17,6 +17,7 @@ GET  /                          → browser UI  (index.html)
 GET  /static/<file>             → static assets (browser.css, browser.js, …)
 GET  /api/graphs                → JSON list of available trajectories
 GET  /api/graph?id=X[&…]        → on-demand graph HTML for instance X
+GET  /api/sankey                → aggregated phase-per-step data for Sankey diagram
 GET  /api/config                → currently active trajs path and eval_report path
 POST /api/config                → swap trajs/eval_report live; validates paths and overlap
 """
@@ -61,6 +62,7 @@ class GraphHandler(BaseHTTPRequestHandler):
     _cache_lock:   threading.RLock  = threading.RLock()
     _graphs_cache: Optional[list]   = None
     _render_cache: dict[tuple, str] = {}
+    _sankey_cache: Optional[dict]   = None   # keyed on graphs_dir + eval_report_path
 
     # ── Logging ──────────────────────────────────────────────────────────────
 
@@ -98,6 +100,13 @@ class GraphHandler(BaseHTTPRequestHandler):
                     show_observation = _bool_param(params, "show_observation", default=False),
                     unique_think     = _bool_param(params, "unique_think",     default=True),
                 )
+
+            elif path == "/api/sankey":
+                self._api_sankey()
+
+            elif path == "/sankey":
+                # Serve the Sankey page from static dir
+                self._send_file(STATIC_DIR / "sankey.html")
 
             elif path == "/api/config":
                 self._api_get_config()
@@ -217,6 +226,7 @@ class GraphHandler(BaseHTTPRequestHandler):
             GraphHandler.eval_report_path = str(report) if report else None
             GraphHandler._graphs_cache    = None
             GraphHandler._render_cache    = {}
+            GraphHandler._sankey_cache    = None
 
         self._respond_json({
             "ok":          True,
@@ -279,6 +289,68 @@ class GraphHandler(BaseHTTPRequestHandler):
 
         self._respond(200, "text/html; charset=utf-8", html.encode())
 
+    def _api_sankey(self):
+        """Return aggregated phase-per-step data for the Sankey diagram.
+
+        Response shape:
+        {
+          "trajectories": [
+            { "instance_id": "...", "status": "resolved", "phases": ["general","localization",...] },
+            ...
+          ]
+        }
+
+        Each entry's ``phases`` list is indexed by step (step 0, 1, 2, …).  The
+        phase is the dominant phase of the first parsed command at that step.
+
+        We build this by loading every trajectory lightly — we only need the
+        per-step phase sequence, not the full node-link graph.  Results are
+        cached after the first call and invalidated when the data source changes.
+        """
+        with self._cache_lock:
+            cached = self._sankey_cache
+        if cached is not None:
+            logger.info("[handler] Sankey cache hit.")
+            self._respond_json(cached)
+            return
+
+        logger.info("[handler] Building Sankey data (cache miss).")
+
+        # Ensure graph list is built first (cheap; uses its own cache)
+        with self._cache_lock:
+            if self._graphs_cache is None:
+                GraphHandler._graphs_cache = scan_trajectories(
+                    self.graphs_dir, self.eval_report_path, agent_type=self.agent_type,
+                )
+            graphs = self._graphs_cache
+
+        trajectories = []
+        for meta in graphs:
+            instance_id = meta["instance_id"]
+            try:
+                traj_data = load_trajectory(
+                    self.graphs_dir, instance_id, agent_type=self.agent_type,
+                )
+                phases = _extract_phase_sequence(
+                    traj_data, self.agent_type, self.cmd_parser,
+                )
+            except Exception as exc:
+                logger.warning("[sankey] Skipping %s: %s", instance_id, exc)
+                phases = []
+
+            trajectories.append({
+                "instance_id": instance_id,
+                "status":      meta.get("status", "none"),
+                "phases":      phases,
+            })
+
+        result = {"trajectories": trajectories}
+
+        with self._cache_lock:
+            GraphHandler._sankey_cache = result
+
+        self._respond_json(result)
+
     # ── Low-level helpers ─────────────────────────────────────────────────────
 
     def _send_file(self, path: Path):
@@ -302,6 +374,145 @@ class GraphHandler(BaseHTTPRequestHandler):
     def _error(self, status: int, message: str):
         self._respond(status, "application/json; charset=utf-8",
                       json.dumps({"error": message}).encode())
+
+
+# ---------------------------------------------------------------------------
+# Sankey phase-extraction helper
+# ---------------------------------------------------------------------------
+
+def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> list[str]:
+    """Return a list of phase strings, one per trajectory step.
+
+    This mirrors the logic in build_graph / _build_graph_oh but is intentionally
+    lightweight: it only needs the dominant phase of each step, not the full
+    graph structure.  Unrecognised or empty steps are represented as "general".
+    """
+    try:
+        from mapPhase import get_phase
+    except ImportError:
+        def get_phase(*_args, **_kwargs):
+            return "general"
+
+    phases: list[str] = []
+
+    if agent_type == "oh":
+        # ── OpenHands ────────────────────────────────────────────────────────
+        prev_phases_list: list[str] = []
+        for step in traj_data.get("history", []):
+            obs_type = step.get("observation")
+            if obs_type in ("system", "message") or obs_type is None:
+                continue
+
+            tool_call_meta = step.get("tool_call_metadata", {})
+            model_response = tool_call_meta.get("model_response", {})
+            choices        = model_response.get("choices", [])
+
+            step_phase = "general"
+            for choice in choices:
+                msg = choice.get("message", {})
+                for tc in (msg.get("tool_calls") or []):
+                    fn = tc.get("function", {})
+                    tool_name = fn.get("name", "")
+                    args_raw  = fn.get("arguments", "{}")
+                    try:
+                        args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                    except Exception:
+                        args = {}
+                    subcommand = args.pop("command", None)
+                    step_phase = get_phase(
+                        tool_name, subcommand, "", args, prev_phases_list, {},
+                    )
+                    break  # use first tool call's phase
+                if step_phase != "general":
+                    break
+
+            phases.append(step_phase)
+            prev_phases_list.append(step_phase)
+        return phases
+
+    if agent_type == "msa":
+        # ── mini-swe-agent ────────────────────────────────────────────────────
+        prev_phases_list: list[str] = []
+        messages = traj_data.get("messages", [])
+
+        # v1.0 text format
+        if traj_data.get("trajectory_format") == "mini-swe-agent-1":
+            import re
+            i = 2
+            while i < len(messages):
+                msg = messages[i]
+                if msg.get("role") != "assistant":
+                    i += 1
+                    continue
+                content = msg.get("content", "")
+                if not isinstance(content, str) or not content.strip():
+                    i += 2
+                    continue
+                import re as _re
+                bash_match = _re.search(r'```bash\s*(.*?)```', content, _re.DOTALL)
+                action_str = bash_match.group(1).strip() if bash_match else ""
+                step_phase = "general"
+                if action_str and cmd_parser:
+                    cmds = cmd_parser.parse(action_str)
+                    if cmds:
+                        p = cmds[0]
+                        step_phase = get_phase(
+                            p.get("tool",""), p.get("subcommand",""),
+                            p.get("command",""), p.get("args",{}),
+                            prev_phases_list, p.get("flags",{}),
+                        )
+                phases.append(step_phase)
+                prev_phases_list.append(step_phase)
+                i += 2
+            return phases
+
+        # Default MSA structured format
+        i = 2
+        while i < len(messages):
+            msg = messages[i]
+            if not isinstance(msg.get("output"), list):
+                i += 1
+                continue
+            step_phase = "general"
+            for block in msg["output"]:
+                if isinstance(block, dict) and block.get("type") == "function_call":
+                    try:
+                        args_json = json.loads(block.get("arguments", "{}"))
+                    except Exception:
+                        args_json = {}
+                    cmd_str = args_json.get("command", "")
+                    if cmd_str and cmd_parser:
+                        cmds = cmd_parser.parse(cmd_str)
+                        if cmds:
+                            p = cmds[0]
+                            step_phase = get_phase(
+                                p.get("tool",""), p.get("subcommand",""),
+                                p.get("command",""), p.get("args",{}),
+                                prev_phases_list, p.get("flags",{}),
+                            )
+                    break
+            phases.append(step_phase)
+            prev_phases_list.append(step_phase)
+            i += 2
+        return phases
+
+    # ── SWE-agent ─────────────────────────────────────────────────────────────
+    prev_phases_list: list[str] = []
+    for step in traj_data.get("trajectory", []):
+        action_str = step.get("action", "")
+        step_phase = "general"
+        if action_str.strip() and cmd_parser:
+            cmds = cmd_parser.parse(action_str)
+            if cmds:
+                p = cmds[0]
+                step_phase = get_phase(
+                    p.get("tool",""), p.get("subcommand",""),
+                    p.get("command",""), p.get("args",{}),
+                    prev_phases_list, p.get("flags",{}),
+                )
+        phases.append(step_phase)
+        prev_phases_list.append(step_phase)
+    return phases
 
 
 # ---------------------------------------------------------------------------
