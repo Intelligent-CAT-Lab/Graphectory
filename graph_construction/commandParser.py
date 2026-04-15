@@ -626,6 +626,7 @@ if __name__ == "__main__":
         'cat << \'EOF\' > /workspace/test_hstack_fix.py\nimport sympy as sy\n\n# Test case 1: Zero-height matrices\nM1 = sy.Matrix.zeros(0, 0)\nM2 = sy.Matrix.zeros(0, 1)\nM3 = sy.Matrix.zeros(0, 2)\nM4 = sy.Matrix.zeros(0, 3)\nresult = sy.Matrix.hstack(M1, M2, M3, M4).shape\nprint(f"Zero-height hstack result: {result} (should be (0, 6))")\n\n# Test case 2: Non-zero height matrices\nM1 = sy.Matrix.zeros(1, 0)\nM2 = sy.Matrix.zeros(1, 1)\nM3 = sy.Matrix.zeros(1, 2)\nM4 = sy.Matrix.zeros(1, 3)\nresult = sy.Matrix.hstack(M1, M2, M3, M4).shape\nprint(f"Non-zero height hstack result: {result} (should be (1, 6))")\nEOF',
         "python3 - <<'PY'\ndef f(self):\n    return 1\nprop = property(f)\nprint(\"before:\", prop.__doc__)\nprop.__doc__ = \"assigned\"\nprint(\"after assign:\", prop.__doc__)\nclass C:\n    @classmethod\n    def cm(cls): \"cmm\"; return 1\nprint(\"classmethod doc before:\", C.cm.__doc__)\n# Try creating a standalone classmethod object and setting __doc__\ndef g(cls): \"gdoc\"; return 2\ncm_obj = classmethod(g)\nprint(\"cm_obj.__doc__ before:\", cm_obj.__doc__)\ncm_obj.__func__.__doc__ = \"changed_gdoc\"\nprint(\"cm_obj.__doc__ after func doc change:\", cm_obj.__doc__)\ncm_obj.__doc__ = \"assigned_cm\"\nprint(\"cm_obj.__doc__ after assign:\", cm_obj.__doc__)\nPY",
         "PYTHONPATH=src pytest -q testing/test_mark_expression.py -q",
+        "perl -i -pe 's/old/new/g' file.txt",
         ]
 
     for cmd in commands:

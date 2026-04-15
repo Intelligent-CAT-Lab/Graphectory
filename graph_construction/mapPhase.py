@@ -40,7 +40,8 @@ TEST_HINTS: Tuple[str, ...] = (
 READONLY_CMDS: Tuple[str, ...] = ("grep", "find", "cat", "ls", "head", "tail", "awk", "nl")
 
 # Commands that are clearly *editing* or *creating* content.
-EDIT_CMDS: Tuple[str, ...] = ("sed", "touch")
+# Note: sed and perl handled explicitly below based on their flags
+EDIT_CMDS: Tuple[str, ...] = ("touch",)
 
 # str_replace_editor subcommands that indicate edits vs reads.
 SRE_EDIT_SUBCMDS: Tuple[str, ...] = ("create", "str_replace", "insert", "undo_edit")
@@ -359,9 +360,12 @@ def get_phase(
         # Default: test/code execution → key rule
         return "validation" if has_patch else "localization"
 
-    # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl/sed -n)
-    is_sed_readonly = (cmd == "sed" and "n" in flags)
-    if cmd in READONLY_CMDS or is_sed_readonly:
+    # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl/sed -n/perl -n/-p without -i)
+    is_sed_readonly = (cmd == "sed" and "i" not in flags and "n" in flags)
+    # perl -n/-p without -i and with file args = readonly viewing
+    is_perl_readonly = (cmd == "perl" and "i" not in flags and
+                        ("n" in flags or "p" in flags) and paths)
+    if cmd in READONLY_CMDS or is_sed_readonly or is_perl_readonly:
         # Piped operations without output redirection (e.g., nl file.py | sed -n '10,20p') are read-only
         if _is_piped_readonly_operation(cmd, tokens):
             # Viewing content: test-related AFTER patch → validation; otherwise → localization
@@ -378,9 +382,17 @@ def get_phase(
             return "validation"
         return "localization"
 
-    # 4) Edit/creation commands (sed/touch)
-    if cmd in EDIT_CMDS or (cmd == "sed" and "n" not in flags):
-        # sed with/without -i still considered edit by config; treat targets accordingly
+    # 3.5) perl test execution (perl script.pl where script is test-related)
+    if cmd == "perl" and "i" not in flags:
+        # Not in-place editing, not readonly viewing (already handled)
+        # Check if executing test-related scripts
+        if _is_test_related(tokens, paths):
+            return "validation" if has_patch else "localization"
+
+    # 4) Edit/creation commands (sed/touch/perl -i)
+    is_perl_edit = (cmd == "perl" and "i" in flags)
+    if cmd in EDIT_CMDS or (cmd == "sed" and "i" in flags) or is_perl_edit:
+        # sed without -n, perl with -i are editing commands; treat targets accordingly
         return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
 
     # 5) Fallbacks:
@@ -397,49 +409,53 @@ if __name__ == "__main__":
     # Simple tests
     test_cases = [
         # (tool, subcommand, command, args, prev_phases, expected_phase)
-        (None, None, "grep", ["def foo():", "file.py"], None, "localization"),
-        (None, None, "grep", ["def foo():", "test_file.py"], ["patch"], "validation"),
-        (None, None, "grep", ["def foo():", "file.py", ">", "out.txt"], None, "patch"),
-        (None, None, "grep", ["def test_foo():", "file.py", ">", "tests/test_file.py"], None, "localization"),
-        (None, None, "grep", ["def test_foo():", "file.py", ">", "tests/test_file.py"], ["patch"], "validation"),
-        (None, None, "sed", ["-i", "s/foo/bar/g", "file.py"], None, "patch"),
-        (None, None, "sed", ["s/foo/bar/g", "file.py"], None, "patch"),
-        (None, None, "python", ["script.py"], None, "localization"),
-        (None, None, "python", ["script.py"], ["patch"], "validation"),
-        (None, None, "python", ["-c", "'print(42)'", ">", "out.txt"], None, "patch"),
-        (None, None, "python", ["-c", "'print(42)'", ">", "tests/test_out.py"], None, "localization"),
-        (None, None, "python", ["-c", "'print(42)'", ">", "tests/test_out.py"], ["patch"], "validation"),
+        (None, None, "grep", ["def foo():", "file.py"], None, None, "localization"),
+        (None, None, "grep", ["def foo():", "test_file.py"], ["patch"], None, "validation"),
+        (None, None, "grep", ["def foo():", "file.py", ">", "out.txt"], None, None, "patch"),
+        (None, None, "grep", ["def test_foo():", "file.py", ">", "tests/test_file.py"], None, None, "localization"),
+        (None, None, "grep", ["def test_foo():", "file.py", ">", "tests/test_file.py"], ["patch"], None, "validation"),
+        (None, None, "sed", ["s/foo/bar/g", "file.py"], None, {'i': True}, "patch"),
+        (None, None, "python", ["script.py"], None, None, "localization"),
+        (None, None, "python", ["script.py"], ["patch"], None, "validation"),
+        (None, None, "python", ["-c", "'print(42)'", ">", "out.txt"], None, None, "patch"),
+        (None, None, "python", ["-c", "'print(42)'", ">", "tests/test_out.py"], None, None, "localization"),
+        (None, None, "python", ["-c", "'print(42)'", ">", "tests/test_out.py"], ["patch"], None, "validation"),
         # str_replace_editor where `command` may be a dict (observed in traces)
-        ("str_replace_editor", "create", {"path": "file.py"}, None, None, "patch"),
-        ("str_replace_editor", "create", {"path": "tests/test_file.py"}, None, None, "localization"),
-        ("str_replace_editor", "create", {"path": "tests/test_file.py"}, None, ["patch"], "validation"),
-        ("str_replace_editor", "view", {"path": "test_file.py"}, None, ["patch"], "validation"),
-        ("str_replace_editor", "str_replace", {"path": "/testbed/django/db/backends/postgresql/client.py", "new_str": "        temp_pgpass = None\n        sigint_handler = signal.getsignal(signal.SIGINT)\n        try:\n            print(f\"DEBUG: passwd = '{passwd}'\")  # DEBUG\n            if passwd:\n                print(\"DEBUG: Creating temporary .pgpass file\")  # DEBUG\n                # Create temporary .pgpass file.\n                temp_pgpass = NamedTemporaryFile(mode='w+')}"}, None, None, "patch"),
+        ("str_replace_editor", "create", {"path": "file.py"}, None, None, None, "patch"),
+        ("str_replace_editor", "create", {"path": "tests/test_file.py"}, None, None, None, "localization"),
+        ("str_replace_editor", "create", {"path": "tests/test_file.py"}, None, ["patch"], None, "validation"),
+        ("str_replace_editor", "view", {"path": "test_file.py"}, None, ["patch"], None, "validation"),
+        ("str_replace_editor", "str_replace", {"path": "/testbed/django/db/backends/postgresql/client.py", "new_str": "        temp_pgpass = None\n        sigint_handler = signal.getsignal(signal.SIGINT)\n        try:\n            print(f\"DEBUG: passwd = '{passwd}'\")  # DEBUG\n            if passwd:\n                print(\"DEBUG: Creating temporary .pgpass file\")  # DEBUG\n                # Create temporary .pgpass file.\n                temp_pgpass = NamedTemporaryFile(mode='w+')}"}, None, None, None, "patch"),
         # Heredoc embedded in a single token (should be detected as redirection → edit-like).
         # Target is test-related and no prior patch → localization (test generation).
         (None, None, "complex_command",
-         ["cat << 'EOF' > /workspace/test_hstack_fix.py\nprint('hi')\nEOF"], None, "localization"),
+         ["cat << 'EOF' > /workspace/test_hstack_fix.py\nprint('hi')\nEOF"], None, None, "localization"),
 
         # nl piped commands (read-only viewing operations)
         # nl file.py | sed -n '10,20p' - viewing regular file before patch
-        (None, None, "nl", ["filename.py", "|", "sed"], None, "localization"),
+        (None, None, "nl", ['filename.py', '|', 'sed', '10,20p'], None, {'b': True, 'a': True, 'n': True}, "localization"),
         # nl test_file.py | sed -n '10,20p' - viewing test file before patch
-        (None, None, "nl", ["test_file.py", "|", "sed"], None, "localization"),
+        (None, None, "nl", ["test_file.py", "|", "sed", '10,20p'], None, {'b': True, 'a': True, 'n': True}, "localization"),
         # nl test_file.py | sed -n '10,20p' - viewing test file AFTER patch
-        (None, None, "nl", ["test_file.py", "|", "sed"], ["patch"], "validation"),
+        (None, None, "nl", ["test_file.py", "|", "sed", '10,20p'], ["patch"], {'b': True, 'a': True, 'n': True}, "validation"),
         # nl file.py | sed -n '10,20p' - viewing regular file AFTER patch
-        (None, None, "nl", ["filename.py", "|", "sed"], ["patch"], "localization"),
+        (None, None, "nl", ["filename.py", "|", "sed", '10,20p'], ["patch"], {'b': True, 'a': True, 'n': True}, "localization"),
 
         # nl with output redirection (becomes an edit operation)
         # nl file.py > output.txt - creating/editing non-test file
-        (None, None, "nl", ["file.py", ">", "output.txt"], None, "patch"),
+        (None, None, "nl", ["file.py", ">", "output.txt"], None, None, "patch"),
         # nl file.py > test_output.py - creating/editing test file before patch
-        (None, None, "nl", ["file.py", ">", "test_output.py"], None, "localization"),
+        (None, None, "nl", ["file.py", ">", "test_output.py"], None, None, "localization"),
         # nl file.py > test_output.py - creating/editing test file AFTER patch
-        (None, None, "nl", ["file.py", ">", "test_output.py"], ["patch"], "validation"),
+        (None, None, "nl", ["file.py", ">", "test_output.py"], ["patch"], None, "validation"),
+
+        (None, None, "sed", ["/testbed/seaborn/_core/scales.py"], None, {"n": "1,440p"}, "localization"),
+        (None, None, "perl", ['s/old/new/g', 'test_file.py'], None, {'i': True, 'p': True, 'e': True}, "localization"),
+
+        (None, None, "python", ["-", "from pathlib import Path\np=Path('/testbed/seaborn/_core/scales.py')\ns=p.read_text()\nold=''' if prop.legend:\n axis.set_view_interval(vmin, vmax)\n locs = axis.major.locator()\n locs = locs[(vmin <= locs) & (locs <= vmax)]\n labels = axis.major.formatter.format_ticks(locs)\n new._legend = list(locs), list(labels)\n\n return new\n'''\nif old in s:\n new=''' if prop.legend:\n axis.set_view_interval(vmin, vmax)\n locs = axis.major.locator()\n locs = locs[(vmin <= locs) & (locs <= vmax)]\n formatter = axis.major.formatter\n labels = formatter.format_ticks(locs)\n # Attempt to capture any multiplicative offset used by the formatter\n offset = None\n try:\n # Many formatters (e.g. ScalarFormatter) provide a get_offset() method\n off = formatter.get_offset()\n except Exception:\n off = None\n if off:\n offset = str(off)\n new._legend = list(locs), list(labels) if offset is None else (list(locs), list(labels), offset)\n\n return new\n'''\n s=s.replace(old,new)\n p.write_text(s)\n print('patched')\nelse:\n print('pattern not found')"], None, {"__heredoc__": True}, "patch"),
     ]
 
-    for i, (tool, subcmd, cmd, args, prev, expected) in enumerate(test_cases, 1):
-        result = get_phase(tool, subcmd, cmd, args, prev)
+    for i, (tool, subcmd, cmd, args, prev, flag, expected) in enumerate(test_cases, 1):
+        result = get_phase(tool, subcmd, cmd, args, prev, flag)
         assert result == expected, f"Test case {i} failed: got {result}, expected {expected}"
     print("All test cases passed.")
