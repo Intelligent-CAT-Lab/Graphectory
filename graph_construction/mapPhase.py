@@ -311,12 +311,14 @@ def get_phase(
     #    - If command line includes redirection (creating/editing files), treat as edit-like and use heuristics.
     #    - If inline code (heredoc, -c flag) is editing files, classify based on target files.
     if cmd in PY_CMDS:
-        if _contains_redirection(tokens):
-            # Edit-like via redirection (e.g., python -c '...' > tests/test_x.py)
-            return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
-
         # Check for inline code execution (heredoc, -c flag)
         is_heredoc = flags.get("__heredoc__", False)
+
+        # For heredocs, check inline code first before treating as redirection
+        # (heredocs contain << which looks like redirection but needs code analysis first)
+        if _contains_redirection(tokens) and not is_heredoc:
+            # Edit-like via redirection (e.g., python -c '...' > tests/test_x.py)
+            return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
         code_content = None
 
         # Source 1: heredoc (stdin)
