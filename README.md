@@ -2,7 +2,7 @@
 
 [![Graphectory Walkthrough](https://img.shields.io/badge/▶_Watch_Demo-Video-blue?style=for-the-badge&logo=github)](https://github.com/Intelligent-CAT-Lab/Graphectory/blob/main/demo/video1050646930.mp4)
 
-[View the Live Demo Here!](https://graphectory-viewer-demo.vercel.app/)
+[Try the Live Demo Here!](https://graphectory-viewer-demo.vercel.app/)
 
 # Graphectory
 
