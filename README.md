@@ -1,6 +1,7 @@
-## Demo Video
+## Demo Video and Online Demo
 
 [![Graphectory Walkthrough](https://img.shields.io/badge/▶_Watch_Demo-Video-blue?style=for-the-badge&logo=github)](https://github.com/Intelligent-CAT-Lab/Graphectory/blob/main/demo/video1050646930.mp4)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Vercel-black?style=flat-square&logo=vercel&logoColor=white)](https://graphectory-viewer-demo.vercel.app/)
 
 # Graphectory
 
