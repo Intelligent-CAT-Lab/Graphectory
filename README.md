@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="figures/logo.png" alt="Graphectory logo" width="260">
+</p>
+
 ## Demo Video and Online Demo (Try it Out! 🚀)
 
 [![Graphectory Walkthrough](https://img.shields.io/badge/▶_Watch_Demo-Video-blue?style=for-the-badge&logo=github)](https://github.com/Intelligent-CAT-Lab/Graphectory/blob/main/demo/video1050646930.mp4)
@@ -229,6 +233,3 @@ python -m graph_analysis.batch_runner --data-dir ./my_data --output-dir ./my_out
 Results are saved to `trajectory_metrics.csv`.
 
 ---
-<p align="center">
-  <img src="figures/logo.png" alt="Graphectory logo" width="260">
-</p>
