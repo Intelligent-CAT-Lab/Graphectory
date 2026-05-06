@@ -229,3 +229,6 @@ python -m graph_analysis.batch_runner --data-dir ./my_data --output-dir ./my_out
 Results are saved to `trajectory_metrics.csv`.
 
 ---
+<p align="center">
+  <img src="figures/logo.png" alt="Graphectory logo" width="260">
+</p>
