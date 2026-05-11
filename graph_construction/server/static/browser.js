@@ -8,7 +8,7 @@
 let allGraphs          = [];
 let activeId           = null;   // instance_id of selected graph, or null
 let sankeyActive       = false;  // true when Sankey pane is showing
-let dataSourceExpanded = false;
+let dataSourceExpanded = true;
 
 /* =========================================================================
    Bootstrap
@@ -25,6 +25,7 @@ async function init() {
    Data source configuration
    ========================================================================= */
 async function loadConfig() {
+    setDataSourceExpanded(true);
     try {
         const res  = await fetch('/api/config');
         const data = await res.json();
@@ -33,12 +34,8 @@ async function loadConfig() {
             document.getElementById('reportInput').value = data.eval_report;
             updateDataSourceLabel(data.trajs);
             await loadGraphList();
-        } else {
-            setDataSourceExpanded(true);
         }
-    } catch (_) {
-        setDataSourceExpanded(true);
-    }
+    } catch (_) {}
 }
 
 function toggleDataSource() { setDataSourceExpanded(!dataSourceExpanded); }
@@ -50,9 +47,7 @@ function setDataSourceExpanded(open) {
 }
 
 function updateDataSourceLabel(trajsPath) {
-    const parts = trajsPath.replace(/\\/g, '/').split('/').filter(Boolean);
-    const short = parts.length ? parts[parts.length - 1] : trajsPath;
-    document.getElementById('dataSourceLabel').textContent = short || 'Data source';
+    document.getElementById('dataSourceLabel').textContent = 'Data Source';
 }
 
 async function applyDataSource() {
