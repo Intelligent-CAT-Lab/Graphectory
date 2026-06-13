@@ -24,6 +24,7 @@ POST /api/config                → swap trajs/eval_report live; validates paths
 
 import json
 import logging
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -47,6 +48,12 @@ _MIME: dict[str, str] = {
 # (or vice-versa) for the pairing to be considered valid.
 _OVERLAP_THRESHOLD = 0.05
 
+_CLIENT_DISCONNECT_ERRORS = (
+    BrokenPipeError,
+    ConnectionAbortedError,
+    ConnectionResetError,
+)
+
 
 class GraphHandler(BaseHTTPRequestHandler):
     """Thin, thread-safe HTTP handler — delegates all logic to the server modules."""
@@ -60,6 +67,7 @@ class GraphHandler(BaseHTTPRequestHandler):
 
     # ── In-memory caches (class-level, shared across all handler instances) ──
     _cache_lock:   threading.RLock  = threading.RLock()
+    _sankey_build_lock: threading.Lock = threading.Lock()
     _graphs_cache: Optional[list]   = None
     _render_cache: dict[tuple, str] = {}
     _sankey_cache: Optional[dict]   = None   # keyed on graphs_dir + eval_report_path
@@ -114,6 +122,8 @@ class GraphHandler(BaseHTTPRequestHandler):
             else:
                 self._error(404, "Not found")
 
+        except _CLIENT_DISCONNECT_ERRORS as exc:
+            logger.info("[handler] Client disconnected during GET %s: %s", self.path, exc)
         except Exception as exc:
             logger.exception("[handler] Unhandled error for GET %s", self.path)
             self._error(500, str(exc))
@@ -131,6 +141,8 @@ class GraphHandler(BaseHTTPRequestHandler):
             else:
                 self._error(404, "Not found")
 
+        except _CLIENT_DISCONNECT_ERRORS as exc:
+            logger.info("[handler] Client disconnected during POST %s: %s", self.path, exc)
         except Exception as exc:
             logger.exception("[handler] Unhandled error for POST %s", self.path)
             self._error(500, str(exc))
@@ -314,40 +326,90 @@ class GraphHandler(BaseHTTPRequestHandler):
             self._respond_json(cached)
             return
 
-        logger.info("[handler] Building Sankey data (cache miss).")
+        with self._sankey_build_lock:
+            # Another request may have filled the cache while we were waiting.
+            with self._cache_lock:
+                cached = self._sankey_cache
+                if cached is not None:
+                    logger.info("[handler] Sankey cache hit after wait.")
+                    self._respond_json(cached)
+                    return
 
-        # Ensure graph list is built first (cheap; uses its own cache)
-        with self._cache_lock:
-            if self._graphs_cache is None:
-                GraphHandler._graphs_cache = scan_trajectories(
-                    self.graphs_dir, self.eval_report_path, agent_type=self.agent_type,
-                )
-            graphs = self._graphs_cache
+            logger.info("[handler] Building Sankey data (cache miss).")
 
-        trajectories = []
-        for meta in graphs:
-            instance_id = meta["instance_id"]
-            try:
-                traj_data = load_trajectory(
-                    self.graphs_dir, instance_id, agent_type=self.agent_type,
-                )
-                phases = _extract_phase_sequence(
-                    traj_data, self.agent_type, self.cmd_parser,
-                )
-            except Exception as exc:
-                logger.warning("[sankey] Skipping %s: %s", instance_id, exc)
-                phases = []
+            # Ensure graph list is built first (cheap; uses its own cache)
+            with self._cache_lock:
+                if self._graphs_cache is None:
+                    GraphHandler._graphs_cache = scan_trajectories(
+                        self.graphs_dir, self.eval_report_path, agent_type=self.agent_type,
+                    )
+                graphs = self._graphs_cache
 
-            trajectories.append({
-                "instance_id": instance_id,
-                "status":      meta.get("status", "none"),
-                "phases":      phases,
-            })
+            trajectories = []
 
-        result = {"trajectories": trajectories}
+            # OpenHands is stored in a single large JSONL file. Loading each
+            # instance individually would rescan the file once per trajectory,
+            # which makes Sankey generation quadratic in dataset size.
+            # Instead, stream the file exactly once and then emit results in the
+            # same order as the cached metadata list.
+            if self.agent_type == "oh" and self.graphs_dir and self.graphs_dir.is_file():
+                status_by_id = {
+                    meta["instance_id"]: meta.get("status", "none")
+                    for meta in graphs
+                }
+                phases_by_id: dict[str, list[str]] = {}
 
-        with self._cache_lock:
-            GraphHandler._sankey_cache = result
+                with open(self.graphs_dir, encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        instance_id = entry.get("instance_id")
+                        if not instance_id or instance_id not in status_by_id:
+                            continue
+                        try:
+                            phases_by_id[instance_id] = _extract_phase_sequence(
+                                entry, self.agent_type, self.cmd_parser,
+                            )
+                        except Exception as exc:
+                            logger.warning("[sankey] Skipping %s: %s", instance_id, exc)
+                            phases_by_id[instance_id] = []
+
+                for meta in graphs:
+                    instance_id = meta["instance_id"]
+                    trajectories.append({
+                        "instance_id": instance_id,
+                        "status":      meta.get("status", "none"),
+                        "phases":      phases_by_id.get(instance_id, []),
+                    })
+            else:
+                for meta in graphs:
+                    instance_id = meta["instance_id"]
+                    try:
+                        traj_data = load_trajectory(
+                            self.graphs_dir, instance_id, agent_type=self.agent_type,
+                        )
+                        phases = _extract_phase_sequence(
+                            traj_data, self.agent_type, self.cmd_parser,
+                        )
+                    except Exception as exc:
+                        logger.warning("[sankey] Skipping %s: %s", instance_id, exc)
+                        phases = []
+
+                    trajectories.append({
+                        "instance_id": instance_id,
+                        "status":      meta.get("status", "none"),
+                        "phases":      phases,
+                    })
+
+            result = {"trajectories": trajectories}
+
+            with self._cache_lock:
+                GraphHandler._sankey_cache = result
 
         self._respond_json(result)
 
@@ -364,16 +426,30 @@ class GraphHandler(BaseHTTPRequestHandler):
         self._respond(200, "application/json; charset=utf-8", json.dumps(data).encode())
 
     def _respond(self, status: int, content_type: str, body: bytes):
-        self.send_response(status)
-        self.send_header("Content-Type",   content_type)
-        self.send_header("Content-Length", len(body))
-        self.send_header("Cache-Control",  "no-cache")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type",   content_type)
+            self.send_header("Content-Length", len(body))
+            self.send_header("Cache-Control",  "no-cache")
+            self.end_headers()
+            self.wfile.write(body)
+        except _CLIENT_DISCONNECT_ERRORS:
+            raise
+        except OSError as exc:
+            # Windows may surface mid-response client drops as a generic OSError.
+            if isinstance(exc, socket.timeout):
+                raise
+            if getattr(exc, "winerror", None) in {10053, 10054}:
+                logger.info("[handler] Client disconnected while sending %s", self.path)
+                return
+            raise
 
     def _error(self, status: int, message: str):
-        self._respond(status, "application/json; charset=utf-8",
-                      json.dumps({"error": message}).encode())
+        try:
+            self._respond(status, "application/json; charset=utf-8",
+                          json.dumps({"error": message}).encode())
+        except _CLIENT_DISCONNECT_ERRORS:
+            logger.info("[handler] Client disconnected before error response for %s", self.path)
 
 
 # ---------------------------------------------------------------------------

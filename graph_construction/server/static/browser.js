@@ -8,7 +8,7 @@
 let allGraphs          = [];
 let activeId           = null;   // instance_id of selected graph, or null
 let sankeyActive       = false;  // true when Sankey pane is showing
-let dataSourceExpanded = false;
+let dataSourceExpanded = true;
 
 /* =========================================================================
    Bootstrap
@@ -25,6 +25,7 @@ async function init() {
    Data source configuration
    ========================================================================= */
 async function loadConfig() {
+    setDataSourceExpanded(true);
     try {
         const res  = await fetch('/api/config');
         const data = await res.json();
@@ -33,12 +34,8 @@ async function loadConfig() {
             document.getElementById('reportInput').value = data.eval_report;
             updateDataSourceLabel(data.trajs);
             await loadGraphList();
-        } else {
-            setDataSourceExpanded(true);
         }
-    } catch (_) {
-        setDataSourceExpanded(true);
-    }
+    } catch (_) {}
 }
 
 function toggleDataSource() { setDataSourceExpanded(!dataSourceExpanded); }
@@ -50,9 +47,7 @@ function setDataSourceExpanded(open) {
 }
 
 function updateDataSourceLabel(trajsPath) {
-    const parts = trajsPath.replace(/\\/g, '/').split('/').filter(Boolean);
-    const short = parts.length ? parts[parts.length - 1] : trajsPath;
-    document.getElementById('dataSourceLabel').textContent = short || 'Data source';
+    document.getElementById('dataSourceLabel').textContent = 'Data Source';
 }
 
 async function applyDataSource() {
@@ -300,24 +295,35 @@ const SK_PHASE_COLOR = {
     localization: '#C5B3F0',
     patch:        '#FCC9B0',
     validation:   '#A8E6F0',
-    general:      '#CFE0F6',
 };
 const SK_PHASE_STROKE = {
     localization: '#9b7fe8',
     patch:        '#f5956a',
     validation:   '#5bbfd6',
-    general:      '#7aaee8',
 };
 const SK_PHASE_RIBBON = {
     localization: '#b89fe8',
     patch:        '#f5aa80',
     validation:   '#78d0e8',
-    general:      '#90bce8',
 };
-const SK_PHASE_ORDER = ['localization', 'patch', 'validation', 'general'];
+const SK_PHASE_ORDER = ['localization', 'patch', 'validation'];
 
 let skRawData      = null;
-let skActivePhases = new Set(['localization', 'patch', 'validation', 'general']);
+let skActivePhases = new Set(['localization', 'patch', 'validation']);
+
+function skNormalizePhaseSequence(phases) {
+    const normalized = [];
+    let previous = null;
+
+    for (const phase of phases || []) {
+        if (!skActivePhases.has(phase)) continue;
+        if (phase === previous) continue;
+        normalized.push(phase);
+        previous = phase;
+    }
+
+    return normalized;
+}
 
 /* =========================================================================
    Sankey — controls wiring
@@ -410,15 +416,13 @@ function skBuildFlowData(statusFilter, maxSteps, minFlow) {
     const transitions = Array.from({ length: maxSteps }, () => ({}));
 
     for (const traj of entries) {
-        const phases = traj.phases;
+        const phases = skNormalizePhaseSequence(traj.phases);
         const len    = Math.min(phases.length, maxSteps);
         for (let s = 0; s < len; s++) {
             const ph = phases[s];
-            if (!skActivePhases.has(ph)) continue;
             stepCounts[s][ph] = (stepCounts[s][ph] || 0) + 1;
             if (s + 1 < len) {
                 const nph = phases[s + 1];
-                if (!skActivePhases.has(nph)) continue;
                 const key = `${ph}\u2192${nph}`;
                 transitions[s][key] = (transitions[s][key] || 0) + 1;
             }
