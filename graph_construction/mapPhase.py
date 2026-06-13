@@ -33,7 +33,7 @@ from typing import Iterable, List, Tuple, Any, Optional, Dict
 
 # Tokens/paths hinting that something is test-related.
 TEST_HINTS: Tuple[str, ...] = (
-    "test_", "reproduc", "debug", "_test", "/tests/", "/test/",
+    "test_", "repro", "reproduc", "debug", "_test", "/tests/", "/test/",
 )
 
 # Commands that typically *read/search* only; with redirection they can become edits.
@@ -268,6 +268,71 @@ def _extract_edited_files_from_python_code(code: str) -> List[str]:
 
     return edited_files
 
+def _classify_complex_command(
+    args: Any,
+    *,
+    has_patch: bool,
+) -> str:
+    """
+    Classify a complex_command by analyzing the bash command text.
+    Handles commands with heredocs and shell redirections.
+    """
+    # Extract bash command text
+    bash_text = ""
+    if isinstance(args, (list, tuple)) and args:
+        bash_text = str(args[0])
+    elif isinstance(args, str):
+        bash_text = args
+
+    if not bash_text:
+        return "general"
+
+    bash_lower = bash_text.lower()
+
+    # Extract edited files from Python heredoc code
+    python_heredoc_edits: List[str] = []
+    if 'python' in bash_lower and '<<' in bash_text:
+        for heredoc_match in re.finditer(r"<<['\"]?(\w+)['\"]?\s*\n(.*?)\n\1", bash_text, re.DOTALL):
+            heredoc_content = heredoc_match.group(2)
+            edited_files = _extract_edited_files_from_python_code(heredoc_content)
+            python_heredoc_edits.extend(edited_files)
+
+    # Extract shell redirected files (>, >>)
+    shell_redirected_files: List[str] = []
+    if any(op in bash_text for op in ['>', '>>']):
+        for match in re.finditer(r'>\s*([^\s;&|]+)', bash_text):
+            shell_redirected_files.append(match.group(1).strip())
+
+    # Combined edited files
+    edited_files = python_heredoc_edits + shell_redirected_files
+
+    # Classify edited files as test vs non-test
+    edited_test_files = [f for f in edited_files if _is_test_related([], [f.lower()])]
+    edited_nontest_files = [f for f in edited_files if f and not _is_test_related([], [f.lower()])]
+
+    # Detect inline test execution (python heredoc without file writes)
+    is_inline_test_exec = (
+        'python' in bash_lower and
+        '<<' in bash_text and
+        not python_heredoc_edits
+    )
+
+    # Classification priority: patch > validation/localization
+    if edited_nontest_files:
+        # Editing non-test files = patching
+        return "patch"
+    elif is_inline_test_exec:
+        # Inline test execution (heredoc without file edits)
+        return "validation" if has_patch else "localization"
+    elif edited_test_files:
+        # Editing/creating test files
+        return "validation" if has_patch else "localization"
+    else:
+        # Fallback: check for any test hints in the command
+        if any(hint in bash_lower for hint in TEST_HINTS):
+            return "validation" if has_patch else "localization"
+        return "general"
+
 # --------------------------- Core classification ---------------------------
 
 def get_phase(
@@ -289,6 +354,10 @@ def get_phase(
     flags = flags or {}
     cmd, tokens, paths = _normalize_command_and_merge_args(command, args)
     has_patch = _has_prior_patch(prev_phases)
+
+    # 0) Handle complex_command by analyzing the bash command text
+    if cmd == "complex_command":
+        return _classify_complex_command(args, has_patch=has_patch)
 
     # 1) str_replace_editor decisions (tool-specific)
     if (tool or "").lower() == "str_replace_editor":
