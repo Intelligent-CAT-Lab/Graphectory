@@ -15,6 +15,7 @@ let dataSourceExpanded = true;
    ========================================================================= */
 async function init() {
     await loadConfig();
+    clearGraphPane();
     wireSearch();
     wireToggles();
     wireEnterKey();
@@ -216,12 +217,271 @@ function showLoading() {
     ph.innerHTML = '<div class="spinner"></div><span>Rendering graph…</span>';
 }
 
+function landingGuideHtml() {
+    return `
+        <div class="placeholder landing-placeholder">
+            <div class="landing-guide">
+                <div class="landing-hero">
+                    <div>
+                        <p class="eyebrow">How to read a Graphectory</p>
+                        <h2>Read the viewer through small graph examples.</h2>
+                        <p>
+                            Each card below isolates one visual convention from the trajectory viewer, including phase
+                            colors, edge styles, repeated commands, observation markers, and clutter-reduction toggles.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="edge-example-gallery" aria-label="Focused examples of Graphectory edge types">
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Execution edge example">
+                                <defs>
+                                    <marker id="landing-arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7f8c8d"></path></marker>
+                                    <marker id="landing-arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3498db"></path></marker>
+                                    <marker id="landing-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#27ae60"></path></marker>
+                                    <marker id="landing-arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#e74c3c"></path></marker>
+                                </defs>
+                                <rect class="edge-card-node loc" x="18" y="38" width="96" height="54" rx="12"></rect>
+                                <rect class="edge-card-node patch" x="206" y="38" width="96" height="54" rx="12"></rect>
+                                <path class="edge-card-line exec" d="M114 65 C142 65 174 65 206 65"></path>
+                                <text class="edge-card-text" x="66" y="60">view</text>
+                                <text class="edge-card-subtext" x="66" y="77">step 1</text>
+                                <text class="edge-card-text" x="254" y="60">edit</text>
+                                <text class="edge-card-subtext" x="254" y="77">step 2</text>
+                                <text class="edge-card-label" x="160" y="52">normal order</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Execution edge</h3>
+                            <p>The standard gray arrow means the agent moved from one action to the next in chronological order.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Thought length edge example">
+                                <rect class="edge-card-node general" x="18" y="38" width="96" height="54" rx="12"></rect>
+                                <rect class="edge-card-node loc" x="206" y="38" width="96" height="54" rx="12"></rect>
+                                <path class="edge-card-line thought" d="M114 65 C142 65 174 65 206 65"></path>
+                                <text class="edge-card-text" x="66" y="60">think</text>
+                                <text class="edge-card-subtext" x="66" y="77">148 chars</text>
+                                <text class="edge-card-text" x="254" y="60">grep</text>
+                                <text class="edge-card-subtext" x="254" y="77">step 4</text>
+                                <text class="edge-card-label" x="160" y="52">larger thought</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Thought-length edge</h3>
+                            <p>The viewer keeps execution edges thin, but scales the arrowhead/weight cue when a step has more reasoning text.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Multi-command edge example">
+                                <rect class="edge-card-node general" x="18" y="38" width="96" height="54" rx="12"></rect>
+                                <rect class="edge-card-node val" x="206" y="38" width="96" height="54" rx="12"></rect>
+                                <path class="edge-card-line multi" d="M114 65 C142 65 174 65 206 65"></path>
+                                <text class="edge-card-text" x="66" y="58">cd</text>
+                                <text class="edge-card-subtext" x="66" y="77">same step</text>
+                                <text class="edge-card-text" x="254" y="58">pytest</text>
+                                <text class="edge-card-subtext" x="254" y="77">same step</text>
+                                <text class="edge-card-label blue" x="160" y="52">cd && pytest</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Multi-command edge</h3>
+                            <p>The dashed blue arrow links commands split out of one chained action, such as changing directory and running a test.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Structural edge example">
+                                <rect class="edge-card-node loc" x="18" y="26" width="114" height="54" rx="12"></rect>
+                                <rect class="edge-card-node loc" x="188" y="66" width="114" height="54" rx="12"></rect>
+                                <path class="edge-card-line hier" d="M132 58 C160 64 166 76 188 88"></path>
+                                <text class="edge-card-text" x="75" y="48">view</text>
+                                <text class="edge-card-subtext" x="75" y="65">models.py</text>
+                                <text class="edge-card-text" x="245" y="88">view</text>
+                                <text class="edge-card-subtext" x="245" y="105">class User</text>
+                                <text class="edge-card-label green" x="162" y="42">parent directory</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Structural edge</h3>
+                            <p>The dashed green arrow is not time order. It shows file-navigation structure, like a child directory linked to its parent directory.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card edge-example-wide">
+                        <div class="edge-example-visual thought-continuation-visual">
+                            <svg viewBox="0 0 360 142" role="img" aria-label="Thought continuation edge example">
+                                <rect class="edge-card-node general" x="16" y="38" width="104" height="54" rx="12"></rect>
+                                <rect class="edge-card-node patch" x="236" y="38" width="104" height="54" rx="12"></rect>
+                                <path class="edge-card-line cont" d="M120 65 C158 65 196 65 236 65"></path>
+                                <text class="edge-card-text" x="68" y="58">think</text>
+                                <text class="edge-card-subtext" x="68" y="77">step 7</text>
+                                <text class="edge-card-text" x="288" y="58">edit</text>
+                                <text class="edge-card-subtext" x="288" y="77">step 8</text>
+                                <text class="edge-card-label red" x="180" y="52">substring carried forward</text>
+                            </svg>
+                            <div class="thought-pair">
+                                <div><b>Step 7 thought</b><code>I should inspect the serializer path.</code></div>
+                                <div><b>Step 8 thought</b><code><mark>I should inspect the serializer path.</mark> The bug is likely in how null values are converted, so I will patch that branch.</code></div>
+                            </div>
+                        </div>
+                        <div>
+                            <h3>Thought-continuation edge</h3>
+                            <p>The red arrow appears when a later thought starts by repeating or extending the previous thought, making copied or continued reasoning visible.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Loop edge example">
+                                <rect class="edge-card-node val" x="24" y="38" width="104" height="54" rx="12"></rect>
+                                <rect class="edge-card-node patch" x="194" y="38" width="104" height="54" rx="12"></rect>
+                                <path class="edge-card-line exec" d="M128 65 C150 65 170 65 194 65"></path>
+                                <path class="edge-card-line loop" d="M218 94 C180 126 90 124 72 94"></path>
+                                <text class="edge-card-text" x="76" y="58">pytest</text>
+                                <text class="edge-card-subtext" x="76" y="77">first run</text>
+                                <text class="edge-card-text" x="246" y="58">edit</text>
+                                <text class="edge-card-subtext" x="246" y="77">patch</text>
+                                <text class="edge-card-label" x="148" y="116">revisit / repeat</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Loop or revisit edge</h3>
+                            <p>A curved return edge makes repeated commands easy to spot, separating useful rechecking from suspicious cycling.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card edge-example-wide">
+                        <div class="edge-example-visual multi-phase-visual">
+                            <svg viewBox="0 0 360 150" role="img" aria-label="Multi-color node example">
+                                <defs>
+                                    <linearGradient id="multi-phase-node-fill" x1="0" y1="0" x2="1" y2="0">
+                                        <stop offset="0%" stop-color="#C5B3F0"></stop>
+                                        <stop offset="50%" stop-color="#C5B3F0"></stop>
+                                        <stop offset="50%" stop-color="#A8E6F0"></stop>
+                                        <stop offset="100%" stop-color="#A8E6F0"></stop>
+                                    </linearGradient>
+                                </defs>
+                                <text class="edge-card-label" x="84" y="24">two visits</text>
+                                <text class="edge-card-label" x="278" y="24">one deduplicated node</text>
+                                <rect class="edge-card-node loc" x="22" y="38" width="114" height="42" rx="12"></rect>
+                                <rect class="edge-card-node val" x="22" y="92" width="114" height="42" rx="12"></rect>
+                                <rect class="edge-card-node patch faded" x="148" y="66" width="58" height="38" rx="11"></rect>
+                                <rect class="edge-card-node multi-fill" x="236" y="56" width="108" height="64" rx="14"></rect>
+                                <path class="edge-card-line exec" d="M136 59 C170 48 204 58 236 74"></path>
+                                <path class="edge-card-line exec" d="M136 113 C170 126 204 112 236 96"></path>
+                                <text class="edge-card-text small" x="79" y="56">python</text>
+                                <text class="edge-card-subtext" x="79" y="72">localization</text>
+                                <text class="edge-card-text tiny" x="177" y="86">edit</text>
+                                <text class="edge-card-subtext" x="177" y="99">between</text>
+                                <text class="edge-card-text small" x="79" y="110">python</text>
+                                <text class="edge-card-subtext" x="79" y="126">validation</text>
+                                <text class="edge-card-text" x="290" y="80">python</text>
+                                <text class="edge-card-subtext" x="290" y="96">merged</text>
+                                <text class="edge-card-label" x="290" y="113">same command</text>
+                            </svg>
+                            <div class="multi-phase-explainer">
+                                <div><span class="phase-dot loc"></span><b>Occurrence A</b><code>python repro.py</code><p>Before the edit, the command reproduces the bug, so it is localization.</p></div>
+                                <div><span class="phase-dot val"></span><b>Occurrence B</b><code>python repro.py</code><p>After the edit, the same command checks the candidate fix, so it is validation.</p></div>
+                            </div>
+                        </div>
+                        <div>
+                            <h3>Multi-color node</h3>
+                            <p>Graphectory deduplicates repeated commands into one node. If the same command appears in different semantic contexts, the node keeps multiple phase colors instead of forcing one label.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Observation indicator example">
+                                <rect class="edge-card-node patch" x="22" y="38" width="98" height="56" rx="12"></rect>
+                                <rect class="edge-card-node val" x="202" y="38" width="98" height="56" rx="12"></rect>
+                                <path class="edge-card-line exec" d="M120 66 C144 66 178 66 202 66"></path>
+                                <rect class="observation-card-square edge-mounted" x="152" y="54" width="24" height="24" rx="6"></rect>
+                                <text class="edge-card-text" x="71" y="61">edit</text>
+                                <text class="edge-card-subtext" x="71" y="78">patch</text>
+                                <text class="edge-card-text" x="251" y="61">pytest</text>
+                                <text class="edge-card-subtext" x="251" y="78">validation</text>
+                                <text class="edge-card-label blue" x="162" y="102">observation on edge</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Observation indicator</h3>
+                            <p>When enabled, blue squares mark command feedback. Larger squares suggest longer observations, so huge test output is visible without filling the graph.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Filter cd nodes example">
+                                <line class="split-divider" x1="160" y1="18" x2="160" y2="114"></line>
+                                <text class="edge-card-label" x="80" y="24">before</text>
+                                <text class="edge-card-label" x="240" y="24">after</text>
+                                <rect class="edge-card-node general" x="18" y="46" width="54" height="42" rx="11"></rect>
+                                <rect class="edge-card-node val" x="96" y="46" width="54" height="42" rx="11"></rect>
+                                <path class="edge-card-line multi" d="M72 67 C80 67 88 67 96 67"></path>
+                                <text class="edge-card-text tiny" x="45" y="64">cd</text>
+                                <text class="edge-card-subtext" x="45" y="79">tests/</text>
+                                <text class="edge-card-text tiny" x="123" y="64">python</text>
+                                <text class="edge-card-subtext" x="123" y="79">run</text>
+                                <rect class="edge-card-node val" x="196" y="45" width="88" height="48" rx="12"></rect>
+                                <path class="cd-hat" d="M213 45 L240 26 L267 45 Z"></path>
+                                <text class="edge-card-text small" x="240" y="63">python</text>
+                                <text class="edge-card-subtext" x="240" y="80">cd compressed</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Filter cd nodes</h3>
+                            <p>Many SWE-agent runs repeatedly re-enter the same directory before patching or testing. The cd filter compresses that boilerplate so the meaningful action stays prominent.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Unique think nodes example">
+                                <line class="split-divider" x1="160" y1="18" x2="160" y2="114"></line>
+                                <text class="edge-card-label" x="80" y="24">before</text>
+                                <text class="edge-card-label" x="240" y="24">unique on</text>
+                                <rect class="edge-card-node general merged" x="36" y="48" width="88" height="50" rx="12"></rect>
+                                <text class="edge-card-text small" x="80" y="67">think</text>
+                                <text class="edge-card-subtext" x="80" y="84">3 visits</text>
+                                <rect class="edge-card-node general" x="178" y="34" width="56" height="38" rx="11"></rect>
+                                <rect class="edge-card-node general" x="244" y="34" width="56" height="38" rx="11"></rect>
+                                <rect class="edge-card-node general" x="212" y="82" width="56" height="38" rx="11"></rect>
+                                <text class="edge-card-text tiny" x="206" y="53">think</text>
+                                <text class="edge-card-subtext" x="206" y="66">bug</text>
+                                <text class="edge-card-text tiny" x="272" y="53">think</text>
+                                <text class="edge-card-subtext" x="272" y="66">patch</text>
+                                <text class="edge-card-text tiny" x="240" y="101">think</text>
+                                <text class="edge-card-subtext" x="240" y="114">test</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Unique think nodes</h3>
+                            <p>Frameworks such as OpenHands can emit many dedicated thinking steps. Keeping them unique prevents unrelated reasoning moments from collapsing into one misleading node.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="phase-card-grid">
+                    <div class="phase-card phase-localization"><div class="phase-swatch"></div><div><h3>Localization</h3><p>Finding where the bug lives: searching, reading files, reproducing failures, and inspecting stack traces.</p><code>grep "class Pipeline"</code></div></div>
+                    <div class="phase-card phase-patch"><div class="phase-swatch"></div><div><h3>Patch</h3><p>Changing the code or tests: edits, replacements, file writes, and patch-generation steps.</p><code>str_replace pipeline.py</code></div></div>
+                    <div class="phase-card phase-validation"><div class="phase-swatch"></div><div><h3>Validation</h3><p>Checking whether the candidate fix works after edits, usually through tests or reproduction scripts.</p><code>pytest tests/test_pipeline.py</code></div></div>
+                    <div class="phase-card phase-general"><div class="phase-swatch"></div><div><h3>General</h3><p>Planning, submitting, housekeeping, or actions that do not cleanly belong to the repair phases.</p><code>think / submit</code></div></div>
+                </div>
+            </div>
+        </div>`;
+}
+
 function clearGraphPane() {
-    document.getElementById('graphPane').innerHTML =
-        '<div class="placeholder">'
-        + '<span class="placeholder-icon">📊</span>'
-        + '<p>Select a graph from the list</p>'
-        + '</div>';
+    document.getElementById('graphPane').innerHTML = landingGuideHtml();
 }
 
 async function loadGraph(instanceId) {
