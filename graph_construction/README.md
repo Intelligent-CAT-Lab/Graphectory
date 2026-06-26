@@ -75,7 +75,7 @@ Edges are styled by **type**:
 
 | Style | Meaning |
 |---|---|
-| Grey solid, scaled arrowhead | Normal execution. Arrowhead size encodes thought length with a bounded scale — larger means more reasoning, but very long thoughts are capped so they do not dominate the graph. |
+| Grey solid, scaled arrowhead | Normal execution. Arrowhead size encodes thought length; larger arrowheads indicate longer reasoning text on that transition. |
 | Red solid | Thought continuation — the model's thought for this step was identical to or a prefix of the previous step's, indicating cached reasoning. |
 | Blue dashed | Intra-step — connects sub-actions within a single `&&`-chained step. |
 | Green dashed | Hierarchy — drawn between `str_replace_editor view` nodes when one path is a subdirectory or line-range subset of another. |

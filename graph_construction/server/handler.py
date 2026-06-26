@@ -37,11 +37,13 @@ from server.graph_renderer import render_graph_html
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+BROWSER_LOGO_PATH = STATIC_DIR / "browser_logo.png"
 
 _MIME: dict[str, str] = {
     ".html": "text/html; charset=utf-8",
     ".css":  "text/css; charset=utf-8",
     ".js":   "application/javascript; charset=utf-8",
+    ".png":  "image/png",
 }
 
 # Minimum fraction of trajectory instance IDs that must appear in the report
@@ -88,6 +90,9 @@ class GraphHandler(BaseHTTPRequestHandler):
         try:
             if path in ("/", "/index.html"):
                 self._send_file(STATIC_DIR / "index.html")
+
+            elif path in {"/browser_logo.png", "/favicon.png"}:
+                self._send_file(BROWSER_LOGO_PATH)
 
             elif path.startswith("/static/"):
                 self._send_file(STATIC_DIR / path[len("/static/"):])

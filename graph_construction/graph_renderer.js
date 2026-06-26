@@ -165,25 +165,19 @@ function createMarkers(svg) {
 // ==================== Edge Rendering ====================
 
 /**
- * Map a thought_length to a bounded arrowhead size.
+ * Map a thought_length to an arrowhead width.
  * Uses settings.thoughtQuotes to choose raw or clean length.
  */
 function getThoughtLength(edge) {
     return settings.thoughtQuotes ? edge.thought_length_clean : edge.thought_length_raw;
 }
 
-function thoughtToArrowSize(thoughtLength) {
-    if (thoughtLength <= 0) return 0;
-
-    // Characters can range from a few words to many thousands. A sqrt scale
-    // keeps moderate thoughts distinguishable while preventing huge thoughts
-    // from producing graph-dominating arrowheads.
-    const MIN_ARROW_SIZE = 7;
-    const MAX_ARROW_SIZE = 24;
-    const SATURATION_CHARS = 5000;
-    const capped = Math.min(thoughtLength, SATURATION_CHARS);
-    const normalized = Math.sqrt(capped / SATURATION_CHARS);
-    return MIN_ARROW_SIZE + normalized * (MAX_ARROW_SIZE - MIN_ARROW_SIZE);
+function thoughtToWidth(thoughtLength) {
+    if (thoughtLength <= 0) return 1;
+    const capped = Math.min(thoughtLength, 5000);
+    if (capped <= 200)  return 6 + (capped / 200) * 6;
+    if (capped <= 800)  return 12   + ((capped - 200) / 600) * 12;
+    return 24 + ((capped - 800) / 700) * 12;
 }
 
 function calculateEdgeStyle(edge) {
@@ -230,12 +224,12 @@ function calculateEdgeStyle(edge) {
             };
         }
         // Body stays thin; arrowhead marker scales with thought length.
-        const arrowSize = thoughtToArrowSize(tlen);
+        const w = thoughtToWidth(tlen);
         return {
             strokeWidth:    1.5,
             strokeDasharray: '',
             stroke:          '#7f8c8d',
-            markerEnd:       `url(#arrowhead-exec-s${Math.round(arrowSize)})`,
+            markerEnd:       `url(#arrowhead-exec-w${Math.round(w)})`,
             opacity:         1,
         };
     }
@@ -342,17 +336,16 @@ function renderEdges(svg, g, defs) {
     });
 
     // Create per-width arrowhead markers for thought-length scaling.
-    function makeArrowMarker(id, size, color) {
+    function makeArrowMarker(id, w, color) {
         const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
         m.setAttribute('id', id);
-        m.setAttribute('markerWidth',  String(size + 2));
-        m.setAttribute('markerHeight', String(size + 2));
-        m.setAttribute('refX', String(size));
-        m.setAttribute('refY', String(size / 2));
-        m.setAttribute('markerUnits', 'userSpaceOnUse');
+        m.setAttribute('markerWidth',  String(6 + w));
+        m.setAttribute('markerHeight', String(6 + w));
+        m.setAttribute('refX', String(5 + w));
+        m.setAttribute('refY', String((4 + w) / 2));
         m.setAttribute('orient', 'auto');
         const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        p.setAttribute('d', `M0,0 L0,${size} L${size},${size / 2} z`);
+        p.setAttribute('d', `M0,0 L0,${4 + w} L${5 + w},${(4 + w) / 2} z`);
         p.setAttribute('fill', color);
         m.appendChild(p);
         defs.appendChild(m);
@@ -363,10 +356,10 @@ function renderEdges(svg, g, defs) {
     edgesData.forEach(edge => {
         if (edge.type === 'exec' && !edge.is_multi_node_step && !edge.is_thought_continuation) {
             const tlen = getThoughtLength(edge);
-            if (tlen > 0) thoughtWidthsSeen.add(Math.round(thoughtToArrowSize(tlen)));
+            if (tlen > 0) thoughtWidthsSeen.add(Math.round(thoughtToWidth(tlen)));
         }
     });
-    thoughtWidthsSeen.forEach(size => makeArrowMarker(`arrowhead-exec-s${size}`, size, '#7f8c8d'));
+    thoughtWidthsSeen.forEach(w => makeArrowMarker(`arrowhead-exec-w${w}`, w, '#7f8c8d'));
 
     g.edges().forEach(e => {
         const edge        = g.edge(e);

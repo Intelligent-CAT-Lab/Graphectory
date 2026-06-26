@@ -13,13 +13,14 @@ from pathlib import Path
 from networkx.readwrite import json_graph
 from collections import defaultdict
 
-# Optional datasets import for difficulty lookup
+# Optional datasets import for difficulty lookup. The live viewer should still
+# start if HuggingFace datasets is unavailable or broken in the active env.
 try:
     from datasets import load_dataset
     swe_bench_ds = load_dataset("princeton-nlp/SWE-bench_Verified", split="test")
     difficulty_lookup = {row["instance_id"]: row["difficulty"] for row in swe_bench_ds}
-except ImportError:
-    # Fallback if datasets is not available
+except Exception as exc:
+    print(f"[buildGraph] SWE-bench difficulty lookup disabled: {exc}")
     difficulty_lookup = {}
 
 

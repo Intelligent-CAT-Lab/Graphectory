@@ -224,10 +224,10 @@ function landingGuideHtml() {
                 <div class="landing-hero">
                     <div>
                         <p class="eyebrow">How to read a Graphectory</p>
-                        <h2>Read the viewer through small graph examples.</h2>
+                        <h2>Explore the patterns and symbols inside agent trajectories.</h2>
                         <p>
-                            Each card below isolates one visual convention from the trajectory viewer, including phase
-                            colors, edge styles, repeated commands, observation markers, and clutter-reduction toggles.
+                            These mini-graphs decode the visual grammar of Graphectory: phase colors, edge styles,
+                            repeated commands, environment feedback, and the toggles that tame noisy traces.
                         </p>
                     </div>
                 </div>
@@ -400,26 +400,6 @@ function landingGuideHtml() {
 
                     <div class="edge-example-card">
                         <div class="edge-example-visual">
-                            <svg viewBox="0 0 320 132" role="img" aria-label="Observation indicator example">
-                                <rect class="edge-card-node patch" x="22" y="38" width="98" height="56" rx="12"></rect>
-                                <rect class="edge-card-node val" x="202" y="38" width="98" height="56" rx="12"></rect>
-                                <path class="edge-card-line exec" d="M120 66 C144 66 178 66 202 66"></path>
-                                <rect class="observation-card-square edge-mounted" x="152" y="54" width="24" height="24" rx="6"></rect>
-                                <text class="edge-card-text" x="71" y="61">edit</text>
-                                <text class="edge-card-subtext" x="71" y="78">patch</text>
-                                <text class="edge-card-text" x="251" y="61">pytest</text>
-                                <text class="edge-card-subtext" x="251" y="78">validation</text>
-                                <text class="edge-card-label blue" x="162" y="102">observation on edge</text>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3>Observation indicator</h3>
-                            <p>When enabled, blue squares mark command feedback. Larger squares suggest longer observations, so huge test output is visible without filling the graph.</p>
-                        </div>
-                    </div>
-
-                    <div class="edge-example-card">
-                        <div class="edge-example-visual">
                             <svg viewBox="0 0 320 132" role="img" aria-label="Filter cd nodes example">
                                 <line class="split-divider" x1="160" y1="18" x2="160" y2="114"></line>
                                 <text class="edge-card-label" x="80" y="24">before</text>
@@ -440,6 +420,26 @@ function landingGuideHtml() {
                         <div>
                             <h3>Filter cd nodes</h3>
                             <p>Many SWE-agent runs repeatedly re-enter the same directory before patching or testing. The cd filter compresses that boilerplate so the meaningful action stays prominent.</p>
+                        </div>
+                    </div>
+
+                    <div class="edge-example-card">
+                        <div class="edge-example-visual">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Observation indicator example">
+                                <rect class="edge-card-node patch" x="22" y="38" width="98" height="56" rx="12"></rect>
+                                <rect class="edge-card-node val" x="202" y="38" width="98" height="56" rx="12"></rect>
+                                <path class="edge-card-line exec" d="M120 66 C144 66 178 66 202 66"></path>
+                                <rect class="observation-card-square edge-mounted" x="152" y="54" width="24" height="24" rx="6"></rect>
+                                <text class="edge-card-text" x="71" y="61">edit</text>
+                                <text class="edge-card-subtext" x="71" y="78">patch</text>
+                                <text class="edge-card-text" x="251" y="61">pytest</text>
+                                <text class="edge-card-subtext" x="251" y="78">validation</text>
+                                <text class="edge-card-label blue" x="162" y="102">observation on edge</text>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3>Observation indicator</h3>
+                            <p>When enabled, blue squares mark command feedback. Larger squares suggest longer observations, so huge test output is visible without filling the graph.</p>
                         </div>
                     </div>
 
