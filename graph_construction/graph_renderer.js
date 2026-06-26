@@ -1,5 +1,38 @@
 // graph_renderer.js — SVG graph rendering with Dagre layout.
 
+// ==================== Label Sizing ====================
+const NODE_LABEL_MIN_WIDTH = 100;
+const NODE_LABEL_PADDING_X = 24;
+
+function estimateNodeTextWidth(line, lineIndex) {
+    if (!line) return 0;
+    if (lineIndex === 0) return line.length * 7.8;
+    if (lineIndex === 1) return line.length * 6.2;
+    return line.length * 6.4;
+}
+
+function legacyNodeSize(lines) {
+    const line1Len = lines[0] ? Math.min(lines[0].length, 30) : 0;
+    const restMax = lines.slice(1).reduce((m, l) => Math.max(m, Math.min(l.length, 35)), 0);
+    const widthFromL1 = line1Len * 7.5 + 24;
+    const widthFromRest = restMax * 5.5 + 24;
+    return {
+        width: Math.max(100, widthFromL1, widthFromRest),
+        height: Math.max(40, lines.length * 16 + 12),
+    };
+}
+
+function containedNodeSize(lines) {
+    const contentWidth = lines.reduce(
+        (m, line, i) => Math.max(m, estimateNodeTextWidth(line, i)),
+        0
+    );
+    return {
+        width: Math.max(NODE_LABEL_MIN_WIDTH, contentWidth + NODE_LABEL_PADDING_X),
+        height: Math.max(40, lines.length * 16 + 12),
+    };
+}
+
 // ==================== Layout and Coordinate Normalization ====================
 function layoutGraph() {
     // Create dagre graph
@@ -17,16 +50,13 @@ function layoutGraph() {
     // Add nodes with sizing based on label content.
     // Apply verbosity setting to choose which label to use for sizing.
     nodesData.forEach(node => {
-        const label = settings.nodeVerbosity ? node.label : node.label_minimal;
+        const label = node.label || node.label_minimal || node.id;
         node.displayLabel = label;  // Store for rendering
         
         const lines = label.split('\\n');
-        const line1Len = lines[0] ? Math.min(lines[0].length, 30) : 0;
-        const restMax  = lines.slice(1).reduce((m, l) => Math.max(m, Math.min(l.length, 35)), 0);
-        const widthFromL1   = line1Len  * 7.5 + 24;
-        const widthFromRest = restMax   * 5.5 + 24;
-        const width  = Math.max(100, widthFromL1, widthFromRest);
-        const height = Math.max(40, lines.length * 16 + 12);
+        const { width, height } = settings.nodeVerbosity
+            ? legacyNodeSize(lines)
+            : containedNodeSize(lines);
         g.setNode(node.id, { width, height, ...node });
     });
     
@@ -471,6 +501,7 @@ function renderNodes(svg, g, defs) {
             openSidebar(node);
         });
 
+        let nodeFillAttr = node.color || '#CFE0F6';
         if (node.colors && node.colors.length > 1) {
             const gradId = `grad-${nodeId.replace(/[^a-zA-Z0-9]/g, '_')}`;
             const grad   = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
@@ -488,10 +519,9 @@ function renderNodes(svg, g, defs) {
                 grad.appendChild(s2);
             });
             defs.appendChild(grad);
-            nodeGroup.appendChild(makeNodeRect(node, `url(#${gradId})`));
-        } else {
-            nodeGroup.appendChild(makeNodeRect(node, node.color || '#CFE0F6'));
+            nodeFillAttr = `url(#${gradId})`;
         }
+        nodeGroup.appendChild(makeNodeRect(node, nodeFillAttr));
         
         // Add triangular "hat" for nodes that had cd command stripped
         if (node.has_cd) {
@@ -511,7 +541,6 @@ function renderNodes(svg, g, defs) {
             nodeGroup.appendChild(triangle);
         }
 
-        
         const lines = node.displayLabel.split('\\n');
         const lineHeight = 16;
         const totalTextHeight = lines.length * lineHeight;
@@ -523,8 +552,14 @@ function renderNodes(svg, g, defs) {
             text.setAttribute('y', startY + i * lineHeight);
             text.setAttribute('text-anchor', 'middle');
             text.setAttribute('dominant-baseline', 'middle');
-            
-            if (i === 0) {
+
+            if (settings.nodeVerbosity) {
+                // Legacy verbose mode intentionally keeps the old compact boxes
+                // and larger text, including long labels that can extend out.
+                text.setAttribute('font-size', '18');
+                text.setAttribute('font-weight', '600');
+                text.setAttribute('fill', '#2c3e50');
+            } else if (i === 0) {
                 // Line 1: action title — bold, dark, readable
                 text.setAttribute('font-weight', 'bold');
                 text.setAttribute('font-size', '12');

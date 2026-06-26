@@ -52,7 +52,7 @@ Five toggles sit above the instance list. Changing any of them immediately re-re
 
 | Toggle | Default | Effect |
 |---|---|---|
-| **Verbose node labels** | On | Shows multi-line labels: action name, step number, and file path or view range. When off, nodes show only the action verb. |
+| **Legacy verbose labels** | Off | When off, nodes use wider contained labels for the full action name, step number, and file path or view range. When on, the viewer restores the older compact verbose style where long parameters can extend beyond the node. |
 | **Exclude quotes in thought length** | On | Strips content inside backticks and quote characters before measuring thought length, so arrowhead sizes reflect genuine reasoning rather than copied code. |
 | **Filter cd (show ▲ hat)** | Off | Strips leading `cd` commands from multi-command steps and replaces them with a small orange triangle (▲) on the node. |
 | **Show observation indicators** | Off | Draws a small coloured square on each edge at the 25% point, encoding the length and success/failure outcome of the previous step's tool response. |

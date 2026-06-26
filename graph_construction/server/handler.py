@@ -109,7 +109,7 @@ class GraphHandler(BaseHTTPRequestHandler):
                     instance_id      = instance_id,
                     filter_cd        = _bool_param(params, "filter_cd",        default=False),
                     thought_quotes   = _bool_param(params, "thought_quotes",   default=True),
-                    node_verbosity   = _bool_param(params, "node_verbosity",   default=True),
+                    node_verbosity   = _bool_param(params, "node_verbosity",   default=False),
                     show_observation = _bool_param(params, "show_observation", default=False),
                     unique_think     = _bool_param(params, "unique_think",     default=True),
                 )

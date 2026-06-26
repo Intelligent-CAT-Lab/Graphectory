@@ -171,9 +171,6 @@ svg {
 
 .node text {
     pointer-events: none;
-    font-size: 18px;
-    font-weight: 600;
-    fill: #2c3e50;
 }
 
 .edge path {
