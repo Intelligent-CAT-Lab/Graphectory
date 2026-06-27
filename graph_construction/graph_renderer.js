@@ -47,10 +47,9 @@ function layoutGraph() {
     });
     g.setDefaultEdgeLabel(() => ({}));
     
-    // Add nodes with sizing based on label content.
-    // Apply verbosity setting to choose which label to use for sizing.
+    // Add nodes with sizing based on label content and display mode.
     nodesData.forEach(node => {
-        const label = node.label || node.label_minimal || node.id;
+        const label = node.label || node.id;
         node.displayLabel = label;  // Store for rendering
         
         const lines = label.split('\\n');
@@ -604,8 +603,6 @@ function setupTooltips() {
 }
 
 // ==================== Detail Sidebar ====================
-let sidebarNodeId = null;
-let sidebarStepIdx = 0;        // which step visit is being shown (0-based within step_data)
 let sidebarCustomWidth = null;  // remembers user-dragged width across open/close cycles
 
 /**
@@ -613,9 +610,6 @@ let sidebarCustomWidth = null;  // remembers user-dragged width across open/clos
  * Called from the click handler set up in renderNodes.
  */
 function openSidebar(node) {
-    sidebarNodeId = node.id;
-    sidebarStepIdx = 0;         // reset to first visit on each new node
-
     const sidebar  = document.getElementById('detailSidebar');
     // Restore custom width if the user previously dragged the resizer
     sidebar.style.width = sidebarCustomWidth ? sidebarCustomWidth + 'px' : '';
@@ -637,7 +631,6 @@ function openSidebar(node) {
             btn.className   = 'step-tab' + (i === 0 ? ' active' : '');
             btn.textContent = `Step ${sd.step_idx}`;
             btn.addEventListener('click', () => {
-                sidebarStepIdx = i;
                 // Re-render content and update active tab
                 document.querySelectorAll('.step-tab').forEach((b, j) =>
                     b.classList.toggle('active', j === i)
@@ -659,7 +652,6 @@ function closeSidebar() {
     const sidebar = document.getElementById('detailSidebar');
     sidebar.style.width = '';   // clear inline width so CSS transition to 0 takes effect
     sidebar.classList.remove('open');
-    sidebarNodeId = null;
     // Clear content after the CSS transition so the DOM collapse never races
     // with the width animation and causes a page-height flash.
     setTimeout(() => {

@@ -33,7 +33,6 @@ async function loadConfig() {
         if (data.trajs) {
             document.getElementById('trajsInput').value  = data.trajs;
             document.getElementById('reportInput').value = data.eval_report;
-            updateDataSourceLabel(data.trajs);
             await loadGraphList();
         }
     } catch (_) {}
@@ -45,10 +44,6 @@ function setDataSourceExpanded(open) {
     dataSourceExpanded = open;
     document.getElementById('dataSourceBody').style.display = open ? 'flex' : 'none';
     document.getElementById('dsChevron').textContent = open ? '▴' : '▾';
-}
-
-function updateDataSourceLabel(trajsPath) {
-    document.getElementById('dataSourceLabel').textContent = 'Data Source';
 }
 
 async function applyDataSource() {
@@ -72,7 +67,6 @@ async function applyDataSource() {
         const data = await res.json();
         if (!res.ok) { showDsError(data.error || `Server error (HTTP ${res.status})`); return; }
 
-        updateDataSourceLabel(data.trajs);
         activeId = null;
         clearGraphPane();
         setDataSourceExpanded(false);
@@ -119,9 +113,11 @@ async function loadGraphList() {
         const res = await fetch('/api/graphs');
         allGraphs = await res.json();
         renderStats(allGraphs);
-        renderList(allGraphs);
         const q = document.getElementById('searchInput').value.toLowerCase();
-        if (q) renderList(allGraphs.filter(g => g.instance_id.toLowerCase().includes(q)));
+        const visibleGraphs = q
+            ? allGraphs.filter(g => g.instance_id.toLowerCase().includes(q))
+            : allGraphs;
+        renderList(visibleGraphs);
     } catch (_) {
         document.getElementById('graphList').innerHTML =
             '<div class="placeholder" style="position:relative">Failed to load graphs.</div>';
@@ -868,6 +864,7 @@ function skRender(data) {
     const defsEl = mkEl('defs');
     for (const fromPh of SK_PHASE_ORDER) {
         for (const toPh of SK_PHASE_ORDER) {
+            if (fromPh === toPh) continue;
             const lg = mkEl('linearGradient', {
                 id: `skrg_${fromPh}_${toPh}`,
                 gradientUnits: 'userSpaceOnUse',
@@ -928,14 +925,11 @@ function skRender(data) {
                 'Z',
             ].join(' ');
 
-            const isSelf      = fromPh === toPh;
-            const baseOpacity = isSelf ? '0.40' : '0.60';
-
             const path = mkEl('path', {
                 d,
                 fill:    `url(#skrg_${fromPh}_${toPh})`,
                 stroke:  'none',
-                opacity: baseOpacity,
+                opacity: '0.60',
                 style:   'cursor:pointer; transition:opacity .12s;',
             });
             path.addEventListener('mouseenter', e => {
@@ -944,7 +938,7 @@ function skRender(data) {
             });
             path.addEventListener('mousemove',  skMoveTooltip);
             path.addEventListener('mouseleave', () => {
-                path.setAttribute('opacity', baseOpacity);
+                path.setAttribute('opacity', '0.60');
                 skHideTooltip();
             });
             ribbonG.appendChild(path);
@@ -1036,9 +1030,7 @@ function skShowTooltip(e, info) {
         html += `<br><b>${info.count}</b> trajectories (${pct}%)`;
     } else {
         html  = `<b style="color:${SK_PHASE_RIBBON[info.from]}">${skCap(info.from)}</b>`;
-        html += info.from === info.to
-            ? ` <span style="color:#aaa">→ stays same phase</span>`
-            : ` → <b style="color:${SK_PHASE_RIBBON[info.to]}">${skCap(info.to)}</b>`;
+        html += ` → <b style="color:${SK_PHASE_RIBBON[info.to]}">${skCap(info.to)}</b>`;
         html += `<br>Step ${info.step + 1} → ${info.step + 2}`;
         html += `<br><b>${info.count}</b> trajectories`;
     }

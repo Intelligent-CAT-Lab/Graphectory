@@ -24,8 +24,6 @@ except Exception as exc:
     difficulty_lookup = {}
 
 
-FONT_FAMILY = os.environ.get("GRAPH_FONT", "DejaVu Sans, Arial, sans-serif")
-
 # ── Thought-length helpers ──────────────────────────────────────────────────
 
 def compute_thought_length_raw(thought: str) -> int:
@@ -138,7 +136,6 @@ class GraphBuilder:
         self.localization_nodes = []
         self.prev_phases = set()
         self.previous_node = None
-        self.thought_history = []  # Track (node_key, thought_text) pairs
 
     def add_or_update_node(self, node_label, args, flags, phase, step_idx,
                           tool=None, command=None, subcommand=None, thought_length=0, has_cd=False):
@@ -234,30 +231,6 @@ class GraphBuilder:
             phase: Phase to add
         """
         self.prev_phases.add(phase)
-
-    def track_thought(self, node_key, thought_text):
-        """Track thought text for a node and detect substring relationships.
-        
-        Args:
-            node_key: The node to associate with this thought
-            thought_text: The thought text content
-        """
-        # Only track non-empty thoughts
-        if not thought_text or not thought_text.strip():
-            return
-        
-        # Check if this thought is a substring continuation of the previous thought
-        if self.thought_history:
-            prev_node_key, prev_thought = self.thought_history[-1]
-            
-            # Check if previous thought is a substring of current thought
-            # (indicating the current thought extends the previous one)
-            if prev_thought and thought_text.startswith(prev_thought):
-                # Add a "thought" edge to show this relationship
-                self.G.add_edge(prev_node_key, node_key, type="thought", label="")
-        
-        # Add to history
-        self.thought_history.append((node_key, thought_text))
 
     def finalize_and_save(self, output_dir, instance_id, eval_report_path, template_dir=None, metadata_comment=""):
         """Build hierarchical edges, add metadata, and save graph.

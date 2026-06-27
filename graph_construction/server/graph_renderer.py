@@ -7,7 +7,7 @@ in graph_template.html with inlined CSS, JS, and serialised graph data.
 Public surface:
 
     html: str = render_graph_html(G, filter_cd, thought_quotes,
-                                   node_verbosity, show_observation, assets_dir)
+                                  node_verbosity, show_observation, assets_dir)
 """
 
 import json
@@ -110,7 +110,6 @@ def render_graph_html(
     # Graph data
     html = html.replace("{{NODES_DATA}}",   _safe_json(nodes_data))
     html = html.replace("{{EDGES_DATA}}",   _safe_json(edges_data))
-    html = html.replace("{{PHASE_COLORS}}", _safe_json(PHASE_COLORS))
     html = html.replace("{{SETTINGS}}",     _safe_json(settings))
 
     # Inline assets so the rendered page is fully self-contained.
@@ -203,7 +202,6 @@ def _prepare_nodes(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
         nodes.append({
             "id":                 node_id,
             "label":              _make_label(data),
-            "label_minimal":      _make_label_minimal(data),
             "tooltip":            _make_tooltip(data),
             "color":              colors[0] if colors else PHASE_COLORS["general"],
             "colors":             colors,
@@ -237,24 +235,6 @@ def _node_colors(data: dict) -> list[str]:
             result.append(ph)
 
     return [PHASE_COLORS.get(ph, PHASE_COLORS["general"]) for ph in result]
-
-
-def _make_label_minimal(data: dict) -> str:
-    """Single-token label used when verbose node labels are disabled.
-
-    Examples::
-
-        "str_replace_editor: view"  →  "view"
-        "grep -r foo src/"          →  "grep"
-        "python"                    →  "python"
-    """
-    raw = (data.get("label") or "").strip()
-    if not raw:
-        return "action"
-    if ": " in raw:
-        return raw.split(": ", 1)[1].split()[0][:20]
-    tokens = raw.split()
-    return tokens[0][:20] if tokens else raw[:20]
 
 
 def _make_label(data: dict) -> str:

@@ -45,20 +45,6 @@ h1 {
     gap: 8px;
 }
 
-.metadata-comment {
-    margin-top: 12px;
-    padding: 12px;
-    background: #f8f9fa;
-    border-left: 4px solid #667eea;
-    border-radius: 4px;
-    color: #495057;
-    font-size: 14px;
-}
-
-.metadata-comment strong {
-    color: #667eea;
-}
-
 .status-badge {
     padding: 6px 14px;
     border-radius: 20px;
@@ -449,19 +435,6 @@ svg {
     color: #445;
     font-style: italic;
 }
-
-/* Outcome pill inside sidebar */
-.outcome-pill {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: 10px;
-    margin-left: 6px;
-    vertical-align: middle;
-}
-.outcome-pill.success { background: #1a4a2a; color: #4ade80; }
-.outcome-pill.failure { background: #4a1a1a; color: #ff8080; }
 
 /* ── Fullscreen mode ────────────────────────────────────────────────────── */
 /* When the whole document is fullscreened we force the graph-container to  */

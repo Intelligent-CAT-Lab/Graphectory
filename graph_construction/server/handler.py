@@ -117,10 +117,6 @@ class GraphHandler(BaseHTTPRequestHandler):
             elif path == "/api/sankey":
                 self._api_sankey()
 
-            elif path == "/sankey":
-                # Serve the Sankey page from static dir
-                self._send_file(STATIC_DIR / "sankey.html")
-
             elif path == "/api/config":
                 self._api_get_config()
 
@@ -518,7 +514,6 @@ def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> lis
 
         # v1.0 text format
         if traj_data.get("trajectory_format") == "mini-swe-agent-1":
-            import re
             i = 2
             while i < len(messages):
                 msg = messages[i]
