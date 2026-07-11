@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from buildGraph import (
-    GraphBuilder as _GraphBuilderBase,
+    GraphBuilder,
     determine_resolution_status,
     check_edit_status,
     compute_thought_length_raw,
@@ -25,20 +25,15 @@ from buildGraph import (
     build_hierarchical_edges,
 )
 
-import networkx as nx
-
-
 # ── Test-outcome helpers ─────────────────────────────────────────────────────
 
-TEST_COMMANDS = {"python", "python2", "python3", "pytest", "unittest", "nosetests", "tox"}
 RE_PYTEST_FAIL  = re.compile(r"\b(\d+)\s+failed\b",  re.IGNORECASE)
 RE_PYTEST_ERROR = re.compile(r"\b(\d+)\s+errors?\b", re.IGNORECASE)
 RE_PYTEST_PASS  = re.compile(r"\b(\d+)\s+passed\b",  re.IGNORECASE)
 EXCEPTION_SIGNS = ["Traceback (most recent call last):"]
 
 
-def check_command_outcome(command: str, observation: str,
-                          tool: str = None, subcommand: str = None,
+def check_command_outcome(observation: str, tool: str = None, subcommand: str = None,
                           args: dict = None) -> str | None:
     """Return 'success', 'failure', or None for a command + its observation."""
     obs = observation or ""
@@ -63,13 +58,6 @@ def check_command_outcome(command: str, observation: str,
         return "failure"
 
     return None
-
-
-# ── Extended GraphBuilder ────────────────────────────────────────────────────
-
-class GraphBuilder(_GraphBuilderBase):
-    """Extends the base GraphBuilder – no overrides needed; inherits everything."""
-    pass
 
 
 # ── Directory scanning ──────────────────────────────────────────────────────
@@ -641,7 +629,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
             phase = get_phase(tool, subcommand, command, args, prev_phases_list, flags)
 
             outcome = check_command_outcome(
-                command=command, observation=observation,
+                observation=observation,
                 tool=tool, subcommand=subcommand,
                 args=args if isinstance(args, dict) else {},
             )
@@ -873,7 +861,7 @@ def _build_graph_msa_v1(traj_data: dict, instance_id: str,
             phase = get_phase(tool, subcommand, command, args, prev_phases_list, flags)
 
             outcome = check_command_outcome(
-                command=command, observation=observation,
+                observation=observation,
                 tool=tool, subcommand=subcommand,
                 args=args if isinstance(args, dict) else {},
             )
@@ -1115,7 +1103,7 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
                 phase = get_phase(tool, subcommand, command, args, prev_phases_list, flags)
 
                 outcome = check_command_outcome(
-                    command=command, observation=observation,
+                    observation=observation,
                     tool=tool, subcommand=subcommand,
                     args=args if isinstance(args, dict) else {},
                 )
@@ -1343,7 +1331,7 @@ def build_graph(traj_data: dict, instance_id: str,
             phase = get_phase(tool, subcommand, command, args, prev_phases_list, flags)
 
             outcome = check_command_outcome(
-                command=command, observation=observation,
+                observation=observation,
                 tool=tool, subcommand=subcommand,
                 args=args if isinstance(args, dict) else {},
             )

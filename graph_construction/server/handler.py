@@ -37,11 +37,13 @@ from server.graph_renderer import render_graph_html
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+BROWSER_LOGO_PATH = STATIC_DIR / "browser_logo.png"
 
 _MIME: dict[str, str] = {
     ".html": "text/html; charset=utf-8",
     ".css":  "text/css; charset=utf-8",
     ".js":   "application/javascript; charset=utf-8",
+    ".png":  "image/png",
 }
 
 # Minimum fraction of trajectory instance IDs that must appear in the report
@@ -89,6 +91,9 @@ class GraphHandler(BaseHTTPRequestHandler):
             if path in ("/", "/index.html"):
                 self._send_file(STATIC_DIR / "index.html")
 
+            elif path in {"/browser_logo.png", "/favicon.png"}:
+                self._send_file(BROWSER_LOGO_PATH)
+
             elif path.startswith("/static/"):
                 self._send_file(STATIC_DIR / path[len("/static/"):])
 
@@ -104,17 +109,13 @@ class GraphHandler(BaseHTTPRequestHandler):
                     instance_id      = instance_id,
                     filter_cd        = _bool_param(params, "filter_cd",        default=False),
                     thought_quotes   = _bool_param(params, "thought_quotes",   default=True),
-                    node_verbosity   = _bool_param(params, "node_verbosity",   default=True),
+                    node_verbosity   = _bool_param(params, "node_verbosity",   default=False),
                     show_observation = _bool_param(params, "show_observation", default=False),
                     unique_think     = _bool_param(params, "unique_think",     default=True),
                 )
 
             elif path == "/api/sankey":
                 self._api_sankey()
-
-            elif path == "/sankey":
-                # Serve the Sankey page from static dir
-                self._send_file(STATIC_DIR / "sankey.html")
 
             elif path == "/api/config":
                 self._api_get_config()
@@ -513,7 +514,6 @@ def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> lis
 
         # v1.0 text format
         if traj_data.get("trajectory_format") == "mini-swe-agent-1":
-            import re
             i = 2
             while i < len(messages):
                 msg = messages[i]

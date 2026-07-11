@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trajectory Graph Browser</title>
+    <link rel="icon" type="image/png" href="/browser_logo.png">
     <link rel="stylesheet" href="/static/browser.css">
     <style>
         /* ── Sankey list-item button ─────────────────────────────── */
@@ -82,8 +83,6 @@
         .sk-chip-loc   { background: #C5B3F0; color: #2c3e50; }
         .sk-chip-patch { background: #FCC9B0; color: #2c3e50; }
         .sk-chip-val   { background: #A8E6F0; color: #2c3e50; }
-        .sk-chip-gen   { background: #CFE0F6; color: #2c3e50; }
-
         /* Stats strip */
         .sk-stats {
             background: #fff; border-bottom: 1px solid #e8eaed;
@@ -139,9 +138,9 @@
         </div>
 
         <!-- ── Data source configurator ────────────────────────── -->
-        <div class="data-source" id="dataSource">
-            <button class="data-source-toggle" id="dataSourceToggle" onclick="toggleDataSource()">
-                <span id="dataSourceLabel">Data Source</span>
+        <div class="data-source">
+            <button class="data-source-toggle" onclick="toggleDataSource()">
+                <span>Data Source</span>
                 <span class="ds-chevron" id="dsChevron">▴</span>
             </button>
             <div class="data-source-body" id="dataSourceBody">
@@ -162,9 +161,9 @@
             <input type="text" id="searchInput" class="search-input"
                 placeholder="Search instances…" autofocus>
             <label class="toggle-row">
-                <span class="toggle-label">Verbose node labels</span>
+                <span class="toggle-label">Legacy verbose labels</span>
                 <div class="toggle-wrap">
-                    <input type="checkbox" id="nodeVerbosityToggle" checked>
+                    <input type="checkbox" id="nodeVerbosityToggle">
                     <span class="toggle-slider"></span>
                 </div>
             </label>
