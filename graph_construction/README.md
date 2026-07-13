@@ -90,27 +90,34 @@ Click any node to open a detail sidebar showing the full thought, action, and ob
 
 ### Quick Start
 
-**SWE-agent:**
-
+**SWE-agent with DeepSeek-V3:**
 ```bash
-python generatejson.py \
-    --agent sa \
-    --model dsk-v3 \
-    --trajs path/to/trajectory/directory \
-    --eval_report path/to/report.json \
-    --output_dir output
+python graph_construction/generatejson.py \
+  --agent sa --model dsk-v3 \
+  --trajs data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test \
+  --eval_report data/SWE-agent/reports/deepseek-chat.json \
+  --output_dir data/samples
 ```
 
-**OpenHands:**
-
+**OpenHands with Claude-Sonnet-4:**
 ```bash
-python generatejson.py \
-    --agent oh \
-    --model cld-4 \
-    --trajs path/to/output.jsonl \
-    --eval_report path/to/report.json \
-    --output_dir output
+python graph_construction/generatejson.py \
+  --agent oh --model cld-4 \
+  --trajs data/samples/OpenHands/trajectories/deepseek-chat_maxiter_100_N_v0.40.0-no-hint-run_1/sample_output.jsonl \
+  --eval_report data/samples/OpenHands/trajectories/deepseek-chat_maxiter_100_N_v0.40.0-no-hint-run_1/report.json \
+  --output_dir data/samples
 ```
+
+**mini-swe-agent with gpt-5-mini:**
+```bash
+python graph_construction/generatejson.py \
+  --agent msa --model gpt-5-mini \
+  --trajs data/samples/mini-swe-agent/trajectories/gpt-5-mini \
+  --eval_report data/samples/mini-swe-agent/reports/gpt-5-mini.json \
+  --output_dir data/samples
+```
+
+**Output**: `{output_dir}/{Agent}/graphs/{model}/{instance_id}/{instance_id}.json`
 
 ### Arguments
 
@@ -165,3 +172,69 @@ Both tools share the same graph construction pipeline.
 **Hierarchical edges.** After the main graph is built, a post-processing pass adds green hierarchy edges between `str_replace_editor view` nodes — connecting parent directories to child paths, and wider line ranges to narrower ones nested within them.
 
 **Thought continuation.** If the current step's thought is identical to or a prefix of the previous step's thought, the connecting edge is flagged as a thought continuation and drawn in red, making it easy to spot steps where the model reused cached reasoning.
+<<<<<<< Updated upstream
+=======
+
+
+## Extending Graphectory
+
+### Adding New Models
+
+The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility. To add new models, edit [generatejson.py:38](graph_construction/generatejson.py#L38):
+
+```python
+SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "my-model"}
+```
+
+Then run with your new model:
+```bash
+python graph_construction/generatejson.py \
+  --agent sa --model my-model \
+  --trajs <your_trajectories> \
+  --eval_report <your_report> \
+  --output_dir <output>
+```
+
+### Supporting New SWE-agent Tools
+
+To parse custom SWE-agent tools, add their `config.yaml` files to [generatejson.py:558-562](graph_construction/generatejson.py#L558-L562):
+
+```python
+def setup_parser_for_agent(agent: str) -> CommandParser:
+    parser = CommandParser()
+    tool_configs = []
+    if agent == "sa":
+        tool_configs = [
+            "data/SWE-agent/tools/edit_anthropic/config.yaml",
+            "data/SWE-agent/tools/review_on_submit_m/config.yaml",
+            "data/SWE-agent/tools/registry/config.yaml",
+            "data/SWE-agent/tools/your_custom_tool/config.yaml",  # Add here
+        ]
+    if tool_configs:
+        parser.load_tool_yaml_files(tool_configs)
+    return parser
+```
+
+### Supporting New Agents
+
+To add support for a new agent framework:
+
+1. **Implement trajectory builder** in [buildGraph.py](graph_construction/buildGraph.py) (see existing functions at lines 274 & 365):
+   ```python
+    def build_graph_from_newagent_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path):
+        builder = GraphBuilder()
+        # Parse agent-specific trajectory structure
+        # Convert to builder.add_or_update_node() calls
+        return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
+   ```
+
+2. **Register the agent** in [generatejson.py:37-50](graph_construction/generatejson.py#L37-L50):
+   - Update `SUPPORTED_AGENTS` and `AGENT_NAMES`
+
+3. **Add trajectory loading logic** in [generatejson.py](graph_construction/generatejson.py):
+   - Update `load_trajectories()` to handle NewAgent's file format
+   - Add branch in `GraphProcessor.process_trajectory()` to call your builder function
+
+**Key principle**: Different agents have different trajectory formats, but all generate the same unified graph structure (nodes with phases, execution/hierarchical edges, metadata).
+
+---
