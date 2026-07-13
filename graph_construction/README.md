@@ -161,18 +161,23 @@ Each JSON file is a NetworkX node-link graph. Nodes carry label, phase, step ind
 
 ## How Graphs Are Built
 
-Both tools share the same graph construction pipeline.
+Both `generatejson.py` and `live_graph_server.py` share the same graph construction pipeline:
 
-**Parsing.** Each step's action string is parsed by `commandParser.py` into a list of structured records — one per distinct tool call or shell command. `&&`-chained commands produce multiple records per step.
+1. **Parsing**: Agent trajectories → atomic actions using [commandParser.py](graph_construction/commandParser.py)
+2. **Node Deduplication**: Identical actions merged with occurrence tracking
+3. **Phase Classification**: Actions categorized using heuristics ([mapPhase.py](graph_construction/mapPhase.py)):
+   - **Localization**: Information gathering, searching, test generation before patching
+   - **Patch**: Creating/editing non-test files
+   - **Validation**: Running tests or editing test files after patching
+   - **General**: Other actions (planning, environment setup)
+4. **Edge Construction**: Temporal edges (sequential execution flow) + structural edges (hierarchical relationship in the code base) + Thought continuation (If the current step's thought is identical to or a prefix of the previous step's thought, the connecting edge is flagged as a thought continuation and drawn in red, making it easy to spot steps where the model reused cached reasoning.)
+5. **Output**:
+   - `generatejson.py`: JSON files (NetworkX node-link format)
+   - `live_graph_server.py`: Interactive HTML visualization with phase-colored nodes
 
-**Node deduplication.** Each parsed action is hashed by its label, arguments, and flags. If the same action appears multiple times across the trajectory, all occurrences accumulate onto a single node (storing all step indices and thought texts) rather than creating duplicate nodes. This reveals loops and repetition clearly. Think steps are an exception: when the **Unique think nodes** toggle is on, they are keyed by their thought text so that meaningfully different reasoning steps remain distinct.
+**Graph Metadata**: Each graph includes `resolution_status`, `instance_name`, and `debug_difficulty`
 
-**Phase classification.** `mapPhase.py` classifies each action into one of four phases using rule-based heuristics that track what has happened so far in the trajectory. The key rule: test execution and test-file edits are **localization** before the first source patch, and **validation** afterward.
-
-**Hierarchical edges.** After the main graph is built, a post-processing pass adds green hierarchy edges between `str_replace_editor view` nodes — connecting parent directories to child paths, and wider line ranges to narrower ones nested within them.
-
-**Thought continuation.** If the current step's thought is identical to or a prefix of the previous step's thought, the connecting edge is flagged as a thought continuation and drawn in red, making it easy to spot steps where the model reused cached reasoning.
-<<<<<<< Updated upstream
+For detailed graph construction internals, see [buildGraph.py](graph_construction/buildGraph.py).
 =======
 
 

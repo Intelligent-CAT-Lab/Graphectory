@@ -1,7 +1,7 @@
 <p align="center">
   <img src="figures/logo.png" alt="Graphectory logo" width="260">
 </p>
-Artifact repository for the paper [Process-Centric Analysis of Agentic Software Systems!](https://dl.acm.org/doi/10.1145/3798271), accepted to the International Conference on Object-Oriented Programming Systems, Languages, and Applications (OOPSLA 2026).
+Artifact repository for the paper [Process-Centric Analysis of Agentic Software Systems](https://dl.acm.org/doi/10.1145/3798271), accepted to the International Conference on Object-Oriented Programming Systems, Languages, and Applications (OOPSLA 2026).
 
 ## Demo Video and Online Demo (Try it Out! 🚀)
 
@@ -30,17 +30,18 @@ New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHan
 ## Installation
 
 ### Docker (Recommended)
-We provide a Dockerfile which includes the pre-computed graphs and installs all necessary dependencies to reproduce the results of Graphectory. Please download [Docker](https://www.docker.com/), and then execute the following to create a docker image and execute the container in interactive mode:
-```
-docker build --no-cache -t graphectory .
+We provide a Dockerfile which includes the pre-computed graphs and installs all necessary dependencies to reproduce the results of Graphectory. Please download [Docker](https://www.docker.com/), and then build and run:
+```bash
+docker build -t graphectory .
 docker run -it graphectory bash
 ```
 
-Note
+**Multi-platform**: Works on Intel and Apple Silicon. For Apple Silicon, use:
+```bash
+docker build --platform linux/arm64 -t graphectory .
+```
 
-If you are using MacOS with an Apple chip, please consider adding --platform=linux/amd64 in docker build.
-
-Please refer to Reproduce Graphectory Results for instructions on how to reproduce the results of Graphectory. If you are interested in interactive graph construction and inspection, please refer to [graph_construction/README.md](graph_construction/README.md).
+For Docker workflows, see [DOCKER.md](DOCKER.md). If interested in interactive graph construction, see [graph_construction/README.md](graph_construction/README.md).
 
 ### Build Locally
 
@@ -49,21 +50,18 @@ git clone git@github.com:Intelligent-CAT-Lab/Graphectory.git
 cd Graphectory
 ```
 
-We recommend using conda or virtual environments (python>=3.12) to manage dependencies.
-
----
-
-Note on PyGraphviz (Required for Live Visualization)
-The live_graph_server.py tool requires pygraphviz. On Windows, a standard pip install often fails with a cgraph.h error because it cannot find the Graphviz C-libraries.
-
-If you use Conda, we recommend installing the pre-compiled version from conda-forge to handle these dependencies automatically:
+Requires **Python ≥ 3.12**. We recommend using conda or virtual environments:
 
 ```bash
-conda install -c conda-forge pygraphviz
+conda create -n graphectory python=3.12 && conda activate graphectory
 python -m pip install -e .
 ```
 
-If you are not using Conda, you must install the Graphviz system binaries manually and ensure they are added to your system PATH before running the pip install.
+**PyGraphviz Note** (Required for Live Visualization): On Windows, standard `pip install` often fails due to missing Graphviz C-libraries. Using conda is recommended:
+```bash
+conda install -c conda-forge pygraphviz
+```
+Otherwise, install Graphviz system binaries manually before `python -m pip install -e .`
 
 ---
 
@@ -75,28 +73,6 @@ Graphectory provides two tools for working with agent trajectories:
 - **[live_graph_server.py](graph_construction/live_graph_server.py)**: Interactive browser-based graph visualization
 
 For detailed usage and configuration options, see [graph_construction/README.md](graph_construction/README.md).
-
----
-
-## Graph Construction Process
-
-Both `generatejson.py` and `live_graph_server.py` share the same graph construction pipeline:
-
-1. **Parsing**: Agent trajectories → atomic actions using [commandParser.py](graph_construction/commandParser.py)
-2. **Node Deduplication**: Identical actions merged with occurrence tracking
-3. **Phase Classification**: Actions categorized using heuristics ([mapPhase.py](graph_construction/mapPhase.py)):
-   - **Localization**: Information gathering, searching, test generation before patching
-   - **Patch**: Creating/editing non-test files
-   - **Validation**: Running tests or editing test files after patching
-   - **General**: Other actions (planning, environment setup)
-4. **Edge Construction**: Execution edges (sequential flow) + hierarchical edges (structural relationship)
-5. **Output**:
-   - `generatejson.py`: JSON files (NetworkX node-link format)
-   - `live_graph_server.py`: Interactive HTML visualization with phase-colored nodes
-
-**Graph Metadata**: Each graph includes `resolution_status`, `instance_name`, and `debug_difficulty`
-
-For detailed graph construction internals, see [buildGraph.py](graph_construction/buildGraph.py).
 
 ---
 
@@ -121,3 +97,36 @@ Results are saved to `trajectory_metrics.csv`.
 ---
 
 ## Reproduce Graphectory Results
+
+Precomputed graphs are provided under `data/{OpenHands|SWE-agent}/graphs`. The reproduction pipeline has three optional stages:
+
+### Reproduce Figures (Default)
+
+Uses precomputed graphs and analysis. Inside Docker or local environment:
+
+```bash
+reproduce  # Docker: shortcut to docker/reproduce.sh
+# or locally: python docker/reproduce.sh  (or run scripts individually)
+```
+
+Generates all paper figures:
+- **RQ1**: `python plot/trajectory_heatmap_plot.py` → `figures/median_iqr_trajectory_heatmap.png` (Figure 3)
+- **RQ2**: 
+  - `python plot/sankey_phase_transition_plot.py` → `figures/sankey_grid.png` (Figure 7)
+  - `python plot/end_phase_plot.py` → `figures/end_phase_donuts.png` (Figure 8)
+  - `python plot/phase_transition_plot.py` → `figures/phase_transition_overview.png` (Figure 9)
+- **RQ3**: `python plot/inefficiency_plot.py` → `figures/inefficiency_venn/*.pdf` (Figures 14-15)
+
+### Optional: Graph Construction & Analysis
+
+To generate graphs from raw trajectories (requires Zenodo data https://zenodo.org/records/17364210 or `data/samples/`):
+
+**Docker:**
+```bash
+construct <trajectories_path> <eval_report.json>  # Stage 1: trajectories → graphs
+analyze data/                                      # Stage 2: graphs → metrics
+reproduce                                         # Stage 3: metrics → figures
+```
+
+**Local:**
+See `docker/construct.sh`, `docker/analyze.sh`, and `docker/reproduce.sh` for detailed usage. For graph construction and interactive visualization details, see [graph_construction/README.md](graph_construction/README.md).
