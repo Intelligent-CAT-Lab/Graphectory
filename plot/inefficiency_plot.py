@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Phase transition multi-set 'venn'-style plots
+Inefficiency multi-set 'venn'-style plots
 
 Inputs:
     - trajectory_metrics.csv from each unit (SWE-agent, OpenHands × various models)
 
-Outputs (../figures/):
-  - phase_transition_overview.png
+
+Outputs (../figures/inefficiency_venn/):
+  - ineff_localization_multi_venn.pdf   (Scroll, DeepZoomsNoEdit, Back&Forth, RepeatedView)
+  - ineff_patching_multi_venn.pdf       (FlipFlop, Abandon, NotFound, NoChange, MultiOccur)
 """
 
 from __future__ import annotations
@@ -64,7 +66,6 @@ plt.rcParams["font.family"] = "DejaVu Sans"
 
 # Fixed label orders so legend ↔ fills are consistent
 LOC_LABEL_ORDER = ["RepeatedView", "ZoomOut", "Scroll", "OverlyDeepZoom"]
-TRANS_LABEL_ORDER = ["LV", "PL", "VL", "VP"]
 
 # Pastel colors mapped to labels above
 LOC_COLORS = ["#A8D5BA", "#1982c4", "#F7C29B", "#DAB6FC"]                 # green, blue, peach, lilac
@@ -100,16 +101,6 @@ def _to_bool(series: pd.Series, numeric_positive: bool = False) -> pd.Series:
         return pd.to_numeric(series, errors="coerce").fillna(0) > 0
     return series.map(lambda x: False if pd.isna(x) else (str(x).strip().lower() in {"1","true","t","yes","y"}))
 
-def build_phase_transition_flags(df: pd.DataFrame) -> Dict[str, pd.Series]:
-    """Build flags for phase transitions: LV, PL, VL, VP"""
-    cols = df.columns
-    return {
-        "LV": _to_bool(df["LV"], numeric_positive=True) if "LV" in cols else pd.Series(False, index=df.index),
-        "PL": _to_bool(df["PL"], numeric_positive=True) if "PL" in cols else pd.Series(False, index=df.index),
-        "VL": _to_bool(df["VL"], numeric_positive=True) if "VL" in cols else pd.Series(False, index=df.index),
-        "VP": _to_bool(df["VP"], numeric_positive=True) if "VP" in cols else pd.Series(False, index=df.index),
-    }
-
 def build_localization_flags(df: pd.DataFrame) -> Dict[str, pd.Series]:
     cols = df.columns
     deep_col = "deep_zooms_without_edit" if "deep_zooms_without_edit" in cols else \
@@ -140,94 +131,6 @@ def flags_to_sets(flags: Dict[str, pd.Series]) -> Dict[str, set]:
         if idxs:
             out[label] = idxs
     return out
-
-def _iter_nodes(graph_json: dict):
-    if isinstance(graph_json, dict):
-        if "nodes" in graph_json and isinstance(graph_json["nodes"], list):
-            yield from graph_json["nodes"]
-        elif "graph" in graph_json and isinstance(graph_json["graph"], dict) and "nodes" in graph_json["graph"]:
-            yield from graph_json["graph"]["nodes"]
-
-
-def _extract_phase_sequence(graph_json: dict) -> List[str]:
-    phase_abbr = {"localization": "L", "patch": "P", "validation": "V"}
-    step_phase: List[Tuple[int, str]] = []
-
-    for node in _iter_nodes(graph_json):
-        step_indices = node.get("step_indices") or []
-        phases = node.get("phases") or node.get("phase")
-
-        if isinstance(phases, list):
-            if len(phases) == len(step_indices):
-                for idx, phase in zip(step_indices, phases):
-                    step_phase.append((idx, str(phase).lower()))
-        else:
-            for idx in step_indices:
-                step_phase.append((idx, str(phases).lower()))
-
-    if not step_phase:
-        return []
-
-    step_phase.sort(key=lambda x: x[0])
-    seq: List[str] = []
-    prev = None
-    for _, phase in step_phase:
-        abbr = phase_abbr.get(phase)
-        if not abbr:
-            continue
-        if abbr != prev:
-            seq.append(abbr)
-            prev = abbr
-    return seq
-
-
-def _build_phase_transition_frame(agent: str, model: str) -> pd.DataFrame:
-    rows = []
-    root = graph_dir(agent, model)
-    if not root.exists():
-        return pd.DataFrame(columns=["instance", "LV", "PL", "VL", "VP"])
-
-    for graph_path in sorted(root.rglob("*.json")):
-        instance = graph_path.stem
-        try:
-            with graph_path.open("r", encoding="utf-8") as f:
-                graph_json = json.load(f)
-            seq = _extract_phase_sequence(graph_json)
-        except Exception:
-            continue
-
-        transitions = {a + b for a, b in zip(seq, seq[1:])}
-        rows.append(
-            {
-                "instance": instance,
-                "LV": int("LV" in transitions),
-                "PL": int("PL" in transitions),
-                "VL": int("VL" in transitions),
-                "VP": int("VP" in transitions),
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
-def load_phase_transition_df(agent: str, model: str) -> pd.DataFrame:
-    df = pd.read_csv(csv_path(agent, model))
-    if {"LV", "PL", "VL", "VP"}.issubset(df.columns):
-        return df
-
-    if "instance" not in df.columns:
-        return df
-
-    phase_df = _build_phase_transition_frame(agent, model)
-    if phase_df.empty:
-        return df
-
-    merged = df.merge(phase_df, on="instance", how="left")
-    for col in ("LV", "PL", "VL", "VP"):
-        if col not in merged.columns:
-            merged[col] = 0
-        merged[col] = merged[col].fillna(0).astype(int)
-    return merged
 
 # ------------ Title helper (subscript model) ------------
 def format_title(agent_name: str, model_abbr: str) -> str:
@@ -503,13 +406,13 @@ def _add_resolution_badge(ax: plt.Axes, resolution: str) -> None:
     )
 
 
-def _draw_phase_grid(fig,
-                     gs,
-                     units: List[Tuple[str, str]],
-                     resolution: str,
-                     builder,
-                     label_order: List[str],
-                     colors: List[str]) -> List[str]:
+def _draw_inefficiency_grid(fig,
+                             gs,
+                             units: List[Tuple[str, str]],
+                             resolution: str,
+                             builder,
+                             label_order: List[str],
+                             colors: List[str]) -> List[str]:
     color_map = {lab: colors[i % len(colors)] for i, lab in enumerate(label_order)}
     active_labels_overall: List[str] = []
 
@@ -524,7 +427,7 @@ def _draw_phase_grid(fig,
                           fontsize=10, fontweight="bold", labelpad=2)
             continue
 
-        df = load_phase_transition_df(agent, model)
+        df = pd.read_csv(path)
         df_res = _filter_by_resolution(df, resolution)
         total_cases = len(df_res)
 
@@ -547,11 +450,11 @@ def _draw_phase_grid(fig,
     return [lab for lab in label_order if lab in set(active_labels_overall)]
 
 
-def plot_phase_transition_overview(units: List[Tuple[str, str]],
-                                   builder,
-                                   label_order: List[str],
-                                   colors: List[str],
-                                   out_path: Path) -> None:
+def plot_inefficiency_venn(units: List[Tuple[str, str]],
+                           builder,
+                           label_order: List[str],
+                           colors: List[str],
+                           out_path: Path) -> None:
     """Render resolved and unresolved grids side by side under one shared legend."""
     fig = plt.figure(figsize=(10.2, 9.6))
     outer = fig.add_gridspec(
@@ -565,10 +468,10 @@ def plot_phase_transition_overview(units: List[Tuple[str, str]],
     left_gs = outer[1:, 0].subgridspec(4, 2, wspace=0.04, hspace=0.08)
     right_gs = outer[1:, 1].subgridspec(4, 2, wspace=0.04, hspace=0.08)
 
-    labels_resolved = _draw_phase_grid(
+    labels_resolved = _draw_inefficiency_grid(
         fig, left_gs, units, "resolved", builder, label_order, colors
     )
-    labels_unresolved = _draw_phase_grid(
+    labels_unresolved = _draw_inefficiency_grid(
         fig, right_gs, units, "unresolved", builder, label_order, colors
     )
 
@@ -597,19 +500,36 @@ def plot_phase_transition_overview(units: List[Tuple[str, str]],
              fontsize=14, fontweight="bold", color=RESOLUTION_STYLES["unresolved"]["color"])
 
     fig.subplots_adjust(left=0.035, right=0.985, top=0.955, bottom=0.04)
-    fig.savefig(out_path, format="png", dpi=300, bbox_inches="tight")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
 def main():
-    out_path = FIG_DIR / "phase_transition_overview.png"
-    plot_phase_transition_overview(
-        UNITS,
-        builder=build_phase_transition_flags,
-        label_order=TRANS_LABEL_ORDER,
-        colors=TRANS_COLORS,
-        out_path=out_path,
-    )
+    out_dir = FIG_DIR / "inefficiency_venn"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-if __name__ == "__main__":              
+    loc_out = out_dir / "ineff_localization_multi_venn.pdf"
+    plot_inefficiency_venn(
+        UNITS,
+        builder=build_localization_flags,
+        label_order=LOC_LABEL_ORDER,
+        colors=LOC_COLORS,
+        out_path=loc_out,
+    )
+    print(f"Saved: {loc_out}")
+
+    pat_out = out_dir / "ineff_patching_multi_venn.pdf"
+    pat_label_order = ["UnresolvedRetry", "EditReversion", "StrNotFound", "NoEffectEdit", "AmbiguousTarget"]
+    plot_inefficiency_venn(
+        UNITS,
+        builder=build_patching_flags,
+        label_order=pat_label_order,
+        colors=PAT_COLORS[:len(pat_label_order)],
+        out_path=pat_out,
+    )
+    print(f"Saved: {pat_out}")
+
+
+if __name__ == "__main__":
     main()
+

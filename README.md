@@ -1,6 +1,7 @@
 <p align="center">
   <img src="figures/logo.png" alt="Graphectory logo" width="260">
 </p>
+Artifact repository for the paper [Process-Centric Analysis of Agentic Software Systems!](https://dl.acm.org/doi/10.1145/3798271), accepted to the International Conference on Object-Oriented Programming Systems, Languages, and Applications (OOPSLA 2026).
 
 ## Demo Video and Online Demo (Try it Out! 🚀)
 
@@ -10,11 +11,11 @@
 
 # Graphectory
 
-Graphectory transforms agent execution traces into structured graphs that capture the problem-solving patterns of AI software engineering agents. By modeling agent actions as directed graphs with phase classification (localization, patching, validation), this tool enables systematic analysis of how agents approach and solve software engineering tasks.
+Graphectory transforms agent execution traces into structured graphs that capture the problem-solving patterns of AI software engineering agents. By modeling agent actions as directed graphs with phase classification (localization, patching, validation), this tool enables systematic analysis of how agents solve software engineering tasks.
 
 Graphectory is very easy to adopt (please see "Supporting New Agents" and "Supporting New SWE Agent Tools" in the ReadMe). If you have any question or need help, please post on the issue tracker with a sample of your trajectory and we would be happy to assist. 
 
-New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHands), the repository additionally supports **mini-swe-agent** (v2.0.0, `trajectory_format` version `mini-swe-agent-1.1`; `trajectory_format` version `mini-swe-agent-1`), a widely used scaffold in agentic research with over 3.3k GitHub stars. 
+New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHands), the repository additionally supports **mini-swe-agent** (v2.0.0, `trajectory_format` version `mini-swe-agent-1.1`; and `trajectory_format` version `mini-swe-agent-1`), a widely used scaffold in agentic research with over 3.3k GitHub stars. 
 
 ---
 
@@ -27,6 +28,21 @@ New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHan
 ---
 
 ## Installation
+
+### Docker (Recommended)
+We provide a Dockerfile which includes the pre-computed graphs and installs all necessary dependencies to reproduce the results of Graphectory. Please download [Docker](https://www.docker.com/), and then execute the following to create a docker image and execute the container in interactive mode:
+```
+docker build --no-cache -t graphectory .
+docker run -it graphectory bash
+```
+
+Note
+
+If you are using MacOS with an Apple chip, please consider adding --platform=linux/amd64 in docker build.
+
+Please refer to Reproduce Graphectory Results for instructions on how to reproduce the results of Graphectory. If you are interested in interactive graph construction and inspection, please refer to [graph_construction/README.md](graph_construction/README.md).
+
+### Build Locally
 
 ```bash
 git clone git@github.com:Intelligent-CAT-Lab/Graphectory.git
@@ -49,6 +65,8 @@ python -m pip install -e .
 
 If you are not using Conda, you must install the Graphviz system binaries manually and ensure they are added to your system PATH before running the pip install.
 
+---
+
 ## Quick Start
 
 Graphectory provides two tools for working with agent trajectories:
@@ -57,75 +75,6 @@ Graphectory provides two tools for working with agent trajectories:
 - **[live_graph_server.py](graph_construction/live_graph_server.py)**: Interactive browser-based graph visualization
 
 For detailed usage and configuration options, see [graph_construction/README.md](graph_construction/README.md).
-
-### Batch Export (generatejson.py)
-
-Generate JSON graph files for offline analysis:
-
-**SWE-agent with DeepSeek-V3:**
-```bash
-python graph_construction/generatejson.py \
-  --agent sa --model dsk-v3 \
-  --trajs data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test \
-  --eval_report data/SWE-agent/reports/deepseek-chat.json \
-  --output_dir data/samples
-```
-
-**OpenHands with Claude-Sonnet-4:**
-```bash
-python graph_construction/generatejson.py \
-  --agent oh --model cld-4 \
-  --trajs data/samples/OpenHands/trajectories/deepseek-chat_maxiter_100_N_v0.40.0-no-hint-run_1/sample_output.jsonl \
-  --eval_report data/samples/OpenHands/trajectories/deepseek-chat_maxiter_100_N_v0.40.0-no-hint-run_1/report.json \
-  --output_dir data/samples
-```
-
-**mini-swe-agent with gpt-5-mini:**
-```bash
-python graph_construction/generatejson.py \
-  --agent msa --model gpt-5-mini \
-  --trajs data/samples/mini-swe-agent/trajectories/gpt-5-mini \
-  --eval_report data/samples/mini-swe-agent/reports/gpt-5-mini.json \
-  --output_dir data/samples
-```
-
-**Output**: `{output_dir}/{Agent}/graphs/{model}/{instance_id}/{instance_id}.json`
-
-### Live Interactive Visualization (live_graph_server.py)
-
-Launch a local server for exploring trajectories interactively in your browser:
-
-```bash
-python graph_construction/live_graph_server.py \
-  --trajs <path_to_trajectories> \
-  --eval_report <path_to_report.json>
-```
-
-Then open **http://localhost:8000** to browse and visualize graphs on demand. 
-
----
-
-## Input Requirements
-
-### generatejson.py
-
-| Argument | Description | Format |
-|----------|-------------|--------|
-| `--agent` | Agent type | `sa` (SWE-agent), `oh` (OpenHands), `msa` (mini-swe-agent) |
-| `--model` | Model identifier | `dsk-v3`, `dsk-r1`, `dev`, `cld-4` (extensible) |
-| `--trajs` | Trajectory path | **SWE-agent**: directory with `.traj` files<br>**OpenHands**: `output.jsonl` file<br>**mini-swe-agent**: directory with `.traj.json` files|
-| `--eval_report` | Evaluation report | JSON with `resolved_ids`/`unresolved_ids` keys |
-| `--output_dir` | Base output directory | Organized as `{agent}/graphs/{model}/{instance_id}/` |
-| `--workers` | Parallel workers (optional) | Default: 8 |
-
-### live_graph_server.py
-
-| Argument | Description | Format |
-|----------|-------------|--------|
-| `--trajs` | Trajectory path | **SWE-agent**: directory with `.traj` files<br>**OpenHands**: `output.jsonl` file<br>Agent type auto-detected |
-| `--eval_report` | Evaluation report | JSON with `resolved_ids`/`unresolved_ids` keys |
-| `--port` | Server port (optional) | Default: 8000 |
-| `--assets_dir` | Assets directory (optional) | Default: script directory |
 
 ---
 
@@ -151,69 +100,6 @@ For detailed graph construction internals, see [buildGraph.py](graph_constructio
 
 ---
 
-## Extending Graphectory
-
-### Adding New Models
-
-The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility. To add new models, edit [generatejson.py:38](graph_construction/generatejson.py#L38):
-
-```python
-SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "my-model"}
-```
-
-Then run with your new model:
-```bash
-python graph_construction/generatejson.py \
-  --agent sa --model my-model \
-  --trajs <your_trajectories> \
-  --eval_report <your_report> \
-  --output_dir <output>
-```
-
-### Supporting New SWE-agent Tools
-
-To parse custom SWE-agent tools, add their `config.yaml` files to [generatejson.py:558-562](graph_construction/generatejson.py#L558-L562):
-
-```python
-def setup_parser_for_agent(agent: str) -> CommandParser:
-    parser = CommandParser()
-    tool_configs = []
-    if agent == "sa":
-        tool_configs = [
-            "data/SWE-agent/tools/edit_anthropic/config.yaml",
-            "data/SWE-agent/tools/review_on_submit_m/config.yaml",
-            "data/SWE-agent/tools/registry/config.yaml",
-            "data/SWE-agent/tools/your_custom_tool/config.yaml",  # Add here
-        ]
-    if tool_configs:
-        parser.load_tool_yaml_files(tool_configs)
-    return parser
-```
-
-### Supporting New Agents
-
-To add support for a new agent framework:
-
-1. **Implement trajectory builder** in [buildGraph.py](graph_construction/buildGraph.py) (see existing functions at lines 274 & 365):
-   ```python
-    def build_graph_from_newagent_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path):
-        builder = GraphBuilder()
-        # Parse agent-specific trajectory structure
-        # Convert to builder.add_or_update_node() calls
-        return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
-   ```
-
-2. **Register the agent** in [generatejson.py:37-50](graph_construction/generatejson.py#L37-L50):
-   - Update `SUPPORTED_AGENTS` and `AGENT_NAMES`
-
-3. **Add trajectory loading logic** in [generatejson.py](graph_construction/generatejson.py):
-   - Update `load_trajectories()` to handle NewAgent's file format
-   - Add branch in `GraphProcessor.process_trajectory()` to call your builder function
-
-**Key principle**: Different agents have different trajectory formats, but all generate the same unified graph structure (nodes with phases, execution/hierarchical edges, metadata).
-
----
-
 ## Graph Analysis
 
 Pre-computed analysis results for the full dataset are available under [data/{OpenHands|SWE-agent}/analysis](data/), including Graphectory metrics.
@@ -227,9 +113,11 @@ python -m graph_analysis.batch_runner
 ### Analyze Custom Graphs
 
 ```bash
-python -m graph_analysis.batch_runner --data-dir ./my_data --output-dir ./my_output
+python -m graph_analysis.batch_runner --data-dir ./my_graphs --output-dir ./my_output
 ```
 
 Results are saved to `trajectory_metrics.csv`.
 
 ---
+
+## Reproduce Graphectory Results
