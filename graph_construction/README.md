@@ -177,9 +177,9 @@ Both `generatejson.py` and `live_graph_server.py` share the same graph construct
 
 **Graph Metadata**: Each graph includes `resolution_status`, `instance_name`, and `debug_difficulty`
 
-For detailed graph construction internals, see [buildGraph.py](graph_construction/buildGraph.py).
-=======
+For detailed graph construction details, see [buildGraph.py](graph_construction/buildGraph.py).
 
+---
 
 ## Extending Graphectory
 
