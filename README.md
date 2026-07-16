@@ -1,7 +1,7 @@
 <p align="center">
   <img src="figures/logo.png" alt="Graphectory logo" width="260">
 </p>
-Artifact repository for the paper [Process-Centric Analysis of Agentic Software Systems](https://dl.acm.org/doi/10.1145/3798271), accepted to the International Conference on Object-Oriented Programming Systems, Languages, and Applications (OOPSLA 2026).
+Artifact repository for the paper [*Process-Centric Analysis of Agentic Software Systems*](https://dl.acm.org/doi/10.1145/3798271), accepted to the International Conference on Object-Oriented Programming, Systems, Languages, and Applications (OOPSLA 2026).
 
 ## Demo Video and Online Demo (Try it Out! 🚀)
 

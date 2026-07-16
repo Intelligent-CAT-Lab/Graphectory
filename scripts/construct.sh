@@ -31,8 +31,8 @@ MODEL AUTO-INFERENCE:
   Inferred from directory name: deepseek-chat, deepseek-r1, devstral, claude, gpt-5
 
 EXAMPLES:
-  bash scripts/construct.sh data/samples/SWE-agent/trajectories data/report.json
-  bash scripts/construct.sh data/samples/OpenHands/trajectories data/report.json ./graphs
+  bash scripts/construct.sh data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test data/samples/SWE-agent/reports/deepseek-chat.json
+  bash scripts/construct.sh data/samples/OpenHands/trajectories/deepseek-chat_maxiter_100_N_v0.40.0-no-hint-run_1/sample_output.jsonl data/samples/OpenHands/trajectories/deepseek-chat_maxiter_100_N_v0.40.0-no-hint-run_1/report.json ./graphs
   bash scripts/construct.sh data/trajs report.json . dsk-r1
 
 EOF
@@ -57,17 +57,21 @@ info "Report: $EVAL_REPORT"
 info "Output: $OUTPUT_DIR"
 
 # Detect agent type
-if [[ -f "$TRAJECTORIES/output.jsonl" ]]; then
+OH_JSONL=$(find "$TRAJECTORIES" -type f -name "output.jsonl" -print -quit)
+SA_TRAJ=$(find "$TRAJECTORIES" -type f -name "*.traj" -print -quit)
+
+if [[ -n "$OH_JSONL" ]]; then
     AGENT="oh"
-    TRAJS_PATH="$TRAJECTORIES/output.jsonl"
+    TRAJS_PATH="$OH_JSONL"
     info "Agent: OpenHands"
-elif ls "$TRAJECTORIES"/*.traj >/dev/null 2>&1; then
+elif [[ -n "$SA_TRAJ" ]]; then
     AGENT="sa"
     TRAJS_PATH="$TRAJECTORIES"
     info "Agent: SWE-agent"
 else
-    error "Cannot detect agent type. Expected .traj files or output.jsonl in $TRAJECTORIES"
+    error "Cannot detect agent type. Expected output.jsonl or .traj files under $TRAJECTORIES"
 fi
+
 
 # Infer model if not provided
 if [[ -z "$MODEL" ]]; then
@@ -85,7 +89,7 @@ fi
 info "Model: $MODEL"
 echo
 
-python -m graph_construction.generatejson \
+python graph_construction/generatejson.py \
     --agent "$AGENT" \
     --model "$MODEL" \
     --trajs "$TRAJS_PATH" \

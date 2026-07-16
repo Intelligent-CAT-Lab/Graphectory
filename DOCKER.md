@@ -2,6 +2,9 @@
 
 Containerized reproducible environment for graph analysis of agentic software systems.
 
+Tested platforms: Linux (Ubuntu 22.04, x86-64) and Windows (x64).
+Docker build: ~136 seconds and ~13 GB of memory.
+
 ## Quick Start
 
 ### Build

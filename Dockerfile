@@ -45,7 +45,7 @@ RUN useradd --create-home --uid 10001 --shell /bin/bash graphectory && \
     mkdir -p /output /opt/graphectory/figures && \
     chown -R graphectory:graphectory \
       /opt/graphectory /output /home/graphectory && \
-    chmod 0755 docker/*.sh
+    chmod 0755 scripts/*.sh
 
 USER graphectory
 

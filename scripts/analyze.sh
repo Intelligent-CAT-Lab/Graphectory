@@ -52,21 +52,13 @@ OUTPUT_DIR="${2:-.}"
 
 python -c "import graph_analysis" 2>/dev/null || error "graph_analysis module not installed"
 
-# Find graphs directory
-GRAPHS_PATH=$(find "$DATA_DIR" -type d -name "graphs" -print -quit 2>/dev/null)
-if [[ -z "$GRAPHS_PATH" ]]; then
-    error "No precomputed graphs found in $DATA_DIR (expected: */graphs/)"
-fi
-
-DATA_BASE="$(dirname "$GRAPHS_PATH")"
-
 info "Starting graph analysis..."
-info "Data: $DATA_BASE"
+info "Data: $DATA_DIR"
 info "Output: $OUTPUT_DIR"
 echo
 
-# Build command
-CMD="python -m graph_analysis.batch_runner --data-dir $DATA_BASE"
+# Build command - pass DATA_DIR directly to batch_runner
+CMD="python -m graph_analysis.batch_runner --data-dir $DATA_DIR"
 [[ "$OUTPUT_DIR" != "." ]] && CMD="$CMD --output-dir $OUTPUT_DIR"
 
 # Pass remaining arguments (--agent, --model)
