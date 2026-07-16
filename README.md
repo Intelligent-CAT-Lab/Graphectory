@@ -30,6 +30,10 @@ New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHan
 ## Installation
 
 ### Docker (Recommended)
+```bash
+git clone git@github.com:Intelligent-CAT-Lab/Graphectory.git
+cd Graphectory
+```
 We provide a Dockerfile which includes the pre-computed graphs and installs all necessary dependencies to reproduce the results of Graphectory. Please download [Docker](https://www.docker.com/), and then build and run:
 ```bash
 docker build -t graphectory .
@@ -44,12 +48,6 @@ docker build --platform linux/arm64 -t graphectory .
 For Docker workflows, see [DOCKER.md](DOCKER.md). If interested in interactive graph construction, see [graph_construction/README.md](graph_construction/README.md).
 
 ### Build Locally
-
-```bash
-git clone git@github.com:Intelligent-CAT-Lab/Graphectory.git
-cd Graphectory
-```
-
 Requires **Python ≥ 3.12**. We recommend using conda or virtual environments:
 
 ```bash
@@ -100,33 +98,40 @@ Results are saved to `trajectory_metrics.csv`.
 
 Precomputed graphs are provided under `data/{OpenHands|SWE-agent}/graphs`. The reproduction pipeline has three optional stages:
 
-### Reproduce Figures (Default)
+### Generate Figures (Default)
 
-Uses precomputed graphs and analysis. Inside Docker or local environment:
+Requires precomputed analysis in `data/{agent}/analysis/{model}/`:
 
 ```bash
-reproduce  # Docker: shortcut to docker/reproduce.sh
-# or locally: python docker/reproduce.sh  (or run scripts individually)
+bash scripts/reproduce.sh                    # Generate figures in figures/
+bash scripts/reproduce.sh -o ./my_output    # Custom output directory
 ```
 
-Generates all paper figures:
-- **RQ1**: `python plot/trajectory_heatmap_plot.py` → `figures/median_iqr_trajectory_heatmap.png` (Figure 3)
-- **RQ2**: 
-  - `python plot/sankey_phase_transition_plot.py` → `figures/sankey_grid.png` (Figure 7)
-  - `python plot/end_phase_plot.py` → `figures/end_phase_donuts.png` (Figure 8)
-  - `python plot/phase_transition_plot.py` → `figures/phase_transition_overview.png` (Figure 9)
-- **RQ3**: `python plot/inefficiency_plot.py` → `figures/inefficiency_venn/*.pdf` (Figures 14-15)
+All paper figures (RQ1-RQ3):
+- RQ1: `figures/median_iqr_trajectory_heatmap.png` (Figure 3)
+- RQ2: `figures/sankey_grid.png` (Figure 7), `figures/end_phase_donuts.png` (Figure 8), `figures/phase_transition_overview.png` (Figure 9)
+- RQ3: `figures/inefficiency_venn/*.pdf` (Figures 14-15)
 
 ### Optional: Graph Construction & Analysis
 
 To generate graphs from raw trajectories (requires Zenodo data https://zenodo.org/records/17364210 or `data/samples/`):
 
-**Docker:**
 ```bash
-construct <trajectories_path> <eval_report.json>  # Stage 1: trajectories → graphs
-analyze data/                                      # Stage 2: graphs → metrics
-reproduce                                         # Stage 3: metrics → figures
+# Generate graphs from trajectories
+bash scripts/construct.sh <trajectories_path> <eval_report.json> [output_dir] [model]
+
+# Analyze graphs and compute metrics
+bash scripts/analyze.sh <data_dir> [output_dir] [--agent AGENT] [--model MODEL]
+
+# Generate figures
+bash scripts/reproduce.sh
 ```
 
-**Local:**
-See `docker/construct.sh`, `docker/analyze.sh`, and `docker/reproduce.sh` for detailed usage. For graph construction and interactive visualization details, see [graph_construction/README.md](graph_construction/README.md).
+For script usage and options:
+```bash
+bash scripts/construct.sh -h    # Show construct options
+bash scripts/analyze.sh -h      # Show analyze options
+bash scripts/reproduce.sh -h    # Show reproduce options
+```
+
+For interactive graph visualization, see [graph_construction/README.md](graph_construction/README.md).

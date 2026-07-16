@@ -6,3 +6,4 @@ dist/
 build/
 application/
 *.pdf
+misc/
