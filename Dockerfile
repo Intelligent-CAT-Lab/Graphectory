@@ -43,6 +43,8 @@ COPY . .
 # Create non-root user and directories
 RUN useradd --create-home --uid 10001 --shell /bin/bash graphectory && \
     mkdir -p /output /opt/graphectory/figures && \
+    # Shell scripts may be checked out with CRLF on Windows hosts.
+    sed -i 's/\r$//' scripts/*.sh && \
     chown -R graphectory:graphectory \
       /opt/graphectory /output /home/graphectory && \
     chmod 0755 scripts/*.sh
