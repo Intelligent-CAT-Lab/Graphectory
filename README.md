@@ -1,7 +1,7 @@
 <p align="center">
   <img src="figures/logo.png" alt="Graphectory logo" width="260">
 </p>
-Artifact repository for the paper [*Process-Centric Analysis of Agentic Software Systems*](https://dl.acm.org/doi/10.1145/3798271), accepted to the International Conference on Object-Oriented Programming, Systems, Languages, and Applications (OOPSLA 2026).
+Artifact repository for the paper Process-Centric Analysis of Agentic Software Systems, accepted to the International Conference on Object-Oriented Programming, Systems, Languages, and Applications (OOPSLA 2026).
 
 ## Demo Video and Online Demo (Try it Out! 🚀)
 
@@ -31,18 +31,12 @@ New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHan
 
 ### Docker (Recommended)
 ```bash
-git clone git@github.com:Intelligent-CAT-Lab/Graphectory.git
 cd Graphectory
 ```
 We provide a Dockerfile which includes the pre-computed graphs and installs all necessary dependencies to reproduce the results of Graphectory. Please download [Docker](https://www.docker.com/), and then build and run:
 ```bash
 docker build -t graphectory .
 docker run -it graphectory bash
-```
-
-**Multi-platform**: Works on Intel and Apple Silicon. For Apple Silicon, use:
-```bash
-docker build --platform linux/arm64 -t graphectory .
 ```
 
 For Docker workflows, see [DOCKER.md](DOCKER.md). If interested in interactive graph construction, see [graph_construction/README.md](graph_construction/README.md).
@@ -135,3 +129,24 @@ bash scripts/reproduce.sh -h    # Show reproduce options
 ```
 
 For interactive graph visualization, see [graph_construction/README.md](graph_construction/README.md).
+
+## Please Cite as
+```
+@article{10.1145/3798271,
+author = {Liu, Shuyang and Chen, Yang and Krishna, Rahul and Sinha, Saurabh and Ganhotra, Jatin and Jabbarvand, Reyhaneh},
+title = {Process-Centric Analysis of Agentic Software Systems},
+year = {2026},
+issue_date = {April 2026},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+volume = {10},
+number = {OOPSLA1},
+url = {https://doi.org/10.1145/3798271},
+doi = {10.1145/3798271},
+journal = {Proc. ACM Program. Lang.},
+month = apr,
+articleno = {163},
+numpages = {28},
+keywords = {Large Language Models, Process-centric Analysis, Program Analysis, Software Engineering Agents}
+}
+```

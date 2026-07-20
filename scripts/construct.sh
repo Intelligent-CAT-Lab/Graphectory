@@ -42,7 +42,7 @@ EOF
 
 TRAJECTORIES="$1"
 EVAL_REPORT="$2"
-OUTPUT_DIR="${3:-.}"
+OUTPUT_DIR="${3:-./data}"
 MODEL="${4:-}"
 
 # Validation

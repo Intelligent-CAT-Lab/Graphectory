@@ -163,9 +163,9 @@ Each JSON file is a NetworkX node-link graph. Nodes carry label, phase, step ind
 
 Both `generatejson.py` and `live_graph_server.py` share the same graph construction pipeline:
 
-1. **Parsing**: Agent trajectories → atomic actions using [commandParser.py](graph_construction/commandParser.py)
+1. **Parsing**: Agent trajectories → atomic actions using [commandParser.py](commandParser.py)
 2. **Node Deduplication**: Identical actions merged with occurrence tracking
-3. **Phase Classification**: Actions categorized using heuristics ([mapPhase.py](graph_construction/mapPhase.py)):
+3. **Phase Classification**: Actions categorized using heuristics ([mapPhase.py](mapPhase.py)):
    - **Localization**: Information gathering, searching, test generation before patching
    - **Patch**: Creating/editing non-test files
    - **Validation**: Running tests or editing test files after patching
@@ -177,7 +177,7 @@ Both `generatejson.py` and `live_graph_server.py` share the same graph construct
 
 **Graph Metadata**: Each graph includes `resolution_status`, `instance_name`, and `debug_difficulty`
 
-For detailed graph construction details, see [buildGraph.py](graph_construction/buildGraph.py).
+For detailed graph construction details, see [buildGraph.py](buildGraph.py).
 
 ---
 
@@ -185,7 +185,7 @@ For detailed graph construction details, see [buildGraph.py](graph_construction/
 
 ### Adding New Models
 
-The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility. To add new models, edit [generatejson.py:38](graph_construction/generatejson.py#L38):
+The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility. To add new models, edit [generatejson.py:38](generatejson.py#L38):
 
 ```python
 SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "my-model"}
@@ -202,7 +202,7 @@ python graph_construction/generatejson.py \
 
 ### Supporting New SWE-agent Tools
 
-To parse custom SWE-agent tools, add their `config.yaml` files to [generatejson.py:558-562](graph_construction/generatejson.py#L558-L562):
+To parse custom SWE-agent tools, add their `config.yaml` files to [generatejson.py:558-562](generatejson.py#L558-L562):
 
 ```python
 def setup_parser_for_agent(agent: str) -> CommandParser:
@@ -224,7 +224,7 @@ def setup_parser_for_agent(agent: str) -> CommandParser:
 
 To add support for a new agent framework:
 
-1. **Implement trajectory builder** in [buildGraph.py](graph_construction/buildGraph.py) (see existing functions at lines 274 & 365):
+1. **Implement trajectory builder** in [buildGraph.py](buildGraph.py) (see existing functions at lines 274 & 365):
    ```python
     def build_graph_from_newagent_trajectory(traj_data, parser, instance_id, output_dir, eval_report_path):
         builder = GraphBuilder()
@@ -233,10 +233,10 @@ To add support for a new agent framework:
         return builder.finalize_and_save(output_dir, instance_id, eval_report_path)
    ```
 
-2. **Register the agent** in [generatejson.py:37-50](graph_construction/generatejson.py#L37-L50):
+2. **Register the agent** in [generatejson.py:37-50](generatejson.py#L37-L50):
    - Update `SUPPORTED_AGENTS` and `AGENT_NAMES`
 
-3. **Add trajectory loading logic** in [generatejson.py](graph_construction/generatejson.py):
+3. **Add trajectory loading logic** in [generatejson.py](generatejson.py):
    - Update `load_trajectories()` to handle NewAgent's file format
    - Add branch in `GraphProcessor.process_trajectory()` to call your builder function
 
