@@ -31,8 +31,6 @@ bash scripts/reproduce.sh
 
 ## Multi-Platform Support
 
-Works on Intel (`linux/amd64`):
-
 ```bash
 docker build --platform linux/arm64 -t graphectory .
 ```
@@ -62,7 +60,7 @@ bash scripts/reproduce.sh
 From trajectories to figures:
 ```bash
 docker run -it graphectory bash
-bash scripts/construct.sh data/samples/SWE-agent/trajectories data/report.json
+bash scripts/construct.sh <trajectories_path> <eval_report.json>
 bash scripts/analyze.sh data/
 bash scripts/reproduce.sh
 ```
@@ -93,14 +91,14 @@ bash scripts/reproduce.sh -h    # Figure generation
 ### Stage 1: Graph Construction
 Converts trajectories to JSON graphs.
 ```bash
-bash scripts/construct.sh <trajectories_path> <eval_report.json> [output_dir] [model]
+bash scripts/construct.sh <trajectories_path> <eval_report.json> [base_output_dir] [model]
 ```
 - Auto-detects agent (SWE-agent or OpenHands)
 - Auto-infers model from directory names
 
 Example:
 ```bash
-bash scripts/construct.sh data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test data/samples/SWE-agent/reports/deepseek-chat.json
+bash scripts/construct.sh data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test data/samples/SWE-agent/reports/deepseek-chat.json data/samples
 ```
 
 ### Stage 2: Graph Analysis
@@ -151,7 +149,7 @@ trajectories        → graphs              → analysis
 ↓                   ↓                      ↓
 construct.sh        analyze.sh            reproduce.sh
 ↓                   ↓                      ↓
-JSON graphs         CSV metrics           PNG/PDF figures
+JSON graphs         CSV metrics           figures
 ```
 
 ## Local Install (No Docker)
