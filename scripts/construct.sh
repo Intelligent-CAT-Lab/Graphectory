@@ -38,6 +38,11 @@ EXAMPLES:
 EOF
 }
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
 [[ $# -lt 2 ]] && { show_help; exit 1; }
 
 TRAJECTORIES="$1"

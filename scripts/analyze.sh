@@ -43,6 +43,11 @@ EXAMPLES:
 EOF
 }
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
 [[ $# -lt 1 ]] && { show_help; exit 1; }
 
 DATA_DIR="$1"

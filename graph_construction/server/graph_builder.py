@@ -46,6 +46,12 @@ def check_command_outcome(observation: str, tool: str = None, subcommand: str = 
         if edit_status == "success":
             return "success"
 
+    # A successful view can contain arbitrary source code, including exception
+    # names or test-result strings.  Only its explicit editor validation errors
+    # should affect the rendered outcome.
+    if tool == "str_replace_editor" and subcommand == "view":
+        return None
+
     for sig in EXCEPTION_SIGNS:
         if sig in obs:
             return "failure"
@@ -352,7 +358,12 @@ def _accumulate_observation(node_data: dict, observation: str) -> None:
     fields (set to the most-recent value) so older rendering code keeps working.
     """
     length  = len(observation)
-    outcome = detect_observation_outcome(observation)
+    outcome = detect_observation_outcome(
+        observation,
+        tool=node_data.get("tool"),
+        subcommand=node_data.get("subcommand"),
+        args=node_data.get("args"),
+    )
 
     if "observation_lengths" not in node_data:
         node_data["observation_lengths"] = []

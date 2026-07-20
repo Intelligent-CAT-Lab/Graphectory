@@ -51,10 +51,21 @@ def compute_thought_length_clean(thought: str) -> int:
 
 # ── Outcome detection helper ────────────────────────────────────────────────
 
-def detect_observation_outcome(observation: str) -> str:
-    """Return 'success', 'failure', or 'neutral' based on observation content."""
+def detect_observation_outcome(observation: str, tool: str = None,
+                               subcommand: str = None, args: dict = None) -> str:
+    """Return an outcome from an observation without misreading viewed source code.
+
+    ``str_replace_editor view`` returns arbitrary file contents.  Those contents
+    can legitimately include strings such as ``KeyError:`` or ``SyntaxError``, so
+    generic error matching is unsafe for that subcommand.  Its outcomes are
+    therefore limited to explicit editor path/range validation failures.
+    """
     if not observation:
         return "neutral"
+
+    view_status = check_edit_status(tool, subcommand, args or {}, observation)
+    if tool == "str_replace_editor" and subcommand == "view":
+        return "failure" if view_status and view_status.startswith("failure") else "neutral"
 
     obs_lower = observation.lower()
 
@@ -92,7 +103,13 @@ def hash_node_signature(label, args, flags):
 
 
 def check_edit_status(tool, subcommand, args, observation):
-    """Check if an edit operation succeeded or failed."""
+    """Check explicit ``str_replace_editor`` edit and view outcomes.
+
+    A successful ``view`` intentionally returns ``None``: the UI reserves
+    checkmarks for state-changing commands, while an X identifies a failed
+    request.  This also prevents source text shown by a view from being treated
+    as an execution error by generic observation matching.
+    """
     def check_str_edit_status(obs):
         if not obs:
             return None
@@ -108,7 +125,44 @@ def check_edit_status(tool, subcommand, args, observation):
 
     if tool == "str_replace_editor" and subcommand in {"str_replace"}:
         return check_str_edit_status(observation)
+
+    if tool == "str_replace_editor" and subcommand == "view":
+        obs = (observation or "").strip().lower()
+        view_range = (args or {}).get("view_range") if isinstance(args, dict) else None
+
+        # The editor reports this exact response for missing files/directories.
+        if re.search(r"^the path .+ does not exist\. please provide a valid path\.?$", obs):
+            return "failure: path does not exist"
+
+        # A view range must contain exactly two line numbers.  Catch both a
+        # malformed parsed range and validation messages emitted by the tool.
+        if view_range is not None and (
+            not isinstance(view_range, (list, tuple))
+            or len(view_range) != 2
+            or not all(isinstance(line, int) for line in view_range)
+        ):
+            return "failure: invalid view range"
+        if (
+            "view_range must be in the format" in obs
+            or "invalid view_range" in obs
+            or "invalid view range" in obs
+            or "invalid line range" in obs
+            or re.search(r"view_range.*(?:must|expected|requires).*?(?:two|2)", obs)
+        ):
+            return "failure: invalid view range"
+
     return None
+
+
+def set_observation_metadata(node_data, observation):
+    """Store an observation's length and tool-aware outcome on a graph node."""
+    node_data["observation_length"] = len(observation or "")
+    node_data["observation_outcome"] = detect_observation_outcome(
+        observation,
+        tool=node_data.get("tool"),
+        subcommand=node_data.get("subcommand"),
+        args=node_data.get("args"),
+    )
 
 
 def determine_resolution_status(instance_id: str, eval_report_path: str) -> str:
@@ -314,8 +368,7 @@ def build_graph_from_sa_trajectory(traj_data, parser, instance_id, output_dir, e
             )
             builder.G.nodes[node_key]["thought_len_raw"]   = thought_len_raw
             builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
-            builder.G.nodes[node_key]["observation_length"]  = len(observation)
-            builder.G.nodes[node_key]["observation_outcome"] = detect_observation_outcome(observation)
+            set_observation_metadata(builder.G.nodes[node_key], observation)
             builder.add_execution_edge(node_key, step_idx,
                                        is_first_in_step=True,
                                        thought_length_raw=thought_len_raw,
@@ -386,8 +439,7 @@ def build_graph_from_sa_trajectory(traj_data, parser, instance_id, output_dir, e
         # Mark last node of this step with observation info
         if node_keys_in_step:
             last_node = node_keys_in_step[-1]
-            builder.G.nodes[last_node]["observation_length"]  = len(observation)
-            builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(observation)
+            set_observation_metadata(builder.G.nodes[last_node], observation)
 
     return builder.finalize_and_save(output_dir, instance_id, eval_report_path, template_dir, metadata_comment)
 
@@ -552,8 +604,7 @@ def build_graph_from_oh_trajectory(traj_data, parser, instance_id, output_dir, e
         if node_keys_in_step:
             last_node = node_keys_in_step[-1]
             obs_text = step.get("content", "") or ""
-            builder.G.nodes[last_node]["observation_length"]  = len(obs_text)
-            builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(obs_text)
+            set_observation_metadata(builder.G.nodes[last_node], obs_text)
 
         step_idx += 1
 
@@ -697,8 +748,7 @@ def build_graph_from_msa_trajectory(traj_data, parser, instance_id, output_dir, 
 
                 if node_keys_in_step:
                     last_node = node_keys_in_step[-1]
-                    builder.G.nodes[last_node]["observation_length"] = len(observation)
-                    builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(observation)
+                    set_observation_metadata(builder.G.nodes[last_node], observation)
 
                 step_idx += 1
 
@@ -825,8 +875,7 @@ def build_graph_from_msa_trajectory(traj_data, parser, instance_id, output_dir, 
                 # Mark last node with observation info
                 if node_keys_in_step:
                     last_node = node_keys_in_step[-1]
-                    builder.G.nodes[last_node]["observation_length"] = len(observation)
-                    builder.G.nodes[last_node]["observation_outcome"] = detect_observation_outcome(observation)
+                    set_observation_metadata(builder.G.nodes[last_node], observation)
 
                 step_idx += 1
 

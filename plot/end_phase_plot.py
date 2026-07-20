@@ -276,19 +276,30 @@ def plot_phase_donuts(per_unit: Dict[Tuple[str, str], Tuple[Counter, Counter]],
             ax.set_axis_off()
             return
 
+        def draw_ring(sizes: List[int], radius: float):
+            """Draw a phase ring, or a neutral placeholder for an empty split."""
+            if sum(sizes):
+                return ax.pie(
+                    sizes, radius=radius, startangle=90,
+                    wedgeprops=dict(width=RING_W, edgecolor="white", linewidth=0.8),
+                    colors=colors,
+                )[0]
+
+            # Some configurations have only resolved or only unresolved runs.
+            # Matplotlib rejects a pie whose wedge sizes are all zero, so retain
+            # the ring geometry with a neutral empty-state band instead.
+            ax.pie(
+                [1], radius=radius, startangle=90,
+                wedgeprops=dict(width=RING_W, edgecolor="white", linewidth=0.8),
+                colors=["#e5e9ef"],
+            )
+            return []
+
         # OUTER ring = unresolved
-        outer_wedges = ax.pie(
-            sizes_unr, radius=OUTER_R, startangle=90,
-            wedgeprops=dict(width=RING_W, edgecolor="white", linewidth=0.8),
-            colors=colors,
-        )[0]
+        outer_wedges = draw_ring(sizes_unr, OUTER_R)
 
         # INNER ring = resolved
-        inner_wedges = ax.pie(
-            sizes_res, radius=INNER_R, startangle=90,
-            wedgeprops=dict(width=RING_W, edgecolor="white", linewidth=0.8),
-            colors=colors,
-        )[0]
+        inner_wedges = draw_ring(sizes_res, INNER_R)
 
         ax.set(aspect="equal")
 
