@@ -79,8 +79,7 @@ data/
 ### Output
 
 Graphs are generated in:
-- `data/SWE-agent/graphs/{model_name}/{instance_id}/{instance_id}.{json,pdf}`
-- `data/OpenHands/graphs/{model_name}/{instance_id}/{instance_id}.{json,pdf}`
+`data/{agent}/graphs/{model_name}/{instance_id}/{instance_id}.{json}`
 
 ### Supported Models
 

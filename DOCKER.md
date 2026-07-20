@@ -31,7 +31,7 @@ bash scripts/reproduce.sh
 
 ## Multi-Platform Support
 
-Works on Intel (`linux/amd64`) and Apple Silicon (`linux/arm64`):
+Works on Intel (`linux/amd64`):
 
 ```bash
 docker build --platform linux/arm64 -t graphectory .
@@ -98,6 +98,11 @@ bash scripts/construct.sh <trajectories_path> <eval_report.json> [output_dir] [m
 - Auto-detects agent (SWE-agent or OpenHands)
 - Auto-infers model from directory names
 
+Example:
+```bash
+bash scripts/construct.sh data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test data/samples/SWE-agent/reports/deepseek-chat.json
+```
+
 ### Stage 2: Graph Analysis
 Analyzes graphs and computes metrics.
 ```bash
@@ -114,7 +119,7 @@ bash scripts/reproduce.sh [-o output_dir]
 
 ### Out of Memory
 Increase Docker memory allocation:
-- Docker Desktop: Settings → Resources → Memory (6-8GB recommended)
+- Docker Desktop: Settings → Resources → Memory (13-15GB recommended)
 
 ### Permission Issues with Output
 Output files belong to container user. Fix on host:
