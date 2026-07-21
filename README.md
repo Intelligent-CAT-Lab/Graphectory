@@ -3,6 +3,8 @@
 </p>
 Artifact repository for the paper Process-Centric Analysis of Agentic Software Systems, accepted to the International Conference on Object-Oriented Programming, Systems, Languages, and Applications (OOPSLA 2026).
 
+For OOPSLA Artifact Reviewers: Start Here → ARTIFACT_EVALUATION.md
+
 ## Demo Video and Online Demo (Try it Out! 🚀)
 
 [![Graphectory Walkthrough](https://img.shields.io/badge/▶_Watch_Demo-Video-blue?style=for-the-badge&logo=github)](https://github.com/Intelligent-CAT-Lab/Graphectory/blob/main/demo/video1050646930.mp4)

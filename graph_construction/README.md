@@ -28,6 +28,14 @@ python live_graph_server.py \
 
 Then open **http://localhost:8000** in your browser.
 
+When Docker is used, expose the port when starting the container, for example:
+
+```bash
+docker run -it -p 8000:8000 graphectory bash
+```
+
+Then run the server inside the container.
+
 ![Interactive trajectory graph visualization in the browser](../demo/html_demo.png)
 *Live server interface showing instance list (left) and interactive graph visualization (right) with phase-colored nodes.*
 
