@@ -472,3 +472,359 @@ svg {
 .sidebar-resizer:active {
     background: rgba(100, 130, 220, 0.35);
 }
+
+/* ==================== File Footprint Lens ==================== */
+
+.control-icon-btn.active {
+    background: #243852;
+    border-color: #4c9eea;
+    color: #8ed0ff;
+    box-shadow: 0 0 0 3px rgba(76, 158, 234, 0.16);
+}
+
+.file-footprint {
+    position: absolute;
+    left: 18px;
+    bottom: 18px;
+    z-index: 40;
+    width: min(540px, calc(100% - 36px));
+    max-height: calc(100% - 36px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+    border: 1px solid rgba(126, 177, 232, 0.45);
+    border-radius: 14px;
+    background: rgba(15, 25, 39, 0.97);
+    color: #e7f0fa;
+    box-shadow: 0 18px 55px rgba(9, 18, 31, 0.38);
+    backdrop-filter: blur(14px);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(14px) scale(0.98);
+    transform-origin: bottom left;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.file-footprint.open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+}
+
+.file-footprint-header,
+.file-footprint-toolbar,
+.file-footprint-path,
+.file-footprint-meta,
+.file-footprint-key {
+    display: flex;
+    align-items: center;
+}
+
+.file-footprint-header {
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.file-footprint-kicker {
+    color: #6db6ee;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+}
+
+.file-footprint-title {
+    margin-top: 3px;
+    color: #f4f8fc;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.file-footprint-close {
+    width: 30px;
+    height: 30px;
+    border: 1px solid #36475c;
+    border-radius: 8px;
+    background: #1f3045;
+    color: #9eb8d0;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    box-shadow: none;
+}
+
+.file-footprint-close:hover {
+    background: #2a405b;
+    color: #ffffff;
+    transform: none;
+    box-shadow: none;
+}
+
+.file-footprint-copy {
+    margin: 11px 0 13px;
+    color: #afc0d3;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.file-footprint-toolbar {
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.file-footprint-filter {
+    min-width: 180px;
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid #3b5068;
+    border-radius: 7px;
+    outline: none;
+    background: #121e2c;
+    color: #e7f0fa;
+    font: 12px 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.file-footprint-filter:focus {
+    border-color: #5eafe8;
+    box-shadow: 0 0 0 2px rgba(94, 175, 232, 0.18);
+}
+
+.file-footprint-key {
+    gap: 8px;
+    color: #9eb1c4;
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.file-footprint-key span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.footprint-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+}
+
+.footprint-dot.seen,
+.file-footprint-mark.seen { background: #77a6d1; }
+
+.footprint-dot.view,
+.file-footprint-mark.view { background: #a78bfa; }
+
+.footprint-dot.edit,
+.file-footprint-mark.edit { background: #f59e0b; }
+
+.file-footprint-summary {
+    margin: 11px 0 7px;
+    color: #77a6d1;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.file-footprint-rows {
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 3px;
+}
+
+.file-footprint-folder {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    margin: 2px 0;
+    padding: 7px 8px 7px calc(8px + var(--file-indent, 0px));
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #bdcde0;
+    cursor: pointer;
+    font: 700 11px 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    letter-spacing: 0.01em;
+    text-align: left;
+    box-shadow: none;
+    transform: none;
+}
+
+.file-footprint-folder:hover {
+    border-color: #314d68;
+    background: #1a2b3e;
+    color: #e9f4ff;
+    box-shadow: none;
+    transform: none;
+}
+
+.file-footprint-chevron {
+    display: inline-block;
+    width: 12px;
+    margin-right: 5px;
+    color: #6db6ee;
+    font-size: 12px;
+    line-height: 1;
+    transform: rotate(0deg);
+    transition: transform 0.14s ease;
+}
+
+.file-footprint-folder[aria-expanded="true"] .file-footprint-chevron {
+    transform: rotate(90deg);
+}
+
+.file-footprint-folder-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-footprint-folder-name::after {
+    content: '/';
+    color: #6f8ba8;
+}
+
+.file-footprint-folder-count {
+    margin-left: auto;
+    padding-left: 8px;
+    color: #7192b1;
+    font-size: 9px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.file-footprint-row {
+    display: block;
+    width: calc(100% - var(--file-indent, 0px));
+    margin: 3px 0 6px var(--file-indent, 0px);
+    padding: 8px 10px 9px;
+    border: 1px solid #283c52;
+    border-radius: 8px;
+    background: #172535;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    box-shadow: none;
+    transform: none;
+}
+
+.file-footprint-row:hover,
+.file-footprint-row.selected {
+    border-color: #5eafe8;
+    background: #1d3147;
+    box-shadow: inset 3px 0 0 #f59e0b;
+    transform: none;
+}
+
+.file-footprint-row.directory-activity {
+    border-style: dashed;
+    background: #142333;
+}
+
+.file-footprint-row.directory-activity .file-footprint-kind {
+    background: #314a61;
+    color: #b4d0e9;
+}
+
+.file-footprint-path {
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    color: #e9f2fb;
+    font: 600 12px 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.file-footprint-path > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-footprint-kind {
+    flex-shrink: 0;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: #2b435d;
+    color: #9bc3e8;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.file-footprint-meta {
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 5px;
+    color: #91a8bd;
+    font-size: 10px;
+}
+
+.file-footprint-meta span { color: #c0d2e2; }
+
+.file-footprint-timeline {
+    position: relative;
+    height: 14px;
+    margin: 8px 3px 0;
+}
+
+.file-footprint-track {
+    position: absolute;
+    top: 6px;
+    right: 0;
+    left: 0;
+    height: 2px;
+    border-radius: 2px;
+    background: #40546a;
+}
+
+.file-footprint-mark {
+    position: absolute;
+    top: 2px;
+    width: 9px;
+    height: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px #172535;
+    transform: translateX(-50%);
+}
+
+.file-footprint-empty {
+    padding: 22px 12px;
+    color: #8da3b7;
+    font-size: 12px;
+    text-align: center;
+}
+
+.node.file-footprint-highlight rect {
+    stroke: #f59e0b;
+    stroke-width: 4;
+    filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.72));
+}
+
+.node.file-footprint-muted {
+    opacity: 0.20;
+}
+
+@media (max-width: 700px) {
+    .file-footprint {
+        right: 10px;
+        bottom: 10px;
+        left: 10px;
+        width: auto;
+        max-height: min(560px, calc(100% - 20px));
+    }
+
+    .file-footprint-key {
+        width: 100%;
+    }
+
+    .file-footprint-meta {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 2px;
+    }
+}

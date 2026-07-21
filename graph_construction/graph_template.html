@@ -31,6 +31,7 @@
             <button class="control-icon-btn" onclick="zoomIn()" title="Zoom in" aria-label="Zoom in">+</button>
             <button class="control-icon-btn" onclick="zoomOut()" title="Zoom out" aria-label="Zoom out">−</button>
             <button class="control-icon-btn" onclick="toggleFullscreen()" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+            <button class="control-icon-btn" id="fileFootprintToggle" onclick="toggleFileFootprint()" title="Show file footprint" aria-label="Show file footprint">&#9638;</button>
         </div>
         
         <div class="graph-container">
@@ -45,6 +46,26 @@
                 <div class="step-tabs" id="stepTabs"></div>
                 <div class="sidebar-content" id="sidebarContent"></div>
             </div>
+            <aside class="file-footprint" id="fileFootprint" aria-label="File footprint">
+                <div class="file-footprint-header">
+                    <div>
+                        <div class="file-footprint-kicker">EXPERIMENTAL LENS</div>
+                        <div class="file-footprint-title">File footprint</div>
+                    </div>
+                    <button class="file-footprint-close" onclick="closeFileFootprint()" title="Close file footprint" aria-label="Close file footprint">&times;</button>
+                </div>
+                <p class="file-footprint-copy">Trace every file or path the agent referenced, viewed, or edited. Click a row to spotlight its graph nodes.</p>
+                <div class="file-footprint-toolbar">
+                    <input id="fileFootprintFilter" class="file-footprint-filter" type="search" placeholder="Filter files and paths" aria-label="Filter files and paths">
+                    <div class="file-footprint-key" aria-label="Activity legend">
+                        <span><i class="footprint-dot seen"></i>Seen</span>
+                        <span><i class="footprint-dot view"></i>Viewed</span>
+                        <span><i class="footprint-dot edit"></i>Edited</span>
+                    </div>
+                </div>
+                <div class="file-footprint-summary" id="fileFootprintSummary"></div>
+                <div class="file-footprint-rows" id="fileFootprintRows"></div>
+            </aside>
         </div>
         
         <div class="legend">
@@ -113,6 +134,7 @@
     <script>
         const nodesData  = {{NODES_DATA}};
         const edgesData  = {{EDGES_DATA}};
+        const fileActivityData = {{FILE_ACTIVITY_DATA}};
         const settings   = {{SETTINGS}};
 
         // Surface rendering errors visibly rather than leaving a blank canvas.

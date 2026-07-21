@@ -13,6 +13,7 @@ Public surface:
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,14 @@ PHASE_COLORS: dict[str, str] = {
 _DAGRE_VERSION    = "0.8.5"
 _DAGRE_CDN_URL    = f"https://unpkg.com/dagre@{_DAGRE_VERSION}/dist/dagre.min.js"
 _DAGRE_LOCAL_NAME = "dagre.min.js"
+
+_PATH_ARGUMENT_NAMES = {
+    "path", "file", "file_path", "filename", "source", "destination", "target",
+}
+_FILE_SUFFIX_RE = re.compile(r"\.[A-Za-z0-9_-]{1,12}$")
+_PATH_FRAGMENT_RE = re.compile(
+    r"(?<![\w.-])(?P<path>(?:~?/|\.?\.?/)(?:[\w@+=,.:~-]+/)*[\w@+=,.:~-]+(?:\.[\w-]+)?)(?![\w.-])"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +72,7 @@ def render_graph_html(
 
     nodes_data = _prepare_nodes(G)
     edges_data = _prepare_edges(G)
+    file_activity_data = _prepare_file_activity(G)
 
     resolution_status = G.graph.get("resolution_status", "none") or "none"
     meta = {
@@ -110,6 +120,7 @@ def render_graph_html(
     # Graph data
     html = html.replace("{{NODES_DATA}}",   _safe_json(nodes_data))
     html = html.replace("{{EDGES_DATA}}",   _safe_json(edges_data))
+    html = html.replace("{{FILE_ACTIVITY_DATA}}", _safe_json(file_activity_data))
     html = html.replace("{{SETTINGS}}",     _safe_json(settings))
 
     # Inline assets so the rendered page is fully self-contained.
@@ -212,6 +223,171 @@ def _prepare_nodes(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
             "step_data":          _sanitize_step_data(data.get("step_data", [])),
         })
     return nodes
+
+
+def _prepare_file_activity(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
+    """Build a compact, action-derived timeline of files and paths in *G*.
+
+    The graph retains the command semantics needed to distinguish an ordinary
+    path reference from a read or write.  Keeping this summary in the renderer
+    avoids a second pass over raw trajectories in the browser and lets each
+    timeline event link back to the graph node that produced it.
+    """
+    records: dict[str, dict[str, Any]] = {}
+
+    for node_id, data in G.nodes(data=True):
+        paths = _extract_node_paths(data)
+        if not paths:
+            continue
+
+        activity = _classify_file_activity(data)
+        step_indices = sorted({int(step) for step in data.get("step_indices", [])})
+        if not step_indices:
+            continue
+
+        for path in paths:
+            record = records.setdefault(path, {
+                "path": path,
+                "kind": "file" if _looks_like_file(path) else "path",
+                "seen_steps": set(),
+                "view_steps": set(),
+                "edit_steps": set(),
+                "events": [],
+                "node_ids": set(),
+            })
+            record["node_ids"].add(str(node_id))
+
+            for step in step_indices:
+                record["seen_steps"].add(step)
+                if activity == "view":
+                    record["view_steps"].add(step)
+                elif activity == "edit":
+                    record["edit_steps"].add(step)
+                record["events"].append({
+                    "step": step,
+                    "type": activity,
+                    "node_id": str(node_id),
+                })
+
+    result: list[dict[str, Any]] = []
+    for record in records.values():
+        # A deduplicated action can revisit a path. Keep one event per step,
+        # preferring edits over views and views over ordinary references.
+        rank = {"seen": 0, "view": 1, "edit": 2}
+        event_by_step: dict[int, dict[str, Any]] = {}
+        for event in record["events"]:
+            old = event_by_step.get(event["step"])
+            if old is None or rank[event["type"]] > rank[old["type"]]:
+                event_by_step[event["step"]] = event
+
+        seen_steps = sorted(record["seen_steps"])
+        result.append({
+            "path": record["path"],
+            "kind": record["kind"],
+            "first_step": seen_steps[0],
+            "last_step": seen_steps[-1],
+            "seen_count": len(seen_steps),
+            "view_count": len(record["view_steps"]),
+            "edit_count": len(record["edit_steps"]),
+            "events": [event_by_step[step] for step in sorted(event_by_step)],
+            "node_ids": sorted(record["node_ids"]),
+        })
+
+    return sorted(
+        result,
+        key=lambda item: (
+            -item["edit_count"],
+            -item["view_count"],
+            -item["seen_count"],
+            item["path"],
+        ),
+    )
+
+
+def _extract_node_paths(data: dict[str, Any]) -> list[str]:
+    """Return normalized path-like arguments from one parsed action node."""
+    args = data.get("args", {}) or {}
+    candidates: list[tuple[str, bool]] = []
+
+    if isinstance(args, dict):
+        for key, value in args.items():
+            if not isinstance(value, str):
+                continue
+            candidates.append((value, key.lower() in _PATH_ARGUMENT_NAMES))
+    elif isinstance(args, (list, tuple)):
+        candidates.extend((str(value), False) for value in args)
+
+    paths: list[str] = []
+    for value, explicit_path in candidates:
+        paths.extend(_extract_paths_from_value(value, explicit_path))
+
+    return list(dict.fromkeys(paths))
+
+
+def _extract_paths_from_value(value: str, explicit_path: bool) -> list[str]:
+    value = (value or "").strip()
+    if not value or "\n" in value:
+        return []
+
+    direct = _normalise_path(value, allow_directory=explicit_path)
+    if direct:
+        return [direct]
+
+    paths = []
+    for match in _PATH_FRAGMENT_RE.finditer(value):
+        path = _normalise_path(match.group("path"), allow_directory=False)
+        if path:
+            paths.append(path)
+    return paths
+
+
+def _normalise_path(value: str, allow_directory: bool) -> str | None:
+    """Normalize a file/path token while rejecting ordinary command arguments."""
+    path = value.strip().strip("'\"`[]{}()<>,;:").replace("\\", "/")
+    path = re.sub(r"(\.[A-Za-z0-9_-]{1,12}):\d+(?::\d+)?$", r"\1", path)
+    if not path or any(char.isspace() for char in path):
+        return None
+
+    is_explicit_path = path.startswith(("/", "~/", "./", "../")) or "/" in path
+    if not is_explicit_path and not _looks_like_file(path):
+        return None
+    if not allow_directory and not _looks_like_file(path):
+        return None
+    return path
+
+
+def _looks_like_file(path: str) -> bool:
+    return bool(_FILE_SUFFIX_RE.search(path.rsplit("/", 1)[-1]))
+
+
+def _classify_file_activity(data: dict[str, Any]) -> str:
+    """Classify a parsed action as a path reference, view, or edit."""
+    tool = str(data.get("tool", "") or "").lower()
+    subcommand = str(data.get("subcommand", "") or "").lower()
+    command = str(data.get("command", "") or "").lower()
+    args = data.get("args", {}) or {}
+    flags = data.get("flags", {}) or {}
+
+    if tool == "str_replace_editor":
+        if subcommand == "view":
+            return "view"
+        if subcommand in {"create", "str_replace", "insert", "undo_edit"}:
+            return "edit"
+
+    if command in {"cat", "head", "tail", "less", "more", "nl", "bat"}:
+        return "view"
+    if command == "sed":
+        return "edit" if isinstance(flags, dict) and flags.get("i") else "view"
+    if command == "perl" and isinstance(flags, dict) and flags.get("i"):
+        return "edit"
+    if command in {"cp", "mv", "rm", "touch", "truncate", "tee"}:
+        return "edit"
+
+    # An editor-style action with a file-text argument writes a new file even
+    # if an unfamiliar tool configuration leaves its subcommand unspecified.
+    if isinstance(args, dict) and any(key in args for key in {"new_str", "old_str", "file_text"}):
+        return "edit"
+    return "seen"
 
 
 def _node_colors(data: dict) -> list[str]:

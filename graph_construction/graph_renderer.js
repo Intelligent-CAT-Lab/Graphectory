@@ -848,6 +848,7 @@ function setupPanning() {
     graphEl.addEventListener('mousedown', (e) => {
         if (e.target.closest('.node')) return;
         if (e.target.closest('.detail-sidebar')) return;
+        if (e.target.closest('.file-footprint')) return;
 
         isDragging = true;
         dragMoved  = false;
@@ -885,6 +886,293 @@ function setupPanning() {
         dragMoved  = false;
         graphEl.style.cursor = 'grab';
     });
+}
+
+// ==================== File Footprint ====================
+// The backend provides a compact activity index keyed by parsed file/path
+// arguments. This panel turns that index into a per-file step timeline.
+let activeFileFootprintPath = null;
+const expandedFileFootprintDirs = new Set();
+const collapsedFileFootprintDirs = new Set();
+
+function activityName(type) {
+    return ({ seen: 'referenced', view: 'viewed', edit: 'edited' })[type] || 'referenced';
+}
+
+function clearFileFootprintHighlight() {
+    document.querySelectorAll('.node.file-footprint-highlight, .node.file-footprint-muted')
+        .forEach(node => node.classList.remove('file-footprint-highlight', 'file-footprint-muted'));
+    activeFileFootprintPath = null;
+}
+
+function highlightFileFootprintNodes(nodeIds) {
+    const activeIds = new Set(nodeIds || []);
+    document.querySelectorAll('.node').forEach(node => {
+        const isMatch = activeIds.has(node.getAttribute('data-id'));
+        node.classList.toggle('file-footprint-highlight', isMatch);
+        node.classList.toggle('file-footprint-muted', activeIds.size > 0 && !isMatch);
+    });
+}
+
+function selectFileFootprintRow(activity, row) {
+    const wasSelected = activeFileFootprintPath === activity.path;
+    document.querySelectorAll('.file-footprint-row.selected')
+        .forEach(item => item.classList.remove('selected'));
+
+    if (wasSelected) {
+        clearFileFootprintHighlight();
+        return;
+    }
+
+    activeFileFootprintPath = activity.path;
+    row.classList.add('selected');
+    highlightFileFootprintNodes(activity.node_ids);
+}
+
+function makeFootprintMark(event, maxStep) {
+    const mark = document.createElement('span');
+    const position = maxStep > 0 ? Math.max(1, Math.min(99, (event.step / maxStep) * 100)) : 50;
+    mark.className = `file-footprint-mark ${event.type}`;
+    mark.style.left = `${position}%`;
+    mark.title = `Step ${event.step}: ${activityName(event.type)}`;
+    mark.setAttribute('aria-label', mark.title);
+    return mark;
+}
+
+function footprintPathParts(path) {
+    const normalized = String(path || '').replace(/\\/g, '/').replace(/^\.\//, '');
+    const parts = normalized.split('/').filter(Boolean);
+    return parts.length ? parts : [normalized || 'unknown path'];
+}
+
+function buildFootprintTree(activities) {
+    const root = { key: '', dirs: new Map(), files: [], directory_activities: [] };
+
+    activities.forEach(activity => {
+        const parts = footprintPathParts(activity.path);
+        const isDirectoryActivity = activity.kind === 'path' && parts.length > 0;
+        const leaf = parts.pop();
+        let parent = root;
+
+        parts.forEach(part => {
+            const key = parent.key ? `${parent.key}/${part}` : part;
+            if (!parent.dirs.has(part)) {
+                parent.dirs.set(part, {
+                    key,
+                    name: part,
+                    dirs: new Map(),
+                    files: [],
+                    directory_activities: [],
+                });
+            }
+            parent = parent.dirs.get(part);
+        });
+
+        if (isDirectoryActivity) {
+            const key = parent.key ? `${parent.key}/${leaf}` : leaf;
+            if (!parent.dirs.has(leaf)) {
+                parent.dirs.set(leaf, {
+                    key,
+                    name: leaf,
+                    dirs: new Map(),
+                    files: [],
+                    directory_activities: [],
+                });
+            }
+            parent.dirs.get(leaf).directory_activities.push(activity);
+        } else {
+            parent.files.push({ ...activity, leaf_name: leaf });
+        }
+    });
+
+    return root;
+}
+
+function footprintTreeStats(node) {
+    const stats = node.files.reduce((total, activity) => ({
+        files: total.files + 1,
+        views: total.views + activity.view_count,
+        edits: total.edits + activity.edit_count,
+    }), { files: 0, views: 0, edits: 0 });
+
+    node.dirs.forEach(child => {
+        const childStats = footprintTreeStats(child);
+        stats.files += childStats.files;
+        stats.views += childStats.views;
+        stats.edits += childStats.edits;
+    });
+    node.stats = stats;
+    return stats;
+}
+
+function isFootprintDirectoryOpen(directory, forceOpen) {
+    if (forceOpen || expandedFileFootprintDirs.has(directory.key)) return true;
+    if (collapsedFileFootprintDirs.has(directory.key)) return false;
+    // Open single-child directory chains so a common project root does not
+    // require several clicks before the analyst sees individual files.
+    return directory.files.length === 0 && directory.dirs.size === 1;
+}
+
+function toggleFootprintDirectory(directory, forceOpen) {
+    if (forceOpen) return;
+    if (isFootprintDirectoryOpen(directory, false)) {
+        expandedFileFootprintDirs.delete(directory.key);
+        collapsedFileFootprintDirs.add(directory.key);
+    } else {
+        collapsedFileFootprintDirs.delete(directory.key);
+        expandedFileFootprintDirs.add(directory.key);
+    }
+    renderFileFootprint(document.getElementById('fileFootprintFilter')?.value || '');
+}
+
+function makeFootprintFileRow(activity, depth, maxStep) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'file-footprint-row';
+    row.style.setProperty('--file-indent', `${depth * 16}px`);
+    row.title = `${activity.path}\nFirst seen: step ${activity.first_step}; last seen: step ${activity.last_step}`;
+    if (activeFileFootprintPath === activity.path) row.classList.add('selected');
+
+    const pathLine = document.createElement('div');
+    pathLine.className = 'file-footprint-path';
+    const pathLabel = document.createElement('span');
+    pathLabel.textContent = activity.leaf_name;
+    pathLabel.title = activity.path;
+    const kind = document.createElement('span');
+    kind.className = 'file-footprint-kind';
+    kind.textContent = activity.kind;
+    pathLine.append(pathLabel, kind);
+
+    const meta = document.createElement('div');
+    meta.className = 'file-footprint-meta';
+    meta.textContent = `steps ${activity.first_step}-${activity.last_step}`;
+    const counts = document.createElement('span');
+    counts.textContent = `${activity.seen_count} seen | ${activity.view_count} viewed | ${activity.edit_count} edited`;
+    meta.appendChild(counts);
+
+    const timeline = document.createElement('div');
+    timeline.className = 'file-footprint-timeline';
+    const track = document.createElement('span');
+    track.className = 'file-footprint-track';
+    timeline.appendChild(track);
+    activity.events.forEach(event => timeline.appendChild(makeFootprintMark(event, maxStep)));
+
+    row.append(pathLine, meta, timeline);
+    row.addEventListener('click', () => selectFileFootprintRow(activity, row));
+    return row;
+}
+
+function makeFootprintDirectoryActivityRow(activity, depth, maxStep) {
+    const row = makeFootprintFileRow({ ...activity, leaf_name: '(folder activity)' }, depth, maxStep);
+    row.classList.add('directory-activity');
+    return row;
+}
+
+function renderFootprintTree(directory, container, depth, maxStep, forceOpen) {
+    directory.directory_activities
+        .sort((left, right) => left.path.localeCompare(right.path))
+        .forEach(activity => container.appendChild(makeFootprintDirectoryActivityRow(activity, depth, maxStep)));
+
+    [...directory.dirs.values()]
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .forEach(child => {
+            const isOpen = isFootprintDirectoryOpen(child, forceOpen);
+            const folder = document.createElement('button');
+            folder.type = 'button';
+            folder.className = 'file-footprint-folder';
+            folder.style.setProperty('--file-indent', `${depth * 16}px`);
+            folder.setAttribute('aria-expanded', String(isOpen));
+            folder.title = `${child.stats.files} tracked ${child.stats.files === 1 ? 'path' : 'paths'} in ${child.key}`;
+
+            const chevron = document.createElement('span');
+            chevron.className = 'file-footprint-chevron';
+            chevron.setAttribute('aria-hidden', 'true');
+            chevron.textContent = '>';
+            const name = document.createElement('span');
+            name.className = 'file-footprint-folder-name';
+            name.textContent = child.name;
+            const count = document.createElement('span');
+            count.className = 'file-footprint-folder-count';
+            count.textContent = `${child.stats.files} ${child.stats.files === 1 ? 'file' : 'files'}`;
+            folder.append(chevron, name, count);
+            folder.addEventListener('click', () => toggleFootprintDirectory(child, forceOpen));
+            container.appendChild(folder);
+
+            if (isOpen) {
+                const children = document.createElement('div');
+                children.className = 'file-footprint-children';
+                renderFootprintTree(child, children, depth + 1, maxStep, forceOpen);
+                container.appendChild(children);
+            }
+        });
+
+    directory.files
+        .sort((left, right) => left.leaf_name.localeCompare(right.leaf_name))
+        .forEach(activity => container.appendChild(makeFootprintFileRow(activity, depth, maxStep)));
+}
+
+function renderFileFootprint(query = '') {
+    const rows = document.getElementById('fileFootprintRows');
+    const summary = document.getElementById('fileFootprintSummary');
+    if (!rows || !summary) return;
+
+    const normalizedQuery = query.trim().toLowerCase();
+    const activities = (fileActivityData || []).filter(activity =>
+        !normalizedQuery || activity.path.toLowerCase().includes(normalizedQuery)
+    );
+    const totalEdits = activities.reduce((total, activity) => total + activity.edit_count, 0);
+    const totalViews = activities.reduce((total, activity) => total + activity.view_count, 0);
+    summary.textContent = `${activities.length} ${activities.length === 1 ? 'path' : 'paths'} | ${totalViews} views | ${totalEdits} edits`;
+    rows.replaceChildren();
+
+    if (!activities.length) {
+        const empty = document.createElement('div');
+        empty.className = 'file-footprint-empty';
+        empty.textContent = normalizedQuery
+            ? 'No parsed file paths match this filter.'
+            : 'No file paths were detected in this trajectory.';
+        rows.appendChild(empty);
+        return;
+    }
+
+    const tree = buildFootprintTree(activities);
+    footprintTreeStats(tree);
+    const maxStep = Math.max(1, ...activities.map(activity => activity.last_step));
+    renderFootprintTree(tree, rows, 0, maxStep, Boolean(normalizedQuery));
+}
+
+function toggleFileFootprint() {
+    const panel = document.getElementById('fileFootprint');
+    if (!panel) return;
+    panel.classList.contains('open') ? closeFileFootprint() : openFileFootprint();
+}
+
+function openFileFootprint() {
+    const panel = document.getElementById('fileFootprint');
+    const toggle = document.getElementById('fileFootprintToggle');
+    if (!panel) return;
+    panel.classList.add('open');
+    if (toggle) toggle.classList.add('active');
+}
+
+function closeFileFootprint() {
+    const panel = document.getElementById('fileFootprint');
+    const toggle = document.getElementById('fileFootprintToggle');
+    if (panel) panel.classList.remove('open');
+    if (toggle) toggle.classList.remove('active');
+    clearFileFootprintHighlight();
+    renderFileFootprint(document.getElementById('fileFootprintFilter')?.value || '');
+}
+
+function setupFileFootprint() {
+    const filter = document.getElementById('fileFootprintFilter');
+    if (filter) {
+        filter.addEventListener('input', () => {
+            clearFileFootprintHighlight();
+            renderFileFootprint(filter.value);
+        });
+    }
+    renderFileFootprint();
 }
 
 // ==================== Sidebar Resize ====================
@@ -963,6 +1251,7 @@ function initializeGraph() {
         setupWheelZoom();
         setupPanning();
         setupSidebarResize();
+        setupFileFootprint();
 
         setTimeout(fitToScreen, 150);
     } catch (err) {
