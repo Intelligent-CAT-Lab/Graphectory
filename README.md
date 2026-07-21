@@ -44,27 +44,66 @@ docker run -it graphectory bash
 For Docker workflows, see [DOCKER.md](DOCKER.md). If interested in interactive graph construction, see [graph_construction/README.md](graph_construction/README.md).
 
 ### Build Locally
-Requires **Python ≥ 3.12**. We recommend using conda or virtual environments:
+The local setup has been tested on Ubuntu 22.04 (x86-64) and Windows x64.
+
+**Python ≥ 3.12** is required. We recommend using conda or virtual environments:
 
 ```bash
 conda create -n graphectory python=3.12 && conda activate graphectory
 python -m pip install -e .
 ```
 
+> [!NOTE]
+> Local installation may depend on system compilers and libraries (e.g., NumPy/GCC compatibility). For a consistent environment, we recommend using the provided Docker setup.
+
 **PyGraphviz Note** (Required for Live Visualization): On Windows, standard `pip install` often fails due to missing Graphviz C-libraries. Using conda is recommended:
 ```bash
 conda install -c conda-forge pygraphviz
 ```
-Otherwise, install Graphviz system binaries manually before `python -m pip install -e .`
+Alternatively, install Graphviz system binaries manually before `python -m pip install -e .`
 
 ---
 
 ## Quick Start
+### Graph Construction
 
 Graphectory provides two tools for working with agent trajectories:
 
 - **[generatejson.py](graph_construction/generatejson.py)**: Batch export graphs to JSON files
 - **[live_graph_server.py](graph_construction/live_graph_server.py)**: Interactive browser-based graph visualization
+
+For example, construct graphs for the provided SWE-agent samples:
+
+```bash
+python graph_construction/generatejson.py \
+  --agent sa \
+  --model dsk-v3 \
+  --trajs data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test \
+  --eval_report data/samples/SWE-agent/reports/deepseek-chat.json \
+  --output_dir data/samples
+```
+
+Graphectory also provides an interactive browser-based graph viewer. run:
+
+```bash
+python graph_construction/live_graph_server.py \
+  --trajs data/samples/SWE-agent/trajectories/anthropic_filemap__deepseek--deepseek-chat__t-0.00__p-1.00__c-2.00___swe_bench_verified_test \
+  --eval_report data/samples/SWE-agent/reports/deepseek-chat.json
+```
+
+Then open:
+
+```text
+http://localhost:8000
+```
+
+When Docker is used, expose the port when starting the container, for example:
+
+```bash
+docker run -it -p 8000:8000 graphectory bash
+```
+
+Then run the server inside the container.
 
 For detailed usage and configuration options, see [graph_construction/README.md](graph_construction/README.md).
 
@@ -77,7 +116,7 @@ Pre-computed analysis results for the full dataset are available under [data/{Op
 ### Analyze Pre-computed Graphs
 
 ```bash
-python -m graph_analysis.batch_runner
+bash scripts/analyze.sh data/
 ```
 
 ### Analyze Custom Graphs

@@ -50,21 +50,6 @@ docker build --platform linux/arm64 -t graphectory .
 
 We recommend allocating approximately **13–15 GB of memory** to Docker during the build.
 
-### Alternative environment: Local installation
-
-```bash
-conda create -n graphectory python=3.12 && conda activate graphectory
-python -m pip install -e .
-```
-
-**PyGraphviz Note** (Required for Live Visualization): On Windows, standard `pip install` often fails due to missing Graphviz C-libraries. Using conda is recommended:
-```bash
-conda install -c conda-forge pygraphviz
-```
-Otherwise, install Graphviz system binaries manually before `python -m pip install -e .`
-
-Because PyGraphviz can require platform-specific Graphviz libraries, **Docker is strongly recommended for artifact evaluation**.
-
 ---
 
 ## 1.2 Obtain the Artifact
@@ -880,13 +865,7 @@ This is the fastest way to verify correspondence between the supplied experiment
 **Required data:** Precomputed graphs included with repository.
 
 ```bash
-python -m graph_analysis.batch_runner
-```
-
-or:
-
-```bash
-bash scripts/analyze.sh <data_dir>
+bash scripts/analyze.sh data/
 ```
 
 Recomputes process-centric analysis from Graphectory graphs.
@@ -899,7 +878,7 @@ Recomputes process-centric analysis from Graphectory graphs.
 
 ```bash
 bash scripts/construct.sh <trajectories> <eval_report>
-bash scripts/analyze.sh <data_dir>
+bash scripts/analyze.sh data/
 bash scripts/reproduce.sh
 ```
 
