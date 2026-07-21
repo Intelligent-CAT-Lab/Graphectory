@@ -48,7 +48,8 @@ function selectGraphWorkspace() {
 
 function openViewOptions() {
     if (sankeyActive) return;
-    document.getElementById('viewOptions').open = true;
+    const options = document.getElementById('viewOptions');
+    options.open = !options.open;
 }
 
 function closeViewOptions() {
