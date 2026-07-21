@@ -7,7 +7,7 @@ For OOPSLA Artifact Reviewers: Start Here → ARTIFACT_EVALUATION.md
 
 ## Demo Video and Online Demo (Try it Out! 🚀)
 
-[![Graphectory Walkthrough](https://img.shields.io/badge/▶_Watch_Demo-Video-blue?style=for-the-badge&logo=github)](https://github.com/Intelligent-CAT-Lab/Graphectory/blob/main/demo/video1050646930.mp4)
+[Watch the original Graphectory demo](https://drive.google.com/file/d/1AksLnyebVd2iEGU4dfmzQRnoEBPaMq42/view?usp=sharing) | [Watch the ASE Tool Demo](https://drive.google.com/file/d/1D6frLH6lLl4P2Al1WyxPLx1_RANLkDGI/view?usp=sharing)
 
 [Try the Live Demo Here!](https://graphectory-viewer-demo.vercel.app/)
 
