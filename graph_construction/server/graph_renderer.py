@@ -7,7 +7,7 @@ in graph_template.html with inlined CSS, JS, and serialised graph data.
 Public surface:
 
     html: str = render_graph_html(G, filter_cd, thought_quotes,
-                                  node_verbosity, show_observation, assets_dir)
+                                  show_observation, assets_dir)
 """
 
 import json
@@ -55,7 +55,6 @@ def render_graph_html(
     G: nx.MultiDiGraph,
     filter_cd: bool,
     thought_quotes: bool,
-    node_verbosity: bool,
     show_observation: bool,
     assets_dir: Path,
 ) -> str:
@@ -78,14 +77,12 @@ def render_graph_html(
     meta = {
         "instance_name":     instance_name,
         "resolution_status": resolution_status,
-        "difficulty":        str(G.graph.get("debug_difficulty", "unknown")),
         "node_count":        str(len(nodes_data)),
         "edge_count":        str(len(edges_data)),
     }
 
     settings = {
         "thoughtQuotes":   thought_quotes,
-        "nodeVerbosity":   node_verbosity,
         "showObservation": show_observation,
     }
 
@@ -113,7 +110,6 @@ def render_graph_html(
     # Metadata
     html = html.replace("{{STATUS_ITEM}}",       status_item_html)
     html = html.replace("{{INSTANCE_NAME}}",     _esc(meta["instance_name"]))
-    html = html.replace("{{DIFFICULTY}}",        _esc(meta["difficulty"]))
     html = html.replace("{{NODE_COUNT}}",        meta["node_count"])
     html = html.replace("{{EDGE_COUNT}}",        meta["edge_count"])
 

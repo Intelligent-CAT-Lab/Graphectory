@@ -9,6 +9,7 @@ let allGraphs          = [];
 let activeId           = null;   // instance_id of selected graph, or null
 let sankeyActive       = false;  // true when Sankey pane is showing
 let dataSourceExpanded = true;
+let sidebarCollapsed   = false;
 
 /* =========================================================================
    Bootstrap
@@ -20,6 +21,38 @@ async function init() {
     wireToggles();
     wireEnterKey();
     skWireControls();
+    setWorkspace('graph');
+}
+
+function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    const sidebar = document.getElementById('appSidebar');
+    const button = document.getElementById('sidebarToggle');
+    sidebar.classList.toggle('collapsed', sidebarCollapsed);
+    button.setAttribute('aria-expanded', String(!sidebarCollapsed));
+    button.setAttribute('aria-label', sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    button.title = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    button.textContent = sidebarCollapsed ? '>' : '<';
+}
+
+function setWorkspace(workspace) {
+    const graphActive = workspace === 'graph';
+    document.getElementById('graphWorkspaceTab').classList.toggle('active', graphActive);
+    document.getElementById('sankeyListItem').classList.toggle('active', !graphActive);
+}
+
+function selectGraphWorkspace() {
+    if (sankeyActive) hideSankeyPane();
+    setWorkspace('graph');
+}
+
+function openViewOptions() {
+    if (sankeyActive) return;
+    document.getElementById('viewOptions').open = true;
+}
+
+function closeViewOptions() {
+    document.getElementById('viewOptions').open = false;
 }
 
 /* =========================================================================
@@ -43,7 +76,26 @@ function toggleDataSource() { setDataSourceExpanded(!dataSourceExpanded); }
 function setDataSourceExpanded(open) {
     dataSourceExpanded = open;
     document.getElementById('dataSourceBody').style.display = open ? 'flex' : 'none';
-    document.getElementById('dsChevron').textContent = open ? '▴' : '▾';
+    document.getElementById('dsChevron').textContent = open ? 'v' : '>';
+}
+
+async function selectLocalPath(purpose, kind) {
+    const input = document.getElementById(purpose === 'trajs' ? 'trajsInput' : 'reportInput');
+    const error = document.getElementById('dsError');
+    error.style.display = 'none';
+
+    try {
+        const params = new URLSearchParams({ purpose, kind });
+        const res = await fetch(`/api/select-path?${params}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (data.path) {
+            input.value = data.path;
+            input.focus();
+        }
+    } catch (err) {
+        showDsError(`${err.message} You can still enter a path manually.`);
+    }
 }
 
 async function applyDataSource() {
@@ -175,8 +227,7 @@ function wireSearch() {
    Graph view toggles
    ========================================================================= */
 function wireToggles() {
-    ['filterCdToggle', 'thoughtQuotesToggle', 'nodeVerbosityToggle',
-     'observationToggle', 'uniqueThinkToggle'].forEach(id => {
+    ['filterCdToggle', 'thoughtQuotesToggle', 'observationToggle', 'uniqueThinkToggle'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => {
             if (activeId) loadGraph(activeId);
         });
@@ -185,9 +236,11 @@ function wireToggles() {
 
 const filterCd        = () => document.getElementById('filterCdToggle').checked;
 const thoughtQuotes   = () => document.getElementById('thoughtQuotesToggle').checked;
-const nodeVerbosity   = () => document.getElementById('nodeVerbosityToggle').checked;
 const showObservation = () => document.getElementById('observationToggle').checked;
 const uniqueThink     = () => document.getElementById('uniqueThinkToggle').checked;
+function shouldAutoOpenFileFootprint() {
+    return document.getElementById('autoFileFootprintToggle')?.checked !== false;
+}
 
 /* =========================================================================
    Graph pane
@@ -195,12 +248,12 @@ const uniqueThink     = () => document.getElementById('uniqueThinkToggle').check
 function selectGraph(instanceId) {
     // Switch away from Sankey if needed
     if (sankeyActive) hideSankeyPane();
+    setWorkspace('graph');
 
     activeId = instanceId;
     document.querySelectorAll('.graph-item').forEach(el =>
         el.classList.toggle('active', el.dataset.id === instanceId)
     );
-    document.getElementById('sankeyListItem').classList.remove('active');
     loadGraph(instanceId);
 }
 
@@ -486,7 +539,6 @@ async function loadGraph(instanceId) {
         id:               instanceId,
         filter_cd:        filterCd(),
         thought_quotes:   thoughtQuotes(),
-        node_verbosity:   nodeVerbosity(),
         show_observation: showObservation(),
         unique_think:     uniqueThink(),
     });
@@ -521,13 +573,15 @@ function selectSankey() {
     // Deselect any active graph item
     activeId = null;
     document.querySelectorAll('.graph-item').forEach(el => el.classList.remove('active'));
-    document.getElementById('sankeyListItem').classList.add('active');
+    setWorkspace('sankey');
 
     showSankeyPane();
 }
 
 function showSankeyPane() {
     sankeyActive = true;
+    closeViewOptions();
+    document.querySelector('.main').classList.add('sankey-active');
     document.getElementById('graphPane').style.display  = 'none';
     document.getElementById('sankeyPane').style.display = 'flex';
     // Fetch data if not yet loaded, otherwise redraw
@@ -540,6 +594,7 @@ function showSankeyPane() {
 
 function hideSankeyPane() {
     sankeyActive = false;
+    document.querySelector('.main').classList.remove('sankey-active');
     document.getElementById('sankeyPane').style.display = 'none';
     document.getElementById('graphPane').style.display  = '';
 }

@@ -11,17 +11,6 @@ function estimateNodeTextWidth(line, lineIndex) {
     return line.length * 6.4;
 }
 
-function legacyNodeSize(lines) {
-    const line1Len = lines[0] ? Math.min(lines[0].length, 30) : 0;
-    const restMax = lines.slice(1).reduce((m, l) => Math.max(m, Math.min(l.length, 35)), 0);
-    const widthFromL1 = line1Len * 7.5 + 24;
-    const widthFromRest = restMax * 5.5 + 24;
-    return {
-        width: Math.max(100, widthFromL1, widthFromRest),
-        height: Math.max(40, lines.length * 16 + 12),
-    };
-}
-
 function containedNodeSize(lines) {
     const contentWidth = lines.reduce(
         (m, line, i) => Math.max(m, estimateNodeTextWidth(line, i)),
@@ -47,15 +36,13 @@ function layoutGraph() {
     });
     g.setDefaultEdgeLabel(() => ({}));
     
-    // Add nodes with sizing based on label content and display mode.
+    // Keep each label inside its node so every graph has a consistent visual grammar.
     nodesData.forEach(node => {
         const label = node.label || node.id;
         node.displayLabel = label;  // Store for rendering
         
         const lines = label.split('\\n');
-        const { width, height } = settings.nodeVerbosity
-            ? legacyNodeSize(lines)
-            : containedNodeSize(lines);
+        const { width, height } = containedNodeSize(lines);
         g.setNode(node.id, { width, height, ...node });
     });
     
@@ -498,6 +485,7 @@ function renderNodes(svg, g, defs) {
         nodeGroup.addEventListener('click', (e) => {
             e.stopPropagation();
             openSidebar(node);
+            if (shouldAutoOpenFileFootprint()) revealFileFootprintForNode(node.id);
         });
 
         let nodeFillAttr = node.color || '#CFE0F6';
@@ -552,13 +540,7 @@ function renderNodes(svg, g, defs) {
             text.setAttribute('text-anchor', 'middle');
             text.setAttribute('dominant-baseline', 'middle');
 
-            if (settings.nodeVerbosity) {
-                // Legacy verbose mode intentionally keeps the old compact boxes
-                // and larger text, including long labels that can extend out.
-                text.setAttribute('font-size', '18');
-                text.setAttribute('font-weight', '600');
-                text.setAttribute('fill', '#2c3e50');
-            } else if (i === 0) {
+            if (i === 0) {
                 // Line 1: action title — bold, dark, readable
                 text.setAttribute('font-weight', 'bold');
                 text.setAttribute('font-size', '12');
@@ -888,11 +870,41 @@ function setupPanning() {
     });
 }
 
+function togglePhaseLegend(forceOpen) {
+    const legend = document.getElementById('phaseLegend');
+    if (!legend) return;
+    const shouldOpen = typeof forceOpen === 'boolean'
+        ? forceOpen
+        : !legend.classList.contains('open');
+    legend.classList.toggle('open', shouldOpen);
+    legend.setAttribute('aria-hidden', String(!shouldOpen));
+}
+
+function openParentViewOptions() {
+    try {
+        if (window.parent !== window && typeof window.parent.openViewOptions === 'function') {
+            window.parent.openViewOptions();
+        }
+    } catch (_) {
+        // A standalone exported graph has no browser-shell settings to open.
+    }
+}
+
+function shouldAutoOpenFileFootprint() {
+    try {
+        if (window.parent !== window && typeof window.parent.shouldAutoOpenFileFootprint === 'function') {
+            return window.parent.shouldAutoOpenFileFootprint();
+        }
+    } catch (_) {
+        // Standalone exports retain the default node-click behavior.
+    }
+    return true;
+}
+
 // ==================== File Footprint ====================
 // The backend provides a compact activity index keyed by parsed file/path
 // arguments. This panel turns that index into a per-file step timeline.
 let activeFileFootprintPath = null;
-const expandedFileFootprintDirs = new Set();
 const collapsedFileFootprintDirs = new Set();
 
 function activityName(type) {
@@ -914,12 +926,12 @@ function highlightFileFootprintNodes(nodeIds) {
     });
 }
 
-function selectFileFootprintRow(activity, row) {
+function selectFileFootprintRow(activity, row, allowToggle = true) {
     const wasSelected = activeFileFootprintPath === activity.path;
     document.querySelectorAll('.file-footprint-row.selected')
         .forEach(item => item.classList.remove('selected'));
 
-    if (wasSelected) {
+    if (wasSelected && allowToggle) {
         clearFileFootprintHighlight();
         return;
     }
@@ -927,6 +939,36 @@ function selectFileFootprintRow(activity, row) {
     activeFileFootprintPath = activity.path;
     row.classList.add('selected');
     highlightFileFootprintNodes(activity.node_ids);
+}
+
+function revealFileFootprintForNode(nodeId) {
+    const matches = (fileActivityData || [])
+        .filter(activity => (activity.node_ids || []).includes(nodeId))
+        .sort((left, right) => {
+            const leftScore = left.edit_count * 4 + left.view_count * 2 + left.seen_count;
+            const rightScore = right.edit_count * 4 + right.view_count * 2 + right.seen_count;
+            return rightScore - leftScore || left.path.localeCompare(right.path);
+        });
+    const activity = matches[0];
+    if (!activity) return;
+
+    const filter = document.getElementById('fileFootprintFilter');
+    if (filter) filter.value = '';
+    // Reopen each parent so a previously collapsed branch never hides the match.
+    let directoryKey = '';
+    footprintPathParts(activity.path).forEach(part => {
+        directoryKey = directoryKey ? `${directoryKey}/${part}` : part;
+        collapsedFileFootprintDirs.delete(directoryKey);
+    });
+    openFileFootprint();
+    renderFileFootprint();
+
+    const row = [...document.querySelectorAll('.file-footprint-row')]
+        .find(item => item.dataset.footprintPath === activity.path);
+    if (!row) return;
+
+    selectFileFootprintRow(activity, row, false);
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function makeFootprintMark(event, maxStep) {
@@ -1006,21 +1048,15 @@ function footprintTreeStats(node) {
 }
 
 function isFootprintDirectoryOpen(directory, forceOpen) {
-    if (forceOpen || expandedFileFootprintDirs.has(directory.key)) return true;
-    if (collapsedFileFootprintDirs.has(directory.key)) return false;
-    // Open single-child directory chains so a common project root does not
-    // require several clicks before the analyst sees individual files.
-    return directory.files.length === 0 && directory.dirs.size === 1;
+    return forceOpen || !collapsedFileFootprintDirs.has(directory.key);
 }
 
 function toggleFootprintDirectory(directory, forceOpen) {
     if (forceOpen) return;
     if (isFootprintDirectoryOpen(directory, false)) {
-        expandedFileFootprintDirs.delete(directory.key);
         collapsedFileFootprintDirs.add(directory.key);
     } else {
         collapsedFileFootprintDirs.delete(directory.key);
-        expandedFileFootprintDirs.add(directory.key);
     }
     renderFileFootprint(document.getElementById('fileFootprintFilter')?.value || '');
 }
@@ -1029,6 +1065,7 @@ function makeFootprintFileRow(activity, depth, maxStep) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'file-footprint-row';
+    row.dataset.footprintPath = activity.path;
     row.style.setProperty('--file-indent', `${depth * 16}px`);
     row.title = `${activity.path}\nFirst seen: step ${activity.first_step}; last seen: step ${activity.last_step}`;
     if (activeFileFootprintPath === activity.path) row.classList.add('selected');
@@ -1043,13 +1080,6 @@ function makeFootprintFileRow(activity, depth, maxStep) {
     kind.textContent = activity.kind;
     pathLine.append(pathLabel, kind);
 
-    const meta = document.createElement('div');
-    meta.className = 'file-footprint-meta';
-    meta.textContent = `steps ${activity.first_step}-${activity.last_step}`;
-    const counts = document.createElement('span');
-    counts.textContent = `${activity.seen_count} seen | ${activity.view_count} viewed | ${activity.edit_count} edited`;
-    meta.appendChild(counts);
-
     const timeline = document.createElement('div');
     timeline.className = 'file-footprint-timeline';
     const track = document.createElement('span');
@@ -1057,7 +1087,7 @@ function makeFootprintFileRow(activity, depth, maxStep) {
     timeline.appendChild(track);
     activity.events.forEach(event => timeline.appendChild(makeFootprintMark(event, maxStep)));
 
-    row.append(pathLine, meta, timeline);
+    row.append(pathLine, timeline);
     row.addEventListener('click', () => selectFileFootprintRow(activity, row));
     return row;
 }
@@ -1290,4 +1320,7 @@ function _wireSidebarClose() {
     // something upstream cancelled the synthetic click (e.g. drag-end logic).
     btn.addEventListener('click',   closeSidebar);
     btn.addEventListener('mouseup', (e) => { e.stopPropagation(); closeSidebar(); });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') togglePhaseLegend(false);
+    });
 }

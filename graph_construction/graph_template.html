@@ -3,150 +3,107 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trajectory Graph: {{INSTANCE_NAME}}</title>
+    <title>{{INSTANCE_NAME}} | Graphectory Viewer</title>
     {{DAGRE_SCRIPT_TAG}}
     <link rel="stylesheet" href="styles.css">
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📊 Trajectory Graph: {{INSTANCE_NAME}}</h1>
-            <div class="metadata">
+<body class="graph-document">
+    <main class="graph-container">
+        <div id="graph" aria-label="Trajectory graph canvas"></div>
+
+        <header class="graph-hud">
+            <div class="trajectory-identity">
+                <span>Trajectory</span>
+                <h1 title="{{INSTANCE_NAME}}">{{INSTANCE_NAME}}</h1>
+            </div>
+            <div class="graph-hud-metadata">
                 {{STATUS_ITEM}}
-                <div class="metadata-item">
-                    <strong>Difficulty:</strong> {{DIFFICULTY}}
-                </div>
-                <div class="metadata-item">
-                    <strong>Nodes:</strong> {{NODE_COUNT}}
-                </div>
-                <div class="metadata-item">
-                    <strong>Edges:</strong> {{EDGE_COUNT}}
-                </div>
+                <span><b>{{NODE_COUNT}}</b> nodes</span>
+                <span><b>{{EDGE_COUNT}}</b> edges</span>
             </div>
+        </header>
 
-        </div>
-        
-        <div class="controls">
-            <button class="control-icon-btn" onclick="fitToScreen()" title="Fit to screen" aria-label="Fit to screen">⌖</button>
-            <button class="control-icon-btn" onclick="zoomIn()" title="Zoom in" aria-label="Zoom in">+</button>
-            <button class="control-icon-btn" onclick="zoomOut()" title="Zoom out" aria-label="Zoom out">−</button>
-            <button class="control-icon-btn" onclick="toggleFullscreen()" title="Fullscreen" aria-label="Fullscreen">⛶</button>
-            <button class="control-icon-btn" id="fileFootprintToggle" onclick="toggleFileFootprint()" title="Show file footprint" aria-label="Show file footprint">&#9638;</button>
-        </div>
-        
-        <div class="graph-container">
-            <div id="graph"></div>
-            <!-- Detail sidebar – populated by JS on node click -->
-            <div class="detail-sidebar" id="detailSidebar">
-                <div class="sidebar-resizer" id="sidebarResizer"></div>
-                <div class="sidebar-header">
-                    <span class="sidebar-node-title" id="sidebarTitle">—</span>
-                    <button class="sidebar-close-btn" id="sidebarCloseBtn" title="Close">✕</button>
-                </div>
-                <div class="step-tabs" id="stepTabs"></div>
-                <div class="sidebar-content" id="sidebarContent"></div>
-            </div>
-            <aside class="file-footprint" id="fileFootprint" aria-label="File footprint">
-                <div class="file-footprint-header">
-                    <div>
-                        <div class="file-footprint-kicker">EXPERIMENTAL LENS</div>
-                        <div class="file-footprint-title">File footprint</div>
-                    </div>
-                    <button class="file-footprint-close" onclick="closeFileFootprint()" title="Close file footprint" aria-label="Close file footprint">&times;</button>
-                </div>
-                <p class="file-footprint-copy">Trace every file or path the agent referenced, viewed, or edited. Click a row to spotlight its graph nodes.</p>
-                <div class="file-footprint-toolbar">
-                    <input id="fileFootprintFilter" class="file-footprint-filter" type="search" placeholder="Filter files and paths" aria-label="Filter files and paths">
-                    <div class="file-footprint-key" aria-label="Activity legend">
-                        <span><i class="footprint-dot seen"></i>Seen</span>
-                        <span><i class="footprint-dot view"></i>Viewed</span>
-                        <span><i class="footprint-dot edit"></i>Edited</span>
-                    </div>
-                </div>
-                <div class="file-footprint-summary" id="fileFootprintSummary"></div>
-                <div class="file-footprint-rows" id="fileFootprintRows"></div>
-            </aside>
-        </div>
-        
-        <div class="legend">
-            <div class="legend-title">Phase Legend</div>
-            <div class="legend-grid">
-                <div class="legend-item">
-                    <div class="legend-color" style="background-color: #C5B3F0;"></div>
-                    <span class="legend-label">Localization</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background-color: #FCC9B0;"></div>
-                    <span class="legend-label">Patch</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background-color: #A8E6F0;"></div>
-                    <span class="legend-label">Validation</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background-color: #CFE0F6;"></div>
-                    <span class="legend-label">General</span>
-                </div>
-            </div>
-            <div class="legend-title" style="margin-top: 20px;">Edge Types</div>
-            <div class="legend-grid">
-                <div class="legend-item">
-                    <div style="width: 32px; height: 2px; background: #95a5a6; flex-shrink: 0;"></div>
-                    <span class="legend-label">Execution</span>
-                </div>
-                <div class="legend-item">
-                    <svg width="32" height="12" style="flex-shrink:0;overflow:visible;">
-                        <line x1="0" y1="6" x2="32" y2="6" stroke="#27ae60" stroke-width="2" stroke-dasharray="5,3"/>
-                        <polygon points="32,3 32,9 38,6" fill="#27ae60"/>
-                    </svg>
-                    <span class="legend-label">Hierarchy</span>
-                </div>
-                <div class="legend-item">
-                    <div style="width: 32px; height: 3px; background: #e74c3c; flex-shrink: 0;"></div>
-                    <span class="legend-label">Thought Continuation</span>
-                </div>
-                <div class="legend-item">
-                    <svg width="32" height="12" style="flex-shrink:0;overflow:visible;">
-                        <line x1="0" y1="6" x2="32" y2="6" stroke="#3498db" stroke-width="2" stroke-dasharray="4,3"/>
-                        <polygon points="32,3 32,9 38,6" fill="#3498db"/>
-                    </svg>
-                    <span class="legend-label">Intra-step (&amp;&amp;)</span>
-                </div>
-            </div>
-            <div class="legend-title" style="margin-top: 20px;">Node Symbols</div>
-            <div class="legend-grid">
-                <div class="legend-item">
-                    <div class="legend-symbol" style="position: relative;">
-                        <svg width="32" height="24" style="overflow: visible;">
-                            <rect x="0" y="10" width="32" height="14" fill="#CFE0F6" stroke="#2c3e50" stroke-width="1" rx="2"/>
-                            <path d="M 16 4 L 10 10 L 22 10 Z" fill="#f39c12" stroke="#e67e22" stroke-width="1"/>
-                        </svg>
-                    </div>
-                    <span class="legend-label">cd command stripped (▲ hat)</span>
-                </div>
+        <nav class="controls" aria-label="Graph controls">
+            <button class="control-icon-btn" type="button" onclick="fitToScreen()" title="Fit graph to screen" aria-label="Fit graph to screen">&#x2922;</button>
+            <button class="control-icon-btn" type="button" onclick="zoomIn()" title="Zoom in" aria-label="Zoom in">+</button>
+            <button class="control-icon-btn" type="button" onclick="zoomOut()" title="Zoom out" aria-label="Zoom out">-</button>
+            <button class="control-icon-btn" type="button" onclick="toggleFullscreen()" title="Fullscreen" aria-label="Fullscreen">&#x26F6;</button>
+            <button class="control-icon-btn" id="fileFootprintToggle" type="button" onclick="toggleFileFootprint()" title="Show file footprint" aria-label="Show file footprint">&#9638;</button>
+            <button class="control-icon-btn" type="button" onclick="openParentViewOptions()" title="Graph view settings" aria-label="Graph view settings">&#9881;</button>
+            <button class="control-icon-btn help-btn" type="button" onclick="togglePhaseLegend()" title="Open phase legend" aria-label="Open phase legend">?</button>
+        </nav>
 
+        <aside class="phase-legend" id="phaseLegend" aria-hidden="true">
+            <div class="phase-legend-header">
+                <div><span>Visual guide</span><strong>How to read this Graphectory</strong></div>
+                <button type="button" onclick="togglePhaseLegend(false)" title="Close legend" aria-label="Close legend">x</button>
             </div>
-        </div>
-    </div>
-    
+            <section>
+                <h2>Phases</h2>
+                <div class="legend-grid">
+                    <div class="legend-item"><i class="legend-color localization"></i><span>Localization: inspect, search, or reproduce.</span></div>
+                    <div class="legend-item"><i class="legend-color patch"></i><span>Patch: edit source or tests.</span></div>
+                    <div class="legend-item"><i class="legend-color validation"></i><span>Validation: evaluate a candidate fix.</span></div>
+                    <div class="legend-item"><i class="legend-color general"></i><span>General: plan, submit, or housekeeping.</span></div>
+                </div>
+            </section>
+            <section>
+                <h2>Connections</h2>
+                <div class="legend-grid">
+                    <div class="legend-item"><i class="legend-line execution"></i><span>Execution order</span></div>
+                    <div class="legend-item"><i class="legend-line hierarchy"></i><span>File-navigation hierarchy</span></div>
+                    <div class="legend-item"><i class="legend-line continuation"></i><span>Thought continuation</span></div>
+                    <div class="legend-item"><i class="legend-line intra-step"></i><span>Commands in one step</span></div>
+                </div>
+            </section>
+            <p class="legend-note">Click a node to read every original thought, action, and observation represented by it.</p>
+        </aside>
+
+        <aside class="file-footprint" id="fileFootprint" aria-label="File footprint">
+            <div class="file-footprint-header">
+                <div>
+                    <div class="file-footprint-kicker">FILE ACTIVITY</div>
+                    <div class="file-footprint-title">File footprint</div>
+                </div>
+                <button class="file-footprint-close" type="button" onclick="closeFileFootprint()" title="Close file footprint" aria-label="Close file footprint">x</button>
+            </div>
+            <p class="file-footprint-copy">Trace every file or path the agent referenced, viewed, or edited. Click a row to spotlight its graph nodes.</p>
+            <div class="file-footprint-toolbar">
+                <input id="fileFootprintFilter" class="file-footprint-filter" type="search" placeholder="Filter files and paths" aria-label="Filter files and paths">
+                <div class="file-footprint-key" aria-label="Activity legend">
+                    <span><i class="footprint-dot seen"></i>Seen</span>
+                    <span><i class="footprint-dot view"></i>Viewed</span>
+                    <span><i class="footprint-dot edit"></i>Edited</span>
+                </div>
+            </div>
+            <div class="file-footprint-summary" id="fileFootprintSummary"></div>
+            <div class="file-footprint-rows" id="fileFootprintRows"></div>
+        </aside>
+
+        <aside class="detail-sidebar" id="detailSidebar">
+            <div class="sidebar-resizer" id="sidebarResizer"></div>
+            <div class="sidebar-header">
+                <span class="sidebar-node-title" id="sidebarTitle">Node detail</span>
+                <button class="sidebar-close-btn" id="sidebarCloseBtn" type="button" title="Close node detail" aria-label="Close node detail">x</button>
+            </div>
+            <div class="step-tabs" id="stepTabs"></div>
+            <div class="sidebar-content" id="sidebarContent"></div>
+        </aside>
+    </main>
+
     <div class="tooltip" id="tooltip"></div>
 
     <script>
-        const nodesData  = {{NODES_DATA}};
-        const edgesData  = {{EDGES_DATA}};
+        const nodesData = {{NODES_DATA}};
+        const edgesData = {{EDGES_DATA}};
         const fileActivityData = {{FILE_ACTIVITY_DATA}};
-        const settings   = {{SETTINGS}};
+        const settings = {{SETTINGS}};
 
-        // Surface rendering errors visibly rather than leaving a blank canvas.
-        window.addEventListener('error', (e) => {
+        window.addEventListener('error', (event) => {
             const graphEl = document.getElementById('graph');
             if (!graphEl || graphEl.querySelector('.render-error')) return;
-            graphEl.innerHTML =
-                '<div class="render-error" style="padding:32px;font-family:monospace;color:#e74c3c;">'
-                + '<strong>⚠ Rendering error</strong><br><br>'
-                + '<code>' + (e.message || 'Unknown error') + '</code><br><br>'
-                + '<small style="color:#999;">Check the browser console (F12) for the full stack trace.</small>'
-                + '</div>';
+            graphEl.innerHTML = '<div class="render-error"><strong>Rendering error</strong><br><code>'
+                + (event.message || 'Unknown error') + '</code></div>';
         });
     </script>
     <script src="graph_renderer.js"></script>

@@ -19,6 +19,7 @@ GET  /api/graphs                → JSON list of available trajectories
 GET  /api/graph?id=X[&…]        → on-demand graph HTML for instance X
 GET  /api/sankey                → aggregated phase-per-step data for Sankey diagram
 GET  /api/config                → currently active trajs path and eval_report path
+GET  /api/select-path           → local native file or folder picker
 POST /api/config                → swap trajs/eval_report live; validates paths and overlap
 """
 
@@ -55,6 +56,9 @@ _CLIENT_DISCONNECT_ERRORS = (
     ConnectionAbortedError,
     ConnectionResetError,
 )
+
+_PATH_PICKER_LOCK = threading.Lock()
+_LOCALHOST_ADDRESSES = {"127.0.0.1", "::1"}
 
 
 class GraphHandler(BaseHTTPRequestHandler):
@@ -109,7 +113,6 @@ class GraphHandler(BaseHTTPRequestHandler):
                     instance_id      = instance_id,
                     filter_cd        = _bool_param(params, "filter_cd",        default=False),
                     thought_quotes   = _bool_param(params, "thought_quotes",   default=True),
-                    node_verbosity   = _bool_param(params, "node_verbosity",   default=False),
                     show_observation = _bool_param(params, "show_observation", default=False),
                     unique_think     = _bool_param(params, "unique_think",     default=True),
                 )
@@ -119,6 +122,9 @@ class GraphHandler(BaseHTTPRequestHandler):
 
             elif path == "/api/config":
                 self._api_get_config()
+
+            elif path == "/api/select-path":
+                self._api_select_path(params)
 
             else:
                 self._error(404, "Not found")
@@ -191,6 +197,16 @@ class GraphHandler(BaseHTTPRequestHandler):
         if report is not None and not report.exists():
             self._error(400, f"Eval report not found: {report}")
             return
+        if report is not None and report.is_dir():
+            resolved_report = _report_from_directory(report)
+            if resolved_report is None:
+                self._error(
+                    400,
+                    "The selected eval-report folder must contain exactly one JSON report "
+                    "or a file named report.json.",
+                )
+                return
+            report = resolved_report
 
         # ── Agent type inference ──────────────────────────────────────────────
         if trajs.is_file() and trajs.suffix == ".jsonl":
@@ -248,6 +264,25 @@ class GraphHandler(BaseHTTPRequestHandler):
             "agent_type":  agent_type,
         })
 
+    def _api_select_path(self, params: dict[str, list[str]]):
+        """Open a native picker on the machine running the local server."""
+        purpose = params.get("purpose", [""])[0]
+        kind = params.get("kind", [""])[0]
+        if purpose not in {"trajs", "report"} or kind not in {"file", "folder"}:
+            self._error(400, "Picker requires purpose=trajs|report and kind=file|folder.")
+            return
+        if self.client_address[0] not in _LOCALHOST_ADDRESSES:
+            self._error(403, "Path selection is available only from the local machine.")
+            return
+
+        try:
+            selected = _select_local_path(purpose, kind)
+        except RuntimeError as exc:
+            self._error(503, str(exc))
+            return
+
+        self._respond_json({"path": selected or ""})
+
     def _api_graphs(self):
         """Return the trajectory list, using the cached copy when available."""
         with self._cache_lock:
@@ -265,13 +300,12 @@ class GraphHandler(BaseHTTPRequestHandler):
         instance_id:      str,
         filter_cd:        bool,
         thought_quotes:   bool,
-        node_verbosity:   bool,
         show_observation: bool,
         unique_think:     bool,
     ):
         """Build (or retrieve from cache) and serve the graph HTML for *instance_id*."""
         cache_key = (instance_id, filter_cd, thought_quotes,
-                     node_verbosity, show_observation, unique_think)
+                     show_observation, unique_think)
 
         with self._cache_lock:
             cached = self._render_cache.get(cache_key)
@@ -294,7 +328,7 @@ class GraphHandler(BaseHTTPRequestHandler):
             unique_think     = unique_think,
         )
         html = render_graph_html(
-            G, filter_cd, thought_quotes, node_verbosity, show_observation, self.assets_dir,
+            G, filter_cd, thought_quotes, show_observation, self.assets_dir,
         )
 
         with self._cache_lock:
@@ -451,6 +485,69 @@ class GraphHandler(BaseHTTPRequestHandler):
                           json.dumps({"error": message}).encode())
         except _CLIENT_DISCONNECT_ERRORS:
             logger.info("[handler] Client disconnected before error response for %s", self.path)
+
+
+# ---------------------------------------------------------------------------
+# Local path-picker helpers
+# ---------------------------------------------------------------------------
+
+def _select_local_path(purpose: str, kind: str) -> str:
+    """Return a native picker selection, or an empty string when cancelled.
+
+    The picker deliberately lives in the local Python process rather than the
+    browser: web pages are not permitted to reveal absolute filesystem paths.
+    This also keeps the manual text fields as a reliable fallback for headless
+    or containerised server deployments.
+    """
+    if not _PATH_PICKER_LOCK.acquire(blocking=False):
+        raise RuntimeError("A file picker is already open.")
+
+    root = None
+    try:
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+        except ImportError as exc:
+            raise RuntimeError("Native file selection is unavailable; enter the path manually.") from exc
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+
+        if kind == "folder":
+            selected = filedialog.askdirectory(title="Select trajectory or report folder", parent=root)
+        else:
+            filetypes = (
+                [("Trajectory files", "*.jsonl *.json"), ("All files", "*.*")]
+                if purpose == "trajs"
+                else [("JSON reports", "*.json"), ("All files", "*.*")]
+            )
+            selected = filedialog.askopenfilename(
+                title="Select trajectory file" if purpose == "trajs" else "Select evaluation report",
+                filetypes=filetypes,
+                parent=root,
+            )
+        return str(Path(selected)) if selected else ""
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(
+            "Native file selection is unavailable in this server environment; enter the path manually."
+        ) from exc
+    finally:
+        if root is not None:
+            root.destroy()
+        _PATH_PICKER_LOCK.release()
+
+
+def _report_from_directory(directory: Path) -> Optional[Path]:
+    """Resolve a report folder only when it has an unambiguous JSON report."""
+    named_report = directory / "report.json"
+    if named_report.is_file():
+        return named_report
+
+    candidates = sorted(path for path in directory.glob("*.json") if path.is_file())
+    return candidates[0] if len(candidates) == 1 else None
 
 
 # ---------------------------------------------------------------------------

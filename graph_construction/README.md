@@ -50,17 +50,16 @@ Then run the server inside the container.
 
 ### The Browser UI
 
-The left sidebar lists every trajectory found in the provided path. Each entry shows the instance ID, a coloured status badge (resolved / unresolved / unsubmitted), and a step count. The search box filters the list in real time by instance ID substring.
+The left sidebar lists every trajectory found in the provided path. Each entry shows the instance ID, a coloured status badge (resolved / unresolved / unsubmitted), and a step count. The search box filters the list in real time by instance ID substring. The collapsible **Data source** section accepts manually entered paths and, when the server runs on a local desktop, native file and folder pickers.
 
-Clicking an entry loads its graph into the main pane. The graph is rendered inside a sandboxed iframe; switching instances swaps the content without reloading the page.
+Clicking an entry loads its graph into the main canvas. The graph is rendered inside a sandboxed iframe; switching instances swaps the content without reloading the page. Its floating question-mark control opens the phase and edge legend.
 
 #### View Toggles
 
-Five toggles sit above the instance list. Changing any of them immediately re-requests the current graph with the new settings applied.
+Four toggles sit inside the expandable gear menu at the top right of the graph canvas. Changing any of them immediately re-requests the current graph with the new settings applied.
 
 | Toggle | Default | Effect |
 |---|---|---|
-| **Legacy verbose labels** | Off | When off, nodes use wider contained labels for the full action name, step number, and file path or view range. When on, the viewer restores the older compact verbose style where long parameters can extend beyond the node. |
 | **Exclude quotes in thought length** | On | Strips content inside backticks and quote characters before measuring thought length, so arrowhead sizes reflect genuine reasoning rather than copied code. |
 | **Filter cd (show ▲ hat)** | Off | Strips leading `cd` commands from multi-command steps and replaces them with a small orange triangle (▲) on the node. |
 | **Show observation indicators** | Off | Draws a small coloured square on each edge at the 25% point, encoding the length and success/failure outcome of the previous step's tool response. |

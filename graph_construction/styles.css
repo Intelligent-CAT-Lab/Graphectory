@@ -515,7 +515,6 @@ svg {
 .file-footprint-header,
 .file-footprint-toolbar,
 .file-footprint-path,
-.file-footprint-meta,
 .file-footprint-key {
     display: flex;
     align-items: center;
@@ -632,6 +631,27 @@ svg {
     min-height: 0;
     overflow-y: auto;
     padding-right: 3px;
+    scrollbar-color: #4c9eea #101c2a;
+    scrollbar-width: thin;
+}
+
+.file-footprint-rows::-webkit-scrollbar {
+    width: 10px;
+}
+
+.file-footprint-rows::-webkit-scrollbar-track {
+    border-radius: 8px;
+    background: #101c2a;
+}
+
+.file-footprint-rows::-webkit-scrollbar-thumb {
+    border: 2px solid #101c2a;
+    border-radius: 8px;
+    background: #4c9eea;
+}
+
+.file-footprint-rows::-webkit-scrollbar-thumb:hover {
+    background: #78c2f1;
 }
 
 .file-footprint-folder {
@@ -755,20 +775,10 @@ svg {
     text-transform: uppercase;
 }
 
-.file-footprint-meta {
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 5px;
-    color: #91a8bd;
-    font-size: 10px;
-}
-
-.file-footprint-meta span { color: #c0d2e2; }
-
 .file-footprint-timeline {
     position: relative;
     height: 14px;
-    margin: 8px 3px 0;
+    margin: 5px 3px 0;
 }
 
 .file-footprint-track {
@@ -822,9 +832,167 @@ svg {
         width: 100%;
     }
 
-    .file-footprint-meta {
-        align-items: flex-start;
-        flex-direction: column;
-        gap: 2px;
-    }
+}
+
+/* ==================== Canvas-first Graph View ==================== */
+
+.graph-document {
+    overflow: hidden;
+    padding: 0;
+    background:
+        radial-gradient(circle at 10% 10%, rgba(10, 129, 123, .13), transparent 27%),
+        radial-gradient(circle at 93% 5%, rgba(223, 121, 87, .12), transparent 23%),
+        #eaf1ee;
+    color: #192c3d;
+    font-family: {{FONT_FAMILY}};
+}
+
+.graph-document .graph-container {
+    position: relative;
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: #edf3f0;
+    box-shadow: none;
+}
+
+.graph-document #graph {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #edf3f0;
+    background-image:
+        linear-gradient(rgba(24, 70, 83, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(24, 70, 83, .055) 1px, transparent 1px),
+        radial-gradient(circle at 50% 45%, rgba(255,255,255,.88), transparent 58%);
+    background-size: 28px 28px, 28px 28px, auto;
+}
+
+.graph-document .graph-hud {
+    position: absolute;
+    z-index: 12;
+    top: 16px;
+    left: 18px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    max-width: min(720px, calc(100% - 152px));
+    padding: 12px 15px 12px 17px;
+    border: 1px solid rgba(25, 44, 61, .16);
+    border-radius: 14px;
+    background: rgba(255, 254, 249, .92);
+    box-shadow: 0 12px 32px rgba(25, 44, 61, .13);
+    backdrop-filter: blur(10px);
+}
+
+.trajectory-identity { min-width: 0; }
+.trajectory-identity > span { display: block; margin-bottom: 3px; color: #0a817b; font: 800 9px/1 'Cascadia Code', Consolas, monospace; letter-spacing: .13em; text-transform: uppercase; }
+.graph-document h1 { max-width: 380px; margin: 0; overflow: hidden; color: #192c3d; font: 700 clamp(18px, 2vw, 25px)/1.08 {{FONT_FAMILY}}; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
+.graph-hud-metadata { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; color: #5a727e; font: 700 10px/1 'Cascadia Code', Consolas, monospace; }
+.graph-hud-metadata > span { padding: 5px 7px; border: 1px solid #d8e3de; border-radius: 6px; background: #f6f9f7; white-space: nowrap; }
+.graph-hud-metadata b { color: #192c3d; }
+.graph-hud-metadata .metadata-item { display: contents; }
+.graph-hud-metadata .metadata-item strong { display: none; }
+.graph-hud-metadata .status-badge { padding: 5px 7px; border: 1px solid currentColor; border-radius: 6px; font: 800 9px/1 'Cascadia Code', Consolas, monospace; }
+.graph-document .controls {
+    position: absolute;
+    z-index: 13;
+    top: 16px;
+    bottom: auto;
+    right: 18px;
+    display: flex;
+    gap: 5px;
+    margin: 0;
+    padding: 7px;
+    border: 1px solid rgba(25, 44, 61, .16);
+    border-radius: 13px;
+    background: rgba(255, 254, 249, .92);
+    box-shadow: 0 12px 32px rgba(25, 44, 61, .13);
+    backdrop-filter: blur(10px);
+}
+
+.graph-document .controls button {
+    width: 34px;
+    height: 34px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #365363;
+    font: 800 17px/1 'Cascadia Code', Consolas, monospace;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.graph-document .controls button:hover { border-color: #b7d4ca; background: #e5f3ee; color: #075e5a; box-shadow: none; transform: none; }
+.graph-document .controls .help-btn { border-color: #e7c46e; background: #fff3cb; color: #84631e; font-family: {{FONT_FAMILY}}; }
+.graph-document .controls .help-btn:hover { border-color: #c89327; background: #ffe7a3; color: #5f440c; }
+.graph-document .control-icon-btn.active { border-color: #0a817b; background: #ddf1ec; color: #075e5a; box-shadow: none; }
+
+.graph-document .phase-legend {
+    position: absolute;
+    z-index: 32;
+    top: 76px;
+    right: 18px;
+    width: min(370px, calc(100% - 36px));
+    max-height: calc(100% - 96px);
+    overflow-y: auto;
+    padding: 16px;
+    border: 1px solid rgba(25, 44, 61, .18);
+    border-radius: 15px;
+    background: rgba(255, 254, 249, .97);
+    box-shadow: 0 22px 52px rgba(25, 44, 61, .22);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-8px);
+    transition: opacity .16s ease, transform .16s ease;
+}
+.graph-document .phase-legend.open { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.phase-legend-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+.phase-legend-header span { display: block; margin-bottom: 4px; color: #0a817b; font: 800 9px/1 'Cascadia Code', Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.phase-legend-header strong { color: #192c3d; font: 700 19px/1.1 {{FONT_FAMILY}}; }
+.phase-legend-header button { width: 27px; height: 27px; border: 1px solid #d4e0da; border-radius: 7px; background: #f6f9f7; color: #59707b; cursor: pointer; font: 800 15px/1 'Cascadia Code', Consolas, monospace; }
+.phase-legend section { margin-top: 14px; }
+.phase-legend h2 { margin: 0 0 8px; color: #617783; font: 800 9px/1 'Cascadia Code', Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
+.phase-legend .legend-grid { display: grid; gap: 6px; grid-template-columns: 1fr; }
+.phase-legend .legend-item { display: flex; align-items: center; gap: 9px; min-height: 29px; padding: 6px 8px; border: 1px solid #dbe5e0; border-radius: 7px; background: #f8faf8; color: #49616e; font-size: 11px; line-height: 1.3; }
+.phase-legend .legend-color { width: 20px; height: 13px; border: 1px solid rgba(25,44,61,.25); border-radius: 4px; }
+.phase-legend .legend-color.localization { background: #b9a2ed; }
+.phase-legend .legend-color.patch { background: #f8ac84; }
+.phase-legend .legend-color.validation { background: #70d1df; }
+.phase-legend .legend-color.general { background: #c4cfda; }
+.legend-line { width: 20px; height: 0; flex: 0 0 auto; border-top: 2px solid #86959a; }
+.legend-line.hierarchy { border-top: 2px dashed #2fbd79; }
+.legend-line.continuation { border-top: 3px solid #e45043; }
+.legend-line.intra-step { border-top: 2px dashed #398fe3; }
+.legend-note { margin: 15px 0 0; color: #6b808a; font-size: 11px; line-height: 1.45; }
+
+.graph-document .detail-sidebar {
+    position: absolute;
+    z-index: 24;
+    top: 0;
+    right: 0;
+    left: auto;
+    width: 0;
+    height: 100%;
+    border-radius: 0;
+    box-shadow: -12px 0 32px rgba(12, 29, 44, .18);
+}
+.graph-document .detail-sidebar.open { width: min(440px, 43vw); }
+.graph-document .sidebar-header { background: #14354b; }
+.graph-document .sidebar-resizer { right: auto; left: 0; }
+
+.graph-document .file-footprint { z-index: 25; left: 18px; bottom: 18px; border-color: #36586b; box-shadow: 0 18px 45px rgba(12,29,44,.27); }
+.graph-document .graph-container.fullscreen-active { width: 100vw; height: 100vh; }
+.render-error { position: absolute; top: 50%; left: 50%; padding: 22px; border: 1px solid #e7b0a8; border-radius: 10px; background: #fffaf8; color: #b93a2c; font-family: 'Cascadia Code', Consolas, monospace; transform: translate(-50%, -50%); }
+
+@media (max-width: 760px) {
+    .graph-document .graph-hud { top: 11px; left: 11px; max-width: calc(100% - 22px); padding-right: 54px; }
+    .graph-hud-metadata { display: none; }
+    .graph-document h1 { max-width: calc(100vw - 125px); font-size: 18px; }
+    .graph-document .controls { top: 65px; right: 11px; bottom: auto; }
+    .graph-document .detail-sidebar.open { width: min(400px, 88vw); }
+    .graph-document .phase-legend { top: 112px; right: 11px; width: calc(100% - 22px); }
 }
