@@ -66,6 +66,97 @@ def check_command_outcome(observation: str, tool: str = None, subcommand: str = 
     return None
 
 
+# --- Agent-format detection -------------------------------------------------
+
+KIMI_TRAJECTORY_FORMAT = "kimi-code-wire-1"
+
+
+def _read_jsonl(path: Path):
+    """Yield valid JSON objects from *path*, tolerating a partial final line."""
+    with open(path, encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                yield value
+
+
+def _is_kimi_wire_file(path: Path) -> bool:
+    """Return whether *path* looks like a current Kimi Code wire stream."""
+    if not path.is_file() or path.suffix.lower() != ".jsonl":
+        return False
+    try:
+        for index, record in enumerate(_read_jsonl(path)):
+            record_type = record.get("type")
+            if record_type in {
+                "config.update",
+                "turn.prompt",
+                "context.append_loop_event",
+                "context.append_message",
+            }:
+                return True
+            if record_type == "metadata" and "protocol_version" in record:
+                return True
+            if index >= 20:
+                break
+    except OSError:
+        return False
+    return False
+
+
+def _kimi_wire_files(source: Path) -> list[Path]:
+    """Find main-agent Kimi Code wire streams below a file or directory."""
+    if source.is_file():
+        return [source] if _is_kimi_wire_file(source) else []
+
+    wires = []
+    for path in source.rglob("wire.jsonl"):
+        # Current Kimi Code stores each session's primary stream here. Ignore
+        # agents/<subagentId>/wire.jsonl so one session remains one trajectory.
+        if path.parent.name == "main" and path.parent.parent.name == "agents":
+            wires.append(path)
+    return sorted(wires)
+
+
+def _kimi_session_dir(wire_path: Path) -> Path:
+    if wire_path.parent.name == "main" and wire_path.parent.parent.name == "agents":
+        return wire_path.parent.parent.parent
+    return wire_path.parent
+
+
+def _load_kimi_state(wire_path: Path) -> dict:
+    state_path = _kimi_session_dir(wire_path) / "state.json"
+    if not state_path.is_file():
+        return {}
+    try:
+        with open(state_path, encoding="utf-8", errors="replace") as stream:
+            value = json.load(stream)
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def detect_agent_type(source: Path) -> str:
+    """Infer the trajectory format represented by *source*."""
+    if source.is_file():
+        if _is_kimi_wire_file(source):
+            return "kimi"
+        if source.suffix.lower() == ".jsonl":
+            return "oh"
+        return "sa"
+
+    if any(source.rglob("agents/main/wire.jsonl")):
+        return "kimi"
+    if any(source.rglob("*.traj.json")):
+        return "msa"
+    return "sa"
+
+
 # ── Directory scanning ──────────────────────────────────────────────────────
 
 def scan_trajectories(graphs_dir: Path,
@@ -78,6 +169,7 @@ def scan_trajectories(graphs_dir: Path,
     For SWE-agent (agent_type='sa'), graphs_dir is a directory tree of .traj files.
     For OpenHands (agent_type='oh'), graphs_dir is a path to an output.jsonl file.
     For mini-swe-agent (agent_type='msa'), graphs_dir is a directory tree of .traj.json files.
+    For Kimi Code (agent_type='kimi'), graphs_dir contains session wire.jsonl files.
     """
     resolved_set:   set[str] = set()
     unresolved_set: set[str] = set()
@@ -91,6 +183,34 @@ def scan_trajectories(graphs_dir: Path,
             pass
 
     results = []
+
+    if agent_type == "kimi":
+        for wire_path in _kimi_wire_files(graphs_dir):
+            session_dir = _kimi_session_dir(wire_path)
+            instance_id = session_dir.name or wire_path.stem
+            state = _load_kimi_state(wire_path)
+            title = str(state.get("title") or "").strip()
+            step_count = 0
+            try:
+                for record in _read_jsonl(wire_path):
+                    if record.get("type") != "context.append_loop_event":
+                        continue
+                    event = record.get("event") or {}
+                    if event.get("type") == "step.begin":
+                        step_count += 1
+            except OSError:
+                continue
+
+            results.append({
+                "instance_id": instance_id,
+                "display_name": title or instance_id,
+                "status": "none",
+                "difficulty": "unknown",
+                "step_count": step_count,
+            })
+
+        results.sort(key=lambda item: (item["display_name"].lower(), item["instance_id"]))
+        return results
 
     if agent_type == "oh":
         # OpenHands: graphs_dir is actually the output.jsonl file
@@ -241,9 +361,25 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
     For SWE-agent, searches for a matching .traj file under graphs_dir.
     For OpenHands, scans the output.jsonl file for the matching instance.
     For mini-swe-agent, searches for a matching .traj.json file under graphs_dir.
+    For Kimi Code, loads the main agent's wire.jsonl event stream.
 
     Raises FileNotFoundError if the trajectory cannot be found.
     """
+    if agent_type == "kimi":
+        for wire_path in _kimi_wire_files(graphs_dir):
+            session_dir = _kimi_session_dir(wire_path)
+            if (session_dir.name or wire_path.stem) != instance_id:
+                continue
+            return {
+                "trajectory_format": KIMI_TRAJECTORY_FORMAT,
+                "wire_path": str(wire_path),
+                "state": _load_kimi_state(wire_path),
+                "records": list(_read_jsonl(wire_path)),
+            }
+        raise FileNotFoundError(
+            f"No Kimi Code session '{instance_id}' found under {graphs_dir}"
+        )
+
     if agent_type == "oh":
         jsonl_path = graphs_dir
         if not jsonl_path.is_file():
@@ -716,6 +852,338 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
 
 
 # ── mini-swe-agent v1.0 graph construction ──────────────────────────────────
+
+def _kimi_output_text(value) -> str:
+    """Flatten Kimi tool output/content blocks into sidebar-friendly text."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        chunks = []
+        for part in value:
+            if isinstance(part, str):
+                chunks.append(part)
+            elif isinstance(part, dict):
+                text = part.get("text") or part.get("think")
+                if isinstance(text, str):
+                    chunks.append(text)
+        return "\n".join(chunks)
+    if value is None:
+        return ""
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except TypeError:
+        return str(value)
+
+
+def iter_kimi_steps(traj_data: dict) -> list[dict]:
+    """Fold Kimi Code wire records into ordered model steps and tool calls."""
+    ordered_steps: list[dict] = []
+    steps_by_uuid: dict[str, dict] = {}
+    calls_by_id: dict[str, dict] = {}
+    current_step: dict | None = None
+
+    for record in traj_data.get("records", []):
+        if record.get("type") != "context.append_loop_event":
+            continue
+        event = record.get("event") or {}
+        event_type = event.get("type")
+
+        if event_type == "step.begin":
+            step = {
+                "source_step": event.get("step"),
+                "uuid": str(event.get("uuid") or len(ordered_steps)),
+                "thought_parts": [],
+                "calls": [],
+            }
+            ordered_steps.append(step)
+            steps_by_uuid[step["uuid"]] = step
+            current_step = step
+            continue
+
+        step_uuid = str(event.get("stepUuid") or "")
+        step = steps_by_uuid.get(step_uuid) or current_step
+
+        if event_type == "content.part" and step is not None:
+            part = event.get("part") or {}
+            part_type = str(part.get("type") or "")
+            if part_type == "think":
+                text = part.get("think") or part.get("text") or ""
+            elif part_type == "text":
+                text = part.get("text") or ""
+            else:
+                text = ""
+            if isinstance(text, str) and text:
+                step["thought_parts"].append(text)
+            continue
+
+        if event_type == "tool.call" and step is not None:
+            args = event.get("args")
+            if not isinstance(args, dict):
+                args = {"_raw": args} if args is not None else {}
+            call = {
+                "id": str(event.get("toolCallId") or event.get("uuid") or ""),
+                "name": str(event.get("name") or "tool"),
+                "args": args,
+                "description": str(event.get("description") or ""),
+                "observation": "",
+                "is_error": None,
+            }
+            step["calls"].append(call)
+            if call["id"]:
+                calls_by_id[call["id"]] = call
+            continue
+
+        if event_type == "tool.result":
+            call_id = str(event.get("toolCallId") or "")
+            call = calls_by_id.get(call_id)
+            if call is None:
+                continue
+            result = event.get("result") or {}
+            output = _kimi_output_text(result.get("output"))
+            message = result.get("message")
+            if isinstance(message, str) and message and message not in output:
+                output = f"{output}\n{message}".strip()
+            call["observation"] = output
+            error_value = result.get("isError", result.get("is_error"))
+            if isinstance(error_value, bool):
+                call["is_error"] = error_value
+
+    for step in ordered_steps:
+        step["thought"] = "\n".join(step.pop("thought_parts", []))
+    return ordered_steps
+
+
+def kimi_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str:
+    """Map Kimi Code's native tools onto the Graphectory phase taxonomy."""
+    try:
+        from mapPhase import get_phase
+    except ImportError:
+        return "general"
+
+    name = (tool_name or "").lower()
+    phase_args = dict(args or {})
+    for key in ("path", "file", "file_path", "filename"):
+        value = phase_args.get(key)
+        if isinstance(value, str) and value and not value.startswith(("/", "./", "../", "~")):
+            # mapPhase's test-directory hint is slash-delimited. Preserve the
+            # original node arguments while making relative tests/... paths
+            # classify the same way as absolute /tests/... paths.
+            phase_args[key] = f"./{value}"
+    if name in {"read", "readfile", "readmediafile"}:
+        return get_phase("str_replace_editor", "view", "", phase_args, prev_phases, {})
+    if name in {"write", "writefile"}:
+        return get_phase("str_replace_editor", "create", "", phase_args, prev_phases, {})
+    if name in {"edit", "strreplace", "str_replace"}:
+        return get_phase("str_replace_editor", "str_replace", "", phase_args, prev_phases, {})
+    if name == "grep":
+        return get_phase("", "", "grep", phase_args, prev_phases, {})
+    if name == "glob":
+        return get_phase("", "", "find", phase_args, prev_phases, {})
+    return "general"
+
+
+def _build_graph_kimi(traj_data: dict, instance_id: str,
+                      eval_report_path: str, cmd_parser,
+                      filter_cd: bool = True,
+                      unique_think: bool = True):
+    """Build a graph from a current Kimi Code agents/main/wire.jsonl stream."""
+    try:
+        from mapPhase import get_phase
+    except ImportError:
+        def get_phase(*_args, **_kwargs):
+            return "general"
+
+    builder = GraphBuilder()
+    prev_phases_list: list[str] = []
+    prev_thought = ""
+    prev_step_first_node: str | None = None
+
+    for step_idx, step in enumerate(iter_kimi_steps(traj_data)):
+        thought = step.get("thought", "") or ""
+        calls = step.get("calls", [])
+        thought_len_raw = compute_thought_length_raw(thought)
+        thought_len_clean = compute_thought_length_clean(thought)
+
+        action_parts = []
+        observation_parts = []
+        action_entries = []
+
+        for call in calls:
+            tool_name = str(call.get("name") or "tool")
+            args = dict(call.get("args") or {})
+            observation = str(call.get("observation") or "")
+            is_error = call.get("is_error")
+
+            if tool_name.lower() in {"bash", "shell", "execute_bash"}:
+                command_text = str(args.get("command") or "").strip()
+                action_parts.append(command_text or tool_name)
+                parsed_commands = cmd_parser.parse(command_text) if command_text else []
+                if not parsed_commands:
+                    parsed_commands = [{
+                        "tool": "",
+                        "subcommand": "",
+                        "args": {"_raw": command_text} if command_text else args,
+                        "flags": {},
+                        "command": command_text or tool_name,
+                    }]
+
+                has_cd = False
+                if filter_cd and len(parsed_commands) > 1:
+                    first = parsed_commands[0]
+                    if (first.get("command") or "").strip().lower() == "cd":
+                        has_cd = True
+                        parsed_commands = parsed_commands[1:]
+
+                for parsed in parsed_commands:
+                    if _is_shell_noop(parsed):
+                        continue
+                    action_entries.append({
+                        "parsed": parsed,
+                        "native_tool": tool_name,
+                        "observation": observation,
+                        "is_error": is_error,
+                        "has_cd": has_cd,
+                        "phase": None,
+                    })
+            else:
+                action_parts.append(
+                    f"{tool_name}\n{json.dumps(args, ensure_ascii=False, indent=2, default=str)}"
+                )
+                action_entries.append({
+                    "parsed": {
+                        "tool": tool_name,
+                        "subcommand": "",
+                        "args": args,
+                        "flags": {},
+                        "command": "",
+                    },
+                    "native_tool": tool_name,
+                    "observation": observation,
+                    "is_error": is_error,
+                    "has_cd": False,
+                    "phase": "kimi",
+                })
+
+            if observation:
+                observation_parts.append(f"{tool_name}: {observation}")
+
+        action_str = "\n\n".join(action_parts)
+        step_observation = "\n\n".join(observation_parts)
+
+        if not action_entries:
+            if not thought:
+                continue
+            think_args = {"_thought": thought} if unique_think else {}
+            node_key = builder.add_or_update_node(
+                node_label="think", args=think_args, flags={}, phase="general",
+                step_idx=step_idx, tool=None, command=None, subcommand=None,
+                thought_length=thought_len_raw, has_cd=False,
+            )
+            builder.G.nodes[node_key]["thought_len_raw"] = thought_len_raw
+            builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+            _accumulate_step_data(
+                builder.G.nodes[node_key], step_idx, thought, "", step_observation,
+            )
+            builder.add_execution_edge(
+                node_key, step_idx, is_first_in_step=True,
+                thought_length_raw=thought_len_raw,
+                thought_length_clean=thought_len_clean,
+            )
+            _mark_thought_continuation(
+                builder.G, prev_step_first_node, node_key, prev_thought, thought,
+            )
+            builder.update_previous_node(node_key)
+            prev_phases_list.append("general")
+            builder.prev_phases.add("general")
+            prev_step_first_node = node_key
+            prev_thought = thought
+            continue
+
+        is_first_in_step = True
+        step_first_node: str | None = None
+
+        for entry in action_entries:
+            parsed = entry["parsed"]
+            tool = str(parsed.get("tool") or "").strip()
+            subcommand = str(parsed.get("subcommand") or "").strip()
+            command = str(parsed.get("command") or "").strip()
+            raw_args = parsed.get("args", {})
+            args = dict(raw_args) if isinstance(raw_args, dict) else raw_args
+            flags = parsed.get("flags") or {}
+            observation = entry["observation"]
+
+            if entry["phase"] == "kimi":
+                phase = kimi_tool_phase(entry["native_tool"], args, prev_phases_list)
+            else:
+                phase = entry["phase"] or get_phase(
+                    tool, subcommand, command, args, prev_phases_list, flags,
+                )
+            node_label = f"{tool}: {subcommand}" if tool and subcommand else (tool or command or entry["native_tool"])
+
+            explicit_error = entry["is_error"]
+            if explicit_error is True:
+                outcome = "failure"
+            elif explicit_error is False and entry["native_tool"].lower() in {
+                "write", "writefile", "edit", "strreplace", "str_replace"
+            }:
+                outcome = "success"
+            else:
+                outcome = check_command_outcome(
+                    observation=observation,
+                    tool=tool,
+                    subcommand=subcommand,
+                    args=args if isinstance(args, dict) else {},
+                )
+            if outcome and isinstance(args, dict):
+                args.setdefault("command_outcome", outcome)
+
+            node_key = builder.add_or_update_node(
+                node_label=node_label, args=args, flags=flags, phase=phase,
+                step_idx=step_idx, tool=tool, command=command,
+                subcommand=subcommand, thought_length=thought_len_raw,
+                has_cd=entry["has_cd"],
+            )
+            builder.G.nodes[node_key]["thought_len_raw"] = thought_len_raw
+            builder.G.nodes[node_key]["thought_len_clean"] = thought_len_clean
+            if outcome:
+                builder.G.nodes[node_key]["command_outcome"] = outcome
+            _accumulate_observation(builder.G.nodes[node_key], observation)
+            _accumulate_step_data(
+                builder.G.nodes[node_key], step_idx, thought, action_str,
+                step_observation,
+            )
+            builder.add_execution_edge(
+                node_key, step_idx, is_first_in_step=is_first_in_step,
+                thought_length_raw=thought_len_raw if is_first_in_step else 0,
+                thought_length_clean=thought_len_clean if is_first_in_step else 0,
+            )
+            if is_first_in_step:
+                _mark_thought_continuation(
+                    builder.G, prev_step_first_node, node_key, prev_thought, thought,
+                )
+                step_first_node = node_key
+
+            builder.update_previous_node(node_key)
+            prev_phases_list.append(phase)
+            builder.prev_phases.add(phase)
+            is_first_in_step = False
+
+        prev_step_first_node = step_first_node
+        prev_thought = thought
+
+    build_hierarchical_edges(builder.G, builder.localization_nodes)
+    resolution_status = determine_resolution_status(instance_id, eval_report_path) \
+        if eval_report_path else "none"
+    builder.G.graph["resolution_status"] = resolution_status
+    builder.G.graph["debug_difficulty"] = "unknown"
+    builder.G.graph["trajectory_format"] = KIMI_TRAJECTORY_FORMAT
+    title = str((traj_data.get("state") or {}).get("title") or "").strip()
+    builder.G.graph["instance_name"] = title or instance_id
+    builder.G.graph["session_id"] = instance_id
+    if title:
+        builder.G.graph["session_title"] = title
+    return builder.G
+
 
 def _build_graph_msa_v1(traj_data: dict, instance_id: str,
                         eval_report_path: str, cmd_parser,
@@ -1223,6 +1691,10 @@ def build_graph(traj_data: dict, instance_id: str,
         )
 
     # Dispatch to agent-specific builder
+    if agent_type == "kimi":
+        return _build_graph_kimi(traj_data, instance_id, eval_report_path,
+                                 cmd_parser, filter_cd, unique_think=unique_think)
+
     if agent_type == "oh":
         return _build_graph_oh(traj_data, instance_id, eval_report_path,
                                cmd_parser, filter_cd, unique_think=unique_think)

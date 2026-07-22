@@ -21,6 +21,8 @@ New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHan
 
 ---
 
+The live viewer also supports current **Kimi Code** sessions. Point it at the Kimi session root (normally `~/.kimi-code/sessions`) or at one session's `agents/main/wire.jsonl`; session discovery, tool outcomes, thinking content, phase mapping, Sankey flow, and file-footprint data are derived from the native wire event stream.
+
 ## Dataset
 
 **Pre-computed Graphs**: Full dataset (2 agents × 4 models) available under [data/{OpenHands|SWE-agent}/graphs](data/)

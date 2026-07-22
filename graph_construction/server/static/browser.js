@@ -168,7 +168,7 @@ async function loadGraphList() {
         renderStats(allGraphs);
         const q = document.getElementById('searchInput').value.toLowerCase();
         const visibleGraphs = q
-            ? allGraphs.filter(g => g.instance_id.toLowerCase().includes(q))
+            ? allGraphs.filter(g => `${g.display_name || ''} ${g.instance_id}`.toLowerCase().includes(q))
             : allGraphs;
         renderList(visibleGraphs);
     } catch (_) {
@@ -200,12 +200,13 @@ function renderList(graphs) {
         const showBadge  = status !== 'none' && status !== 'unknown';
         const steps      = g.step_count != null ? `${g.step_count} steps` : '';
         const diff       = g.difficulty && g.difficulty !== 'unknown' ? escHtml(g.difficulty) : '';
+        const displayName = g.display_name || g.instance_id;
         const metaParts  = [steps, diff].filter(Boolean).join(' · ');
         return `
         <div class="graph-item${g.instance_id === activeId ? ' active' : ''}"
              data-id="${escHtml(g.instance_id)}"
              onclick="selectGraph('${escHtml(g.instance_id)}')">
-            <div class="item-title" title="${escHtml(g.instance_id)}">${escHtml(g.instance_id)}</div>
+            <div class="item-title" title="${escHtml(g.instance_id)}">${escHtml(displayName)}</div>
             <div class="item-meta">
                 ${showBadge ? `<span class="badge badge-${badgeClass}">${escHtml(status)}</span>` : ''}
                 ${metaParts ? `<span>${metaParts}</span>` : ''}
@@ -220,7 +221,7 @@ function renderList(graphs) {
 function wireSearch() {
     document.getElementById('searchInput').addEventListener('input', e => {
         const q = e.target.value.toLowerCase();
-        renderList(allGraphs.filter(g => g.instance_id.toLowerCase().includes(q)));
+        renderList(allGraphs.filter(g => `${g.display_name || ''} ${g.instance_id}`.toLowerCase().includes(q)));
     });
 }
 

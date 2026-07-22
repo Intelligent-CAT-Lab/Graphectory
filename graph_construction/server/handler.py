@@ -32,7 +32,14 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
-from server.graph_builder  import scan_trajectories, load_trajectory, build_graph
+from server.graph_builder import (
+    build_graph,
+    detect_agent_type,
+    iter_kimi_steps,
+    kimi_tool_phase,
+    load_trajectory,
+    scan_trajectories,
+)
 from server.graph_renderer import render_graph_html
 
 logger = logging.getLogger(__name__)
@@ -65,8 +72,8 @@ class GraphHandler(BaseHTTPRequestHandler):
     """Thin, thread-safe HTTP handler — delegates all logic to the server modules."""
 
     # ── Injected by live_graph_server.py before the server starts ────────────
-    graphs_dir:       Path = None   # directory (SWE-agent) or .jsonl file (OpenHands)
-    agent_type:       str  = "sa"   # "sa" | "oh"
+    graphs_dir:       Path = None
+    agent_type:       str  = "sa"   # "sa" | "oh" | "msa" | "kimi"
     eval_report_path: str  = None
     cmd_parser             = None
     assets_dir:       Path = None   # directory containing graph_template.html etc.
@@ -210,18 +217,14 @@ class GraphHandler(BaseHTTPRequestHandler):
 
         # ── Agent type inference ──────────────────────────────────────────────
         if trajs.is_file() and trajs.suffix == ".jsonl":
-            agent_type = "oh"
+            agent_type = detect_agent_type(trajs)
         elif trajs.is_dir():
-            # Peek inside: .traj.json files indicate mini-swe-agent; otherwise SWE-agent
-            if any(trajs.rglob("*.traj.json")):
-                agent_type = "msa"
-            else:
-                agent_type = "sa"
+            agent_type = detect_agent_type(trajs)
         else:
             self._error(
                 400,
-                f"Trajectories path must be a directory (SWE-agent or mini-swe-agent) "
-                f"or an output.jsonl file (OpenHands): {trajs}",
+                f"Trajectories path must be a supported trajectory directory "
+                f"or JSONL file: {trajs}",
             )
             return
 
@@ -569,6 +572,36 @@ def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> lis
 
     phases: list[str] = []
 
+    if agent_type == "kimi":
+        prev_phases_list: list[str] = []
+        for step in iter_kimi_steps(traj_data):
+            step_phase = "general"
+            calls = step.get("calls", [])
+            for call in calls:
+                tool_name = str(call.get("name") or "")
+                args = dict(call.get("args") or {})
+                candidate = "general"
+                if tool_name.lower() in {"bash", "shell", "execute_bash"}:
+                    command_text = str(args.get("command") or "").strip()
+                    commands = cmd_parser.parse(command_text) if command_text and cmd_parser else []
+                    for parsed in commands:
+                        command_phase = get_phase(
+                            parsed.get("tool", ""), parsed.get("subcommand", ""),
+                            parsed.get("command", ""), parsed.get("args", {}),
+                            prev_phases_list, parsed.get("flags", {}),
+                        )
+                        if command_phase != "general":
+                            candidate = command_phase
+                            break
+                else:
+                    candidate = kimi_tool_phase(tool_name, args, prev_phases_list)
+                if candidate != "general":
+                    step_phase = candidate
+                    break
+            phases.append(step_phase)
+            prev_phases_list.append(step_phase)
+        return phases
+
     if agent_type == "oh":
         # ── OpenHands ────────────────────────────────────────────────────────
         prev_phases_list: list[str] = []
@@ -714,6 +747,12 @@ def _traj_instance_ids(trajs: Path, agent_type: str) -> set[str]:
     elif agent_type == "msa":
         for traj_file in trajs.rglob("*.traj.json"):
             ids.add(traj_file.name[: -len(".traj.json")])
+    elif agent_type == "kimi":
+        for wire_file in (trajs.rglob("agents/main/wire.jsonl") if trajs.is_dir() else [trajs]):
+            if wire_file.parent.name == "main" and wire_file.parent.parent.name == "agents":
+                ids.add(wire_file.parent.parent.parent.name)
+            elif wire_file.is_file():
+                ids.add(wire_file.parent.name or wire_file.stem)
     else:
         for traj_file in trajs.rglob("*.traj"):
             ids.add(traj_file.stem)

@@ -1,12 +1,12 @@
 # Graph Construction
 
-Interactive graph visualiser for SWE-agent and OpenHands trajectory files. Two entry points are provided: a **live server** that renders graphs on demand in the browser, and a **batch export script** that pre-generates graph JSON files to disk.
+The **live server** interactively visualises SWE-agent, OpenHands, mini-swe-agent, and Kimi Code trajectories on demand in the browser. The existing **batch export script** pre-generates graph JSON files for the benchmark-oriented formats documented below.
 
 ---
 
 ## Live Server
 
-`live_graph_server.py` starts a local HTTP server and renders every trajectory as an interactive graph on demand. Nothing is written to disk. The agent type (SWE-agent or OpenHands) is detected automatically from the path you pass.
+`live_graph_server.py` starts a local HTTP server and renders every trajectory as an interactive graph on demand. Nothing is written to disk. The agent type is detected automatically from the path you pass.
 
 ### Quick Start
 
@@ -26,6 +26,15 @@ python live_graph_server.py \
     --eval_report path/to/report.json
 ```
 
+**Kimi Code** - pass the session root or one main-agent wire stream. An evaluation report is optional for ordinary coding sessions:
+
+```bash
+python graph_construction/live_graph_server.py \
+    --trajs ~/.kimi-code/sessions
+```
+
+On Windows, the default path is `%USERPROFILE%\.kimi-code\sessions`. Graphectory reads each session's `state.json` and `agents/main/wire.jsonl`; nested subagent streams are not listed as duplicate top-level trajectories.
+
 Then open **http://localhost:8000** in your browser.
 
 When Docker is used, expose the port when starting the container, for example:
@@ -43,8 +52,8 @@ Then run the server inside the container.
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
-| `--trajs` | ✓ | — | Directory of `.traj` files (SWE-agent) **or** path to an `output.jsonl` file (OpenHands). The agent type is inferred from which you pass. |
-| `--eval_report` | ✓ | — | SWE-bench evaluation report JSON. Must contain `"resolved_ids"` and `"unresolved_ids"` arrays. Used to badge each instance as resolved, unresolved, or unsubmitted. |
+| `--trajs` | ✓ | — | Supported trajectory directory or JSONL file. Kimi Code accepts `~/.kimi-code/sessions` or `agents/main/wire.jsonl`. |
+| `--eval_report` | | — | Optional SWE-bench evaluation report JSON containing `"resolved_ids"` and `"unresolved_ids"` arrays. |
 | `--assets_dir` | | script directory | Directory containing `graph_template.html`, `styles.css`, and `graph_renderer.js`. Only needed if you have moved those files elsewhere. |
 | `--port` | | `8000` | Port to serve on. |
 

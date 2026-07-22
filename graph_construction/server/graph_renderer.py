@@ -345,7 +345,7 @@ def _normalise_path(value: str, allow_directory: bool) -> str | None:
         return None
 
     is_explicit_path = path.startswith(("/", "~/", "./", "../")) or "/" in path
-    if not is_explicit_path and not _looks_like_file(path):
+    if not is_explicit_path and not _looks_like_file(path) and not allow_directory:
         return None
     if not allow_directory and not _looks_like_file(path):
         return None
@@ -369,6 +369,11 @@ def _classify_file_activity(data: dict[str, Any]) -> str:
             return "view"
         if subcommand in {"create", "str_replace", "insert", "undo_edit"}:
             return "edit"
+
+    if tool in {"read", "readfile", "readmediafile", "grep", "glob"}:
+        return "view"
+    if tool in {"write", "writefile", "edit", "strreplace", "str_replace"}:
+        return "edit"
 
     if command in {"cat", "head", "tail", "less", "more", "nl", "bat"}:
         return "view"
@@ -435,12 +440,13 @@ def _make_label(data: dict) -> str:
         tokens = raw_label.split()
         title  = tokens[0][:20] if tokens else "action"
 
+    status = data.get("command_outcome", "")
     if isinstance(args, dict):
-        status = args.get("edit_status", "") or args.get("command_outcome", "")
-        if status == "success":
-            title += " ✓"
-        elif status and str(status).startswith("failure"):
-            title += " ✗"
+        status = args.get("edit_status", "") or args.get("command_outcome", "") or status
+    if status == "success":
+        title += " ✓"
+    elif status and str(status).startswith("failure"):
+        title += " ✗"
 
     lines.append(title)
 
@@ -549,16 +555,17 @@ def _make_tooltip(data: dict) -> str:
 
     # Outcome badge
     args = data.get("args", {}) or {}
+    outcome = data.get("command_outcome", "")
     if isinstance(args, dict):
-        outcome = args.get("edit_status", "") or args.get("command_outcome", "")
-        if outcome:
-            color = "#7defa7" if outcome == "success" else "#ff8080"
-            parts.append(
-                '<div style="display:flex;gap:8px;margin:4px 0;">'
-                '<span style="color:#a0c4ff;min-width:110px;flex-shrink:0;">Outcome</span>'
-                f'<span style="color:{color};font-weight:600;">{_esc(outcome)}</span>'
-                "</div>"
-            )
+        outcome = args.get("edit_status", "") or args.get("command_outcome", "") or outcome
+    if outcome:
+        color = "#7defa7" if outcome == "success" else "#ff8080"
+        parts.append(
+            '<div style="display:flex;gap:8px;margin:4px 0;">'
+            '<span style="color:#a0c4ff;min-width:110px;flex-shrink:0;">Outcome</span>'
+            f'<span style="color:{color};font-weight:600;">{_esc(outcome)}</span>'
+            "</div>"
+        )
 
     # Arguments
     _SKIP_KEYS = {"edit_status", "command_outcome"}

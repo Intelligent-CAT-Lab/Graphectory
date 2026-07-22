@@ -13,8 +13,8 @@ changed at any time from the browser UI without restarting the server.
 
 Graphs are rendered on demand — no HTML files are pre-generated.  Each HTTP
 request is handled in its own thread, so navigating quickly between instances
-or changing toggle settings never blocks the UI.  The agent type (SWE-agent or
-OpenHands) is inferred automatically from the path passed to --trajs.
+or changing toggle settings never blocks the UI. The agent type is inferred
+automatically from the path passed to --trajs.
 """
 
 import argparse
@@ -26,6 +26,7 @@ from pathlib import Path
 # Allow sibling imports (buildGraph, mapPhase, commandParser, …).
 sys.path.insert(0, str(Path(__file__).parent))
 
+from server.graph_builder import detect_agent_type
 from server.handler import GraphHandler
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,10 @@ Examples
       --trajs path/to/output.jsonl \\
       --eval_report report.json
 
+  # Kimi Code - pass ~/.kimi-code/sessions (eval report is optional):
+  python live_graph_server.py \
+      --trajs ~/.kimi-code/sessions
+
   # Start without paths and configure via the browser UI:
   python live_graph_server.py --port 8080
 
@@ -64,7 +69,7 @@ Examples
     )
     p.add_argument(
         "--trajs", default=None,
-        help="Directory of .traj files (SWE-agent) or path to output.jsonl (OpenHands). "
+        help="Supported trajectory directory or JSONL file, including Kimi Code sessions. "
              "Can be omitted and set later from the browser UI.",
     )
     p.add_argument(
@@ -150,17 +155,13 @@ def main() -> int:
             return 1
 
         if trajs.is_file() and trajs.suffix == ".jsonl":
-            agent_type = "oh"
+            agent_type = detect_agent_type(trajs)
         elif trajs.is_dir():
-            # Peek inside: .traj.json files indicate mini-swe-agent; otherwise SWE-agent
-            if any(trajs.rglob("*.traj.json")):
-                agent_type = "msa"
-            else:
-                agent_type = "sa"
+            agent_type = detect_agent_type(trajs)
         else:
             logger.error(
-                "--trajs must be a directory (SWE-agent or mini-swe-agent) "
-                "or a .jsonl file (OpenHands): %s", trajs,
+                "--trajs must be a supported trajectory directory or .jsonl file: %s",
+                trajs,
             )
             return 1
 
@@ -182,6 +183,7 @@ def main() -> int:
     httpd = ThreadingHTTPServer(("", args.port), GraphHandler)
 
     agent_label = (
+        "Kimi Code (wire sessions)" if agent_type == "kimi" else
         "OpenHands (.jsonl)"      if agent_type == "oh"  else
         "mini-swe-agent (directory)" if agent_type == "msa" else
         "SWE-agent (directory)"
