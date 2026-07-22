@@ -728,7 +728,7 @@ Because different agent frameworks expose different trajectory structures, each 
 
 ## 6.3 Adding a New Model
 
-The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility. To add new models, edit [graph_construction/generatejson.py](graph_construction/generatejson.py):
+The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility. To add new models, edit `graph_construction/generatejson.py`:
 
 ```python
 SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "my-model"}
@@ -744,7 +744,7 @@ The graph representation itself is model-independent.
 
 SWE-agent trajectories can contain tool calls defined by tool-specific configuration files.
 
-To support additional SWE-agent tools, add their `config.yaml` files to [graph_construction/generatejson.py](graph_construction/generatejson.py):
+To support additional SWE-agent tools, add their `config.yaml` files to `graph_construction/generatejson.py`:
 
 ```python
 def setup_parser_for_agent(agent: str) -> CommandParser:
