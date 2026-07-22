@@ -113,16 +113,8 @@ For detailed usage and configuration options, see [graph_construction/README.md]
 
 Pre-computed analysis results for the full dataset are available under [data/{OpenHands|SWE-agent}/analysis](data/), including Graphectory metrics.
 
-### Analyze Pre-computed Graphs
-
 ```bash
 bash scripts/analyze.sh data/
-```
-
-### Analyze Custom Graphs
-
-```bash
-python -m graph_analysis.batch_runner --data-dir ./my_graphs --output-dir ./my_output
 ```
 
 Results are saved to `trajectory_metrics.csv`.
@@ -157,6 +149,9 @@ bash scripts/construct.sh <trajectories_path> <eval_report.json> [output_dir] [m
 
 # Analyze graphs and compute metrics
 bash scripts/analyze.sh <data_dir> [output_dir] [--agent AGENT] [--model MODEL]
+
+# e.g.
+bash scripts/analyze.sh data/ . --agent SWE-agent --model deepseek-r1
 
 # Generate figures
 bash scripts/reproduce.sh

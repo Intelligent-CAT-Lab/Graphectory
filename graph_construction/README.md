@@ -209,7 +209,7 @@ python graph_construction/generatejson.py \
 
 ### Supporting New SWE-agent Tools
 
-To parse custom SWE-agent tools, add their `config.yaml` files to [generatejson.py:558-562](generatejson.py#L558-L562):
+To parse custom SWE-agent tools, add their `config.yaml` files to [generatejson.py:222-234](generatejson.py#L222-L234):
 
 ```python
 def setup_parser_for_agent(agent: str) -> CommandParser:

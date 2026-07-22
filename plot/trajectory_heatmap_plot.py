@@ -11,6 +11,7 @@ Trajectory metric heatmap with dispersion annotations.
 
 from __future__ import annotations
 import argparse
+import os
 from pathlib import Path
 from typing import Dict, List, Literal
 
@@ -395,8 +396,8 @@ Examples:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("figures/median_iqr_trajectory_heatmap.png"),
-        help="Output file path (default: figures/median_iqr_trajectory_heatmap.png)"
+        default=Path(os.environ.get("OUTPUT_DIR", "figures")) / "median_iqr_trajectory_heatmap.png",
+        help="Output file path (default: OUTPUT_DIR/median_iqr_trajectory_heatmap.png or figures/...)"
     )
 
     parser.add_argument(

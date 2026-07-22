@@ -129,7 +129,7 @@ Examples:
   python -m graph_analysis.batch_runner --agents OpenHands --models deepseek-r1-0528
 
   # Custom directories
-  python -m graph_analysis.batch_runner --data-dir ./my_data --output-dir ./my_output
+  python -m graph_analysis.batch_runner --data-dir data/samples --output-dir data/samples
         """
     )
 

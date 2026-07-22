@@ -42,12 +42,6 @@ The artifact has been tested on:
 * Linux: Ubuntu 22.04, x86-64
 * Windows x64 with Docker
 
-Docker is also intended to support Apple Silicon through an ARM64 build.
-
-```bash
-docker build --platform linux/arm64 -t graphectory .
-```
-
 We recommend allocating approximately **13–15 GB of memory** to Docker during the build.
 
 ---
@@ -92,6 +86,13 @@ From the repository root:
 docker build -t graphectory .
 ```
 
+> [!Note]
+> Docker is also intended to support Apple Silicon through an ARM64 build.
+>
+> ```bash
+> docker build --platform linux/arm64 -t graphectory .
+> ```
+
 Then start an interactive container:
 
 ```bash
@@ -99,14 +100,6 @@ docker run -it graphectory bash
 ```
 
 All commands in the following Docker-based instructions should be executed **inside the container**.
-
-### Apple Silicon
-
-On an ARM64 machine, use:
-
-```bash
-docker build --platform linux/arm64 -t graphectory .
-```
 
 ---
 
@@ -156,7 +149,8 @@ The command should terminate successfully and produce the figures above.
 
 The regenerated figures should show the same qualitative patterns and underlying results as the corresponding figures in the paper. Because this stage operates on the supplied deterministic, precomputed analysis results, substantial deviations from the paper are not expected. 
 
-Note: We made minor improvements to command parsing and phase assignment after paper submission. Consequently, some values may differ slightly (typically by one or two instances), but these differences do not affect the reported patterns, claims, or conclusions.
+> [!NOTE]
+> We made minor improvements to command parsing and phase assignment after paper submission. Consequently, some values may differ slightly (typically by one or two instances), but these differences do not affect the reported patterns, claims, or conclusions.
 
 ---
 
@@ -238,7 +232,7 @@ The browser interface should display:
 5. temporal and structural relationships between actions; and
 6. detailed thought/action/observation information when inspecting nodes.
 
-The viewer supports interactive options for controlling graph presentation, including observation indicators, thought-node handling, and display-related filtering.
+The viewer supports interactive options for controlling graph presentation.
 
 This step verifies the artifact's support for process-level inspection of individual agent executions.
 
@@ -361,15 +355,7 @@ Then inspect the resulting JSON graph.
 For aggregate analysis, the supplied graphs can be analyzed using:
 
 ```bash
-python -m graph_analysis.batch_runner
-```
-
-For custom graph collections:
-
-```bash
-python -m graph_analysis.batch_runner \
-  --data-dir ./my_graphs \
-  --output-dir ./my_output
+bash scripts/analyze.sh data/
 ```
 
 The resulting metrics are written to:
@@ -382,7 +368,7 @@ trajectory_metrics.csv
 
 The reviewer should observe that each trajectory is represented as a graph with process-related information rather than only a binary task outcome.
 
-The aggregate analysis and the RQ1 figure expose measurable differences in execution structure across trajectories, agent/model configurations, and outcomes.
+The aggregate analysis and the RQ1 figure expose measurable characteristics in execution structure across trajectories, agent/model configurations, and outcomes.
 
 ---
 
@@ -665,13 +651,7 @@ http://localhost:8000
 
 The viewer automatically lists available trajectories and presents each execution as an interactive graph.
 
-Graph nodes are phase-aware, and the interface allows reviewers to inspect the underlying execution information associated with each node.
-
-The graph representation includes several relationship types. In particular:
-
-* execution relationships capture temporal action flow;
-* structural relationships capture hierarchical relationships between inspected code locations; and
-* thought-continuation information can expose repeated or continued reasoning across steps.
+Graph nodes are color-coded by phases, and the interface allows reviewers to inspect the underlying execution information associated with each node.
 
 ---
 
@@ -740,7 +720,7 @@ The artifact supports trajectory processing for the agent frameworks documented 
 * SWE-agent
 * OpenHands
 
-The repository additionally supports mini-swe-agent trajectory formats for reuse beyond the original paper experiments.
+The repository additionally supports **mini-swe-agent** trajectory formats for reuse beyond the original paper experiments.
 
 Because different agent frameworks expose different trajectory structures, each framework requires an adapter that maps its native format into Graphectory's unified graph representation.
 
@@ -748,14 +728,10 @@ Because different agent frameworks expose different trajectory structures, each 
 
 ## 6.3 Adding a New Model
 
-The model identifier determines the organization of generated graph outputs.
+The four models (`dsk-v3`, `dsk-r1`, `dev`, `cld-4`) are pre-configured for paper reproducibility. To add new models, edit [graph_construction/generatejson.py](graph_construction/generatejson.py):
 
-The models used in the original paper are preconfigured for reproducibility.
-
-Additional model identifiers can be registered in:
-
-```text
-graph_construction/generatejson.py
+```python
+SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "my-model"}
 ```
 
 After registration, the normal graph generation command can be used with the new model identifier.
@@ -768,10 +744,22 @@ The graph representation itself is model-independent.
 
 SWE-agent trajectories can contain tool calls defined by tool-specific configuration files.
 
-To support additional SWE-agent tools, add their `config.yaml` files to the parser configuration in:
+To support additional SWE-agent tools, add their `config.yaml` files to [graph_construction/generatejson.py](graph_construction/generatejson.py):
 
-```text
-graph_construction/generatejson.py
+```python
+def setup_parser_for_agent(agent: str) -> CommandParser:
+    parser = CommandParser()
+    tool_configs = []
+    if agent == "sa":
+        tool_configs = [
+            "data/SWE-agent/tools/edit_anthropic/config.yaml",
+            "data/SWE-agent/tools/review_on_submit_m/config.yaml",
+            "data/SWE-agent/tools/registry/config.yaml",
+            "data/SWE-agent/tools/your_custom_tool/config.yaml",  # Add here
+        ]
+    if tool_configs:
+        parser.load_tool_yaml_files(tool_configs)
+    return parser
 ```
 
 The command parser can then convert actions generated by the additional tools into Graphectory's atomic action representation.

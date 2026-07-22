@@ -8,6 +8,7 @@ Clean labels: only phase letters in nodes; no counts/percent labels.
 from __future__ import annotations
 import argparse
 import json
+import os
 from pathlib import Path as FilePath
 from typing import Dict, List, Tuple, Iterable, Optional
 from collections import defaultdict
@@ -499,8 +500,8 @@ Examples:
     parser.add_argument(
         "--output",
         type=FilePath,
-        default=FilePath("figures/sankey_grid.png"),
-        help="Output file path (default: figures/sankey_grid.png)"
+        default=FilePath(os.environ.get("OUTPUT_DIR", "figures")) / "sankey_grid.png",
+        help="Output file path (default: OUTPUT_DIR/sankey_grid.png or figures/...)"
     )
 
     args = parser.parse_args()

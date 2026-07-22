@@ -52,6 +52,9 @@ done
 
 mkdir -p "$OUTPUT_DIR/inefficiency_venn"
 
+# Export OUTPUT_DIR for plot scripts
+export OUTPUT_DIR
+
 # Verify plot scripts exist
 declare -a SCRIPTS=(
     "plot/trajectory_heatmap_plot.py"

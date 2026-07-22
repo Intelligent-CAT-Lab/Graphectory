@@ -16,6 +16,7 @@ Modified:
 from __future__ import annotations
 import argparse
 import json
+import os
 from pathlib import Path as FilePath
 from collections import Counter
 from typing import Dict, Iterable, Tuple, List, Optional
@@ -427,8 +428,8 @@ Examples:
     parser.add_argument(
         "--output",
         type=FilePath,
-        default=FilePath("figures/end_phases_donuts.png"),
-        help="Output file path (default: figures/end_phases_donuts.png)"
+        default=FilePath(os.environ.get("OUTPUT_DIR", "figures")) / "end_phases_donuts.png",
+        help="Output file path (default: OUTPUT_DIR/end_phases_donuts.png or figures/...)"
     )
 
     args = parser.parse_args()

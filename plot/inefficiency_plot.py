@@ -57,9 +57,10 @@ UNITS: List[Tuple[str, str]] = [
     ("OpenHands", "claude-sonnet-4"), # OH+CLD-4
 ]
 
+import os
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
-FIG_DIR = ROOT_DIR / "figures"
+FIG_DIR = Path(os.environ.get("OUTPUT_DIR", ROOT_DIR / "figures"))
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 plt.rcParams["font.family"] = "DejaVu Sans"

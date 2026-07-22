@@ -11,6 +11,7 @@ Outputs (../figures/):
 
 from __future__ import annotations
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 from collections import OrderedDict
@@ -57,7 +58,7 @@ UNITS: List[Tuple[str, str]] = [
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
-FIG_DIR = ROOT_DIR / "figures"
+FIG_DIR = Path(os.environ.get("OUTPUT_DIR", ROOT_DIR / "figures"))
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 plt.rcParams["font.family"] = "DejaVu Sans"
