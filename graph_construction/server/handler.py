@@ -40,8 +40,8 @@ from server.graph_builder import (
     codex_tool_phase,
     detect_agent_type,
     iter_codex_steps,
-    iter_kimi_steps,
-    kimi_tool_phase,
+    claude_tool_phase,
+    iter_claude_steps,
     load_trajectory,
     scan_trajectories,
 )
@@ -78,7 +78,7 @@ class GraphHandler(BaseHTTPRequestHandler):
 
     # ── Injected by live_graph_server.py before the server starts ────────────
     graphs_dir:       Path = None
-    agent_type:       str  = "sa"   # "sa" | "oh" | "msa" | "kimi" | "claude" | "codex"
+    agent_type:       str  = "sa"   # "sa" | "oh" | "msa" | "claude" | "codex"
     eval_report_path: str  = None
     cmd_parser             = None
     assets_dir:       Path = None   # directory containing graph_template.html etc.
@@ -602,9 +602,9 @@ def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> lis
             prev_phases_list.append(step_phase)
         return phases
 
-    if agent_type in {"kimi", "claude"}:
+    if agent_type == "claude":
         prev_phases_list: list[str] = []
-        for step in iter_kimi_steps(traj_data):
+        for step in iter_claude_steps(traj_data):
             step_phase = "general"
             calls = step.get("calls", [])
             for call in calls:
@@ -624,7 +624,7 @@ def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> lis
                             candidate = command_phase
                             break
                 else:
-                    candidate = kimi_tool_phase(tool_name, args, prev_phases_list)
+                    candidate = claude_tool_phase(tool_name, args, prev_phases_list)
                 if candidate != "general":
                     step_phase = candidate
                     break
@@ -777,12 +777,11 @@ def _traj_instance_ids(trajs: Path, agent_type: str) -> set[str]:
     elif agent_type == "msa":
         for traj_file in trajs.rglob("*.traj.json"):
             ids.add(traj_file.name[: -len(".traj.json")])
-    elif agent_type in {"kimi", "claude"}:
-        for wire_file in (trajs.rglob("agents/main/wire.jsonl") if trajs.is_dir() else [trajs]):
-            if wire_file.parent.name == "main" and wire_file.parent.parent.name == "agents":
-                ids.add(wire_file.parent.parent.parent.name)
-            elif wire_file.is_file():
-                ids.add(wire_file.parent.name or wire_file.stem)
+    elif agent_type == "claude":
+        ids.update(
+            item["instance_id"]
+            for item in scan_trajectories(trajs, agent_type="claude")
+        )
     elif agent_type == "codex":
         ids.update(
             item["instance_id"]

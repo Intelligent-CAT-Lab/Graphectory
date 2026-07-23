@@ -53,10 +53,6 @@ Examples
       --trajs path/to/output.jsonl \\
       --eval_report report.json
 
-  # Kimi Code - pass ~/.kimi-code/sessions (eval report is optional):
-  python live_graph_server.py \
-      --trajs ~/.kimi-code/sessions
-
   # Claude Code - pass a compatible session root (eval report is optional):
   python live_graph_server.py \
       --trajs path/to/claude-code-sessions
@@ -77,7 +73,7 @@ Examples
     )
     p.add_argument(
         "--trajs", default=None,
-        help="Supported trajectory directory or JSONL file, including Kimi Code, Claude Code, and Codex sessions. "
+        help="Supported trajectory directory or JSONL file, including Claude Code and Codex sessions. "
              "Can be omitted and set later from the browser UI.",
     )
     p.add_argument(
@@ -192,9 +188,7 @@ def main() -> int:
 
     agent_label = (
         "Codex (rollout sessions)" if agent_type == "codex" else
-        "Kimi Code SWE-Together (ShareGPT traces)" if agent_type == "kimi_swe_together" else
         "Claude Code (wire sessions)" if agent_type == "claude" else
-        "Kimi Code (wire sessions)" if agent_type == "kimi" else
         "OpenHands (.jsonl)"      if agent_type == "oh"  else
         "mini-swe-agent (directory)" if agent_type == "msa" else
         "SWE-agent (directory)"

@@ -21,9 +21,7 @@ New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHan
 
 ---
 
-The live viewer also supports current **Kimi Code** sessions. Point it at the Kimi session root (normally `~/.kimi-code/sessions`) or at one session's `agents/main/wire.jsonl`; session discovery, tool outcomes, thinking content, phase mapping, Sankey flow, and file-footprint data are derived from the native wire event stream.
-
-Compatible **Claude Code** session streams are recognized as Claude Code when their `state.json` declares `custom.sourceFramework: "Claude Code"`. This keeps framework identity separate from the underlying model, such as Kimi K2.6. Shell commands are normalized before graph construction, including virtual-environment executables and post-patch checks such as `pytest`, `mypy`, `black --check`, and `isort --check`.
+Compatible **Claude Code** session streams are recognized when their `state.json` declares `custom.sourceFramework: "Claude Code"`. Shell commands are normalized before graph construction, including virtual-environment executables and post-patch checks such as `pytest`, `mypy`, `black --check`, and `isort --check`.
 
 The live viewer additionally supports local **Codex** rollout sessions. Point it at `~/.codex/sessions` (PowerShell: `$HOME\.codex\sessions`; Command Prompt: `%USERPROFILE%\.codex\sessions`) or one `rollout-*.jsonl` file. The adapter reconstructs grouped tool calls and matched outputs, expands shell and patch operations, and uses only visible commentary or explicitly surfaced reasoning summaries rather than private chain-of-thought.
 

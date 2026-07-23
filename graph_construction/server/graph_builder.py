@@ -69,18 +69,8 @@ def check_command_outcome(observation: str, tool: str = None, subcommand: str = 
 
 # --- Agent-format detection -------------------------------------------------
 
-KIMI_TRAJECTORY_FORMAT = "kimi-code-wire-1"
-KIMI_SWE_TOGETHER_FORMAT = "kimi-code-swe-together-sharegpt-1"
 CLAUDE_CODE_TRAJECTORY_FORMAT = "claude-code-wire-1"
 CODEX_TRAJECTORY_FORMAT = "codex-rollout-jsonl-1"
-
-_KIMI_SWE_TOGETHER_FILENAME = "kimicode_swetogether_r3_sharegpt.json"
-_KIMI_SWE_TOGETHER_TOOL_CALL_RE = re.compile(
-    r"<tool_call>\s*(?P<name>[A-Za-z_][\w.-]*)\s*\("
-    r"(?P<args>.*?)\)\s*</tool_call>",
-    re.DOTALL,
-)
-_KIMI_SWE_TOGETHER_CALL_INDEX_RE = re.compile(r":call-(\d+)$")
 
 _CODEX_CALL_TYPES = {
     "function_call",
@@ -111,7 +101,7 @@ def _read_jsonl(path: Path):
                 yield value
 
 
-def _is_kimi_wire_file(path: Path) -> bool:
+def _is_compatible_wire_file(path: Path) -> bool:
     """Return whether *path* looks like a compatible Code wire stream."""
     if not path.is_file() or path.suffix.lower() != ".jsonl":
         return False
@@ -248,28 +238,28 @@ def _codex_rollout_metadata(path: Path) -> dict:
     ))
 
 
-def _kimi_wire_files(source: Path) -> list[Path]:
+def _compatible_wire_files(source: Path) -> list[Path]:
     """Find main-agent compatible Code wire streams below a file or directory."""
     if source.is_file():
-        return [source] if _is_kimi_wire_file(source) else []
+        return [source] if _is_compatible_wire_file(source) else []
 
     wires = []
     for path in source.rglob("wire.jsonl"):
-        # Current Kimi Code stores each session's primary stream here. Ignore
+        # The compatible session format stores its primary stream here. Ignore
         # agents/<subagentId>/wire.jsonl so one session remains one trajectory.
         if path.parent.name == "main" and path.parent.parent.name == "agents":
             wires.append(path)
     return sorted(wires)
 
 
-def _kimi_session_dir(wire_path: Path) -> Path:
+def _wire_session_dir(wire_path: Path) -> Path:
     if wire_path.parent.name == "main" and wire_path.parent.parent.name == "agents":
         return wire_path.parent.parent.parent
     return wire_path.parent
 
 
-def _load_kimi_state(wire_path: Path) -> dict:
-    state_path = _kimi_session_dir(wire_path) / "state.json"
+def _load_wire_state(wire_path: Path) -> dict:
+    state_path = _wire_session_dir(wire_path) / "state.json"
     if not state_path.is_file():
         return {}
     try:
@@ -282,7 +272,7 @@ def _load_kimi_state(wire_path: Path) -> dict:
 
 def _wire_source_framework(wire_path: Path) -> str:
     """Return a declared original framework for converted wire sessions."""
-    custom = _load_kimi_state(wire_path).get("custom")
+    custom = _load_wire_state(wire_path).get("custom")
     if not isinstance(custom, dict):
         return ""
     return str(custom.get("sourceFramework") or "").strip().lower()
@@ -291,93 +281,32 @@ def _wire_source_framework(wire_path: Path) -> str:
 def _claude_code_wire_files(source: Path) -> list[Path]:
     """Find converted Claude Code sessions that use the compatible wire schema."""
     return [
-        path for path in _kimi_wire_files(source)
+        path for path in _compatible_wire_files(source)
         if _wire_source_framework(path) == "claude code"
     ]
 
 
-def _native_kimi_wire_files(source: Path) -> list[Path]:
-    """Find Kimi Code sessions, excluding sources explicitly marked as Claude Code."""
-    return [
-        path for path in _kimi_wire_files(source)
-        if _wire_source_framework(path) != "claude code"
-    ]
-
-
-def _kimi_swe_together_path(source: Path) -> Path | None:
-    """Locate the published Kimi Code SWE-Together ShareGPT export."""
-    if source.is_file():
-        return source if source.name == _KIMI_SWE_TOGETHER_FILENAME else None
-    candidate = source / _KIMI_SWE_TOGETHER_FILENAME
-    return candidate if candidate.is_file() else None
-
-
-def _is_kimi_swe_together_canonical_file(path: Path) -> bool:
-    """Return whether a JSONL file is a SWE-Together canonical request trace."""
-    if not path.is_file() or path.suffix.lower() != ".jsonl":
-        return False
-    try:
-        for record in _read_jsonl(path):
-            return record.get("schema") == "swe-together-agentic-trace-v2"
-    except OSError:
-        return False
-    return False
-
-
-def _load_kimi_swe_together_canonical_records(source: Path) -> list[dict]:
-    """Load valid per-call rows from a canonical SWE-Together JSONL trace."""
-    if not _is_kimi_swe_together_canonical_file(source):
-        return []
-    return [
-        record for record in _read_jsonl(source)
-        if record.get("schema") == "swe-together-agentic-trace-v2"
-    ]
-
-
-def _kimi_swe_together_call_index(record: dict) -> int:
-    match = _KIMI_SWE_TOGETHER_CALL_INDEX_RE.search(str(record.get("id") or ""))
-    return int(match.group(1)) if match else 0
-
-
-def _load_kimi_swe_together_rows(source: Path) -> list[dict]:
-    """Load valid conversation rows from the SWE-Together export."""
-    path = _kimi_swe_together_path(source)
-    if path is None:
-        return []
-    try:
-        with open(path, encoding="utf-8", errors="replace") as stream:
-            rows = json.load(stream)
-    except (OSError, json.JSONDecodeError):
-        return []
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
-
-
-def _kimi_swe_together_session_id(row: dict) -> str:
-    metadata = row.get("metadata")
-    if isinstance(metadata, dict):
-        return str(metadata.get("session_id") or "").strip()
-    return ""
+def _is_claude_code_wire_file(path: Path) -> bool:
+    """Return whether *path* is a compatible stream declared as Claude Code."""
+    return (
+        _is_compatible_wire_file(path)
+        and _wire_source_framework(path) == "claude code"
+    )
 
 
 def detect_agent_type(source: Path) -> str:
     """Infer the trajectory format represented by *source*."""
-    if _is_kimi_swe_together_canonical_file(source):
-        return "kimi_swe_together"
-    if _kimi_swe_together_path(source):
-        return "kimi_swe_together"
     if source.is_file():
         if _is_codex_rollout_file(source):
             return "codex"
-        if _is_kimi_wire_file(source):
-            return "claude" if _wire_source_framework(source) == "claude code" else "kimi"
+        if _is_claude_code_wire_file(source):
+            return "claude"
         if source.suffix.lower() == ".jsonl":
             return "oh"
         return "sa"
 
     if _claude_code_wire_files(source):
         return "claude"
-    if _native_kimi_wire_files(source):
-        return "kimi"
     for jsonl_path in source.rglob("*.jsonl"):
         if _is_codex_rollout_file(jsonl_path):
             return "codex"
@@ -398,10 +327,8 @@ def scan_trajectories(graphs_dir: Path,
     For SWE-agent (agent_type='sa'), graphs_dir is a directory tree of .traj files.
     For OpenHands (agent_type='oh'), graphs_dir is a path to an output.jsonl file.
     For mini-swe-agent (agent_type='msa'), graphs_dir is a directory tree of .traj.json files.
-    For Kimi Code (agent_type='kimi') or Claude Code (agent_type='claude'),
-    graphs_dir contains session wire.jsonl files.
-    For Kimi Code SWE-Together (agent_type='kimi_swe_together'), graphs_dir
-    contains the published ShareGPT request-trace export.
+    For Claude Code (agent_type='claude'), graphs_dir contains session wire.jsonl
+    files that declare ``custom.sourceFramework: "Claude Code"`` in state.json.
     For Codex (agent_type='codex'), graphs_dir contains rollout JSONL files.
     """
     resolved_set:   set[str] = set()
@@ -416,54 +343,6 @@ def scan_trajectories(graphs_dir: Path,
             pass
 
     results = []
-
-    if agent_type == "kimi_swe_together":
-        canonical_records = _load_kimi_swe_together_canonical_records(graphs_dir)
-        if canonical_records:
-            records_by_session: dict[str, list[dict]] = {}
-            for record in canonical_records:
-                session_id = str(record.get("session_id") or "").strip()
-                if session_id:
-                    records_by_session.setdefault(session_id, []).append(record)
-            for instance_id, records in records_by_session.items():
-                records.sort(key=_kimi_swe_together_call_index)
-                reconstructed_steps = _iter_kimi_swe_together_canonical_steps(records)
-                if not reconstructed_steps:
-                    continue
-                results.append({
-                    "instance_id": instance_id,
-                    "display_name": f"SWE-Together {instance_id}",
-                    "status": "none",
-                    "difficulty": "unknown",
-                    "step_count": len(reconstructed_steps),
-                    "model": str(records[0].get("model") or "Kimi K2.6"),
-                    "llm_calls": len(records),
-                })
-            results.sort(key=lambda item: (-item["step_count"], item["instance_id"]))
-            return results
-
-        for row in _load_kimi_swe_together_rows(graphs_dir):
-            instance_id = _kimi_swe_together_session_id(row)
-            if not instance_id:
-                continue
-            conversations = row.get("conversations")
-            step_count = sum(
-                1 for turn in conversations if isinstance(turn, dict)
-                and turn.get("from") == "gpt"
-            ) if isinstance(conversations, list) else 0
-            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
-            results.append({
-                "instance_id": instance_id,
-                "display_name": f"SWE-Together {instance_id}",
-                "status": "none",
-                "difficulty": "unknown",
-                "step_count": step_count,
-                "model": "Kimi K2.6",
-                "llm_calls": metadata.get("llm_calls"),
-            })
-
-        results.sort(key=lambda item: item["instance_id"])
-        return results
 
     if agent_type == "codex":
         for rollout_path in _codex_rollout_files(graphs_dir):
@@ -492,15 +371,11 @@ def scan_trajectories(graphs_dir: Path,
         results.sort(key=lambda item: (item["display_name"].lower(), item["instance_id"]))
         return results
 
-    if agent_type in {"kimi", "claude"}:
-        wire_files = (
-            _claude_code_wire_files(graphs_dir)
-            if agent_type == "claude" else _native_kimi_wire_files(graphs_dir)
-        )
-        for wire_path in wire_files:
-            session_dir = _kimi_session_dir(wire_path)
+    if agent_type == "claude":
+        for wire_path in _claude_code_wire_files(graphs_dir):
+            session_dir = _wire_session_dir(wire_path)
             instance_id = session_dir.name or wire_path.stem
-            state = _load_kimi_state(wire_path)
+            state = _load_wire_state(wire_path)
             custom = state.get("custom")
             model = str(custom.get("model") or "") if isinstance(custom, dict) else ""
             title = str(state.get("title") or "").strip()
@@ -676,43 +551,11 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
     For SWE-agent, searches for a matching .traj file under graphs_dir.
     For OpenHands, scans the output.jsonl file for the matching instance.
     For mini-swe-agent, searches for a matching .traj.json file under graphs_dir.
-    For Kimi Code or Claude Code, loads the main agent's wire.jsonl event stream.
-    For Kimi Code SWE-Together, loads one published ShareGPT conversation.
+    For Claude Code, loads the main agent's wire.jsonl event stream.
     For Codex, loads one persisted rollout JSONL event stream.
 
     Raises FileNotFoundError if the trajectory cannot be found.
     """
-    if agent_type == "kimi_swe_together":
-        canonical_records = _load_kimi_swe_together_canonical_records(graphs_dir)
-        if canonical_records:
-            records = [
-                record for record in canonical_records
-                if str(record.get("session_id") or "") == instance_id
-            ]
-            if records:
-                return {
-                    "trajectory_format": KIMI_SWE_TOGETHER_FORMAT,
-                    "source_path": str(graphs_dir),
-                    "metadata": {
-                        "session_id": instance_id,
-                        "model": records[0].get("model") or "Kimi K2.6",
-                    },
-                    "canonical_records": records,
-                }
-
-        for row in _load_kimi_swe_together_rows(graphs_dir):
-            if _kimi_swe_together_session_id(row) != instance_id:
-                continue
-            return {
-                "trajectory_format": KIMI_SWE_TOGETHER_FORMAT,
-                "source_path": str(_kimi_swe_together_path(graphs_dir)),
-                "metadata": row.get("metadata") or {},
-                "conversations": row.get("conversations") or [],
-            }
-        raise FileNotFoundError(
-            f"No Kimi Code SWE-Together session '{instance_id}' found under {graphs_dir}"
-        )
-
     if agent_type == "codex":
         for rollout_path in _codex_rollout_files(graphs_dir):
             metadata = _codex_rollout_metadata(rollout_path)
@@ -728,26 +571,19 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
             f"No Codex session '{instance_id}' found under {graphs_dir}"
         )
 
-    if agent_type in {"kimi", "claude"}:
-        wire_files = (
-            _claude_code_wire_files(graphs_dir)
-            if agent_type == "claude" else _native_kimi_wire_files(graphs_dir)
-        )
-        for wire_path in wire_files:
-            session_dir = _kimi_session_dir(wire_path)
+    if agent_type == "claude":
+        for wire_path in _claude_code_wire_files(graphs_dir):
+            session_dir = _wire_session_dir(wire_path)
             if (session_dir.name or wire_path.stem) != instance_id:
                 continue
             return {
-                "trajectory_format": (
-                    CLAUDE_CODE_TRAJECTORY_FORMAT
-                    if agent_type == "claude" else KIMI_TRAJECTORY_FORMAT
-                ),
+                "trajectory_format": CLAUDE_CODE_TRAJECTORY_FORMAT,
                 "wire_path": str(wire_path),
-                "state": _load_kimi_state(wire_path),
+                "state": _load_wire_state(wire_path),
                 "records": list(_read_jsonl(wire_path)),
             }
         raise FileNotFoundError(
-            f"No {agent_type.title()} Code session '{instance_id}' found under {graphs_dir}"
+            f"No Claude Code session '{instance_id}' found under {graphs_dir}"
         )
 
     if agent_type == "oh":
@@ -1917,8 +1753,8 @@ def _build_graph_codex(traj_data: dict, instance_id: str,
     return builder.G
 
 
-def _kimi_output_text(value) -> str:
-    """Flatten Kimi tool output/content blocks into sidebar-friendly text."""
+def _claude_output_text(value) -> str:
+    """Flatten Claude Code tool output/content blocks into sidebar-friendly text."""
     if isinstance(value, str):
         return value
     if isinstance(value, list):
@@ -1939,10 +1775,8 @@ def _kimi_output_text(value) -> str:
         return str(value)
 
 
-def iter_kimi_steps(traj_data: dict) -> list[dict]:
-    """Fold compatible Kimi Code or Claude Code records into ordered steps."""
-    if traj_data.get("trajectory_format") == KIMI_SWE_TOGETHER_FORMAT:
-        return _iter_kimi_swe_together_steps(traj_data)
+def iter_claude_steps(traj_data: dict) -> list[dict]:
+    """Fold Claude Code wire records into ordered model steps and tool calls."""
 
     ordered_steps: list[dict] = []
     steps_by_uuid: dict[str, dict] = {}
@@ -2006,7 +1840,7 @@ def iter_kimi_steps(traj_data: dict) -> list[dict]:
             if call is None:
                 continue
             result = event.get("result") or {}
-            output = _kimi_output_text(result.get("output"))
+            output = _claude_output_text(result.get("output"))
             message = result.get("message")
             if isinstance(message, str) and message and message not in output:
                 output = f"{output}\n{message}".strip()
@@ -2020,145 +1854,8 @@ def iter_kimi_steps(traj_data: dict) -> list[dict]:
     return ordered_steps
 
 
-def _iter_kimi_swe_together_steps(traj_data: dict) -> list[dict]:
-    """Reconstruct Kimi Code steps from the published ShareGPT export.
-
-    The dataset records assistant tool calls inline and places the corresponding
-    feedback in the next human turn. It is request-side data, so a session's
-    final assistant reply is intentionally unavailable.
-    """
-    canonical_records = traj_data.get("canonical_records")
-    if isinstance(canonical_records, list):
-        return _iter_kimi_swe_together_canonical_steps(canonical_records)
-
-    conversations = traj_data.get("conversations")
-    if not isinstance(conversations, list):
-        return []
-
-    ordered_steps: list[dict] = []
-    for index, turn in enumerate(conversations):
-        if not isinstance(turn, dict) or turn.get("from") != "gpt":
-            continue
-        value = str(turn.get("value") or "")
-        thought = _KIMI_SWE_TOGETHER_TOOL_CALL_RE.sub("", value).strip()
-        next_turn = conversations[index + 1] if index + 1 < len(conversations) else {}
-        observation = ""
-        if isinstance(next_turn, dict) and next_turn.get("from") == "human":
-            observation = str(next_turn.get("value") or "")
-        is_error = "<system>ERROR: Tool execution failed.</system>" in observation
-
-        calls = []
-        for call_index, match in enumerate(_KIMI_SWE_TOGETHER_TOOL_CALL_RE.finditer(value)):
-            args_text = match.group("args").strip()
-            try:
-                args = json.loads(args_text)
-            except json.JSONDecodeError:
-                args = {"_raw": args_text}
-            if not isinstance(args, dict):
-                args = {"_raw": args}
-            calls.append({
-                "id": f"sharegpt-{index}-{call_index}",
-                "name": match.group("name"),
-                "args": args,
-                "observation": observation,
-                "is_error": is_error,
-            })
-
-        if calls or thought:
-            ordered_steps.append({
-                "source_step": index,
-                "thought": thought,
-                "calls": calls,
-            })
-    return ordered_steps
-
-
-def _iter_kimi_swe_together_canonical_steps(records: list[dict]) -> list[dict]:
-    """Recover action turns from sequential canonical request snapshots."""
-    ordered_steps: list[dict] = []
-    seen_steps: set[str] = set()
-
-    for record in sorted(records, key=_kimi_swe_together_call_index):
-        messages = record.get("messages")
-        if not isinstance(messages, list):
-            continue
-
-        assistant_index = next(
-            (index for index in range(len(messages) - 1, -1, -1)
-             if isinstance(messages[index], dict)
-             and messages[index].get("role") == "assistant"),
-            None,
-        )
-        if assistant_index is None:
-            continue
-
-        assistant = messages[assistant_index]
-        thought = str(
-            assistant.get("reasoning_content") or assistant.get("content") or ""
-        ).strip()
-        raw_calls = assistant.get("tool_calls")
-        if not isinstance(raw_calls, list):
-            raw_calls = []
-
-        outputs_by_id: dict[str, str] = {}
-        for message in messages[assistant_index + 1:]:
-            if not isinstance(message, dict) or message.get("role") != "tool":
-                continue
-            call_id = str(message.get("tool_call_id") or message.get("toolCallId") or "")
-            content = _kimi_output_text(message.get("content"))
-            if call_id:
-                outputs_by_id[call_id] = content
-
-        calls = []
-        for call_index, raw_call in enumerate(raw_calls):
-            if not isinstance(raw_call, dict):
-                continue
-            function = raw_call.get("function")
-            if not isinstance(function, dict):
-                continue
-            raw_args = function.get("arguments")
-            try:
-                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-            except json.JSONDecodeError:
-                args = {"_raw": raw_args}
-            if not isinstance(args, dict):
-                args = {"_raw": args}
-            call_id = str(raw_call.get("id") or "")
-            observation = outputs_by_id.get(call_id, "")
-            calls.append({
-                "id": call_id or f"canonical-{_kimi_swe_together_call_index(record)}-{call_index}",
-                "name": str(function.get("name") or "tool"),
-                "args": args,
-                "observation": observation,
-                "is_error": "<system>ERROR: Tool execution failed.</system>" in observation,
-            })
-
-        signature = json.dumps(
-            {
-                "thought": thought,
-                "calls": [
-                    {"name": call["name"], "args": call["args"]}
-                    for call in calls
-                ],
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            default=str,
-        )
-        if signature in seen_steps or (not thought and not calls):
-            continue
-        seen_steps.add(signature)
-        ordered_steps.append({
-            "source_step": _kimi_swe_together_call_index(record),
-            "thought": thought,
-            "calls": calls,
-        })
-
-    return ordered_steps
-
-
-def kimi_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str:
-    """Map compatible Kimi Code or Claude Code tools onto the phase taxonomy."""
+def claude_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str:
+    """Map Claude Code tools onto the Graphectory phase taxonomy."""
     try:
         from mapPhase import get_phase
     except ImportError:
@@ -2186,12 +1883,11 @@ def kimi_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str:
     return "general"
 
 
-def _build_graph_kimi(traj_data: dict, instance_id: str,
-                      eval_report_path: str, cmd_parser,
-                      filter_cd: bool = True,
-                      unique_think: bool = True,
-                      agent_type: str = "kimi"):
-    """Build a graph from a compatible Kimi Code or Claude Code wire stream."""
+def _build_graph_claude(traj_data: dict, instance_id: str,
+                        eval_report_path: str, cmd_parser,
+                        filter_cd: bool = True,
+                        unique_think: bool = True):
+    """Build a graph from a Claude Code wire stream."""
     try:
         from mapPhase import get_phase
     except ImportError:
@@ -2203,7 +1899,7 @@ def _build_graph_kimi(traj_data: dict, instance_id: str,
     prev_thought = ""
     prev_step_first_node: str | None = None
 
-    for step_idx, step in enumerate(iter_kimi_steps(traj_data)):
+    for step_idx, step in enumerate(iter_claude_steps(traj_data)):
         thought = step.get("thought", "") or ""
         calls = step.get("calls", [])
         thought_len_raw = compute_thought_length_raw(thought)
@@ -2266,7 +1962,7 @@ def _build_graph_kimi(traj_data: dict, instance_id: str,
                     "observation": observation,
                     "is_error": is_error,
                     "has_cd": False,
-                    "phase": "kimi",
+                    "phase": "claude",
                 })
 
             if observation:
@@ -2317,8 +2013,8 @@ def _build_graph_kimi(traj_data: dict, instance_id: str,
             flags = parsed.get("flags") or {}
             observation = entry["observation"]
 
-            if entry["phase"] == "kimi":
-                phase = kimi_tool_phase(entry["native_tool"], args, prev_phases_list)
+            if entry["phase"] == "claude":
+                phase = claude_tool_phase(entry["native_tool"], args, prev_phases_list)
             else:
                 phase = entry["phase"] or get_phase(
                     tool, subcommand, command, args, prev_phases_list, flags,
@@ -2381,10 +2077,7 @@ def _build_graph_kimi(traj_data: dict, instance_id: str,
         if eval_report_path else "none"
     builder.G.graph["resolution_status"] = resolution_status
     builder.G.graph["debug_difficulty"] = "unknown"
-    builder.G.graph["trajectory_format"] = (
-        CLAUDE_CODE_TRAJECTORY_FORMAT
-        if agent_type == "claude" else KIMI_TRAJECTORY_FORMAT
-    )
+    builder.G.graph["trajectory_format"] = CLAUDE_CODE_TRAJECTORY_FORMAT
     title = str((traj_data.get("state") or {}).get("title") or "").strip()
     builder.G.graph["instance_name"] = title or instance_id
     builder.G.graph["session_id"] = instance_id
@@ -2903,10 +2596,11 @@ def build_graph(traj_data: dict, instance_id: str,
         return _build_graph_codex(traj_data, instance_id, eval_report_path,
                                   cmd_parser, filter_cd, unique_think=unique_think)
 
-    if agent_type in {"kimi", "claude", "kimi_swe_together"}:
-        return _build_graph_kimi(traj_data, instance_id, eval_report_path,
-                                 cmd_parser, filter_cd, unique_think=unique_think,
-                                 agent_type=agent_type)
+    if agent_type == "claude":
+        return _build_graph_claude(
+            traj_data, instance_id, eval_report_path, cmd_parser, filter_cd,
+            unique_think=unique_think,
+        )
 
     if agent_type == "oh":
         return _build_graph_oh(traj_data, instance_id, eval_report_path,

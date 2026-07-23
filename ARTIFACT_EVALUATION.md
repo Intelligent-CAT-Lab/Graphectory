@@ -720,7 +720,7 @@ The artifact supports trajectory processing for the agent frameworks documented 
 * SWE-agent
 * OpenHands
 
-The repository additionally supports **mini-swe-agent** trajectory formats for reuse beyond the original paper experiments. The live viewer also supports Kimi Code wire sessions, compatible Claude Code wire sessions identified through `custom.sourceFramework: "Claude Code"`, and local Codex rollout JSONL files. These adapters are intended for interactive exploration; the benchmark batch-reproduction pipeline remains focused on the SWE-agent and OpenHands data documented above.
+The repository additionally supports **mini-swe-agent** trajectory formats for reuse beyond the original paper experiments. The live viewer also supports compatible Claude Code wire sessions identified through `custom.sourceFramework: "Claude Code"` and local Codex rollout JSONL files. These adapters are intended for interactive exploration; the benchmark batch-reproduction pipeline remains focused on the SWE-agent and OpenHands data documented above.
 
 Because different agent frameworks expose different trajectory structures, each framework requires an adapter that maps its native format into Graphectory's unified graph representation.
 

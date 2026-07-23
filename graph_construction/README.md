@@ -1,6 +1,6 @@
 # Graph Construction
 
-The **live server** interactively visualises SWE-agent, OpenHands, mini-swe-agent, Kimi Code, Claude Code, and Codex trajectories on demand in the browser. The existing **batch export script** pre-generates graph JSON files for the benchmark-oriented formats documented below.
+The **live server** interactively visualises SWE-agent, OpenHands, mini-swe-agent, Claude Code, and Codex trajectories on demand in the browser. The existing **batch export script** pre-generates graph JSON files for the benchmark-oriented formats documented below.
 
 ---
 
@@ -25,15 +25,6 @@ python live_graph_server.py \
     --trajs path/to/output.jsonl \
     --eval_report path/to/report.json
 ```
-
-**Kimi Code** - pass the session root or one main-agent wire stream. An evaluation report is optional for ordinary coding sessions:
-
-```bash
-python graph_construction/live_graph_server.py \
-    --trajs ~/.kimi-code/sessions
-```
-
-On Windows, the default path is `%USERPROFILE%\.kimi-code\sessions`. Graphectory reads each session's `state.json` and `agents/main/wire.jsonl`; nested subagent streams are not listed as duplicate top-level trajectories.
 
 **Claude Code** - pass a compatible session root whose `state.json` records `custom.sourceFramework: "Claude Code"`. This preserves the Claude Code framework label even when a different model generated the trajectory. Shell executables are normalized by basename, so commands such as `/opt/venv/bin/pytest`, `/opt/venv/bin/mypy`, `black --check`, and `isort --check` are classified as localization before a source edit and validation after one:
 
@@ -68,7 +59,7 @@ Then run the server inside the container.
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
-| `--trajs` | ✓ | — | Supported trajectory directory or JSONL file. Kimi Code and compatible Claude Code sessions use a session root; Codex accepts `~/.codex/sessions` or one rollout JSONL file. |
+| `--trajs` | ✓ | — | Supported trajectory directory or JSONL file. Compatible Claude Code sessions use a session root; Codex accepts `~/.codex/sessions` or one rollout JSONL file. |
 | `--eval_report` | | — | Optional SWE-bench evaluation report JSON containing `"resolved_ids"` and `"unresolved_ids"` arrays. |
 | `--assets_dir` | | script directory | Directory containing `graph_template.html`, `styles.css`, and `graph_renderer.js`. Only needed if you have moved those files elsewhere. |
 | `--port` | | `8000` | Port to serve on. |
