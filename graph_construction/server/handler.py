@@ -25,6 +25,7 @@ POST /api/config                → swap trajs/eval_report live; validates paths
 
 import json
 import logging
+import os
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler
@@ -33,8 +34,12 @@ from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from server.graph_builder import (
+    _codex_action_entries,
     build_graph,
+    codex_shell_phase,
+    codex_tool_phase,
     detect_agent_type,
+    iter_codex_steps,
     iter_kimi_steps,
     kimi_tool_phase,
     load_trajectory,
@@ -73,7 +78,7 @@ class GraphHandler(BaseHTTPRequestHandler):
 
     # ── Injected by live_graph_server.py before the server starts ────────────
     graphs_dir:       Path = None
-    agent_type:       str  = "sa"   # "sa" | "oh" | "msa" | "kimi"
+    agent_type:       str  = "sa"   # "sa" | "oh" | "msa" | "kimi" | "claude" | "codex"
     eval_report_path: str  = None
     cmd_parser             = None
     assets_dir:       Path = None   # directory containing graph_template.html etc.
@@ -194,8 +199,8 @@ class GraphHandler(BaseHTTPRequestHandler):
             self._error(400, "'trajs' is required.")
             return
 
-        trajs  = Path(raw_trajs)
-        report = Path(raw_report) if raw_report else None
+        trajs = Path(os.path.expandvars(raw_trajs)).expanduser()
+        report = Path(os.path.expandvars(raw_report)).expanduser() if raw_report else None
 
         # ── Path existence ────────────────────────────────────────────────────
         if not trajs.exists():
@@ -572,7 +577,32 @@ def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> lis
 
     phases: list[str] = []
 
-    if agent_type == "kimi":
+    if agent_type == "codex":
+        prev_phases_list: list[str] = []
+        for step in iter_codex_steps(traj_data):
+            step_phase = "general"
+            for call in step.get("calls", []):
+                entries = _codex_action_entries(call, cmd_parser, filter_cd=False)
+                for entry in entries:
+                    parsed = entry["parsed"]
+                    candidate = entry.get("phase")
+                    if candidate is None:
+                        candidate = codex_shell_phase(parsed, prev_phases_list)
+                    elif candidate == "general":
+                        candidate = codex_tool_phase(
+                            entry["native_tool"], parsed.get("args", {}),
+                            prev_phases_list,
+                        )
+                    if candidate != "general":
+                        step_phase = candidate
+                        break
+                if step_phase != "general":
+                    break
+            phases.append(step_phase)
+            prev_phases_list.append(step_phase)
+        return phases
+
+    if agent_type in {"kimi", "claude"}:
         prev_phases_list: list[str] = []
         for step in iter_kimi_steps(traj_data):
             step_phase = "general"
@@ -747,12 +777,17 @@ def _traj_instance_ids(trajs: Path, agent_type: str) -> set[str]:
     elif agent_type == "msa":
         for traj_file in trajs.rglob("*.traj.json"):
             ids.add(traj_file.name[: -len(".traj.json")])
-    elif agent_type == "kimi":
+    elif agent_type in {"kimi", "claude"}:
         for wire_file in (trajs.rglob("agents/main/wire.jsonl") if trajs.is_dir() else [trajs]):
             if wire_file.parent.name == "main" and wire_file.parent.parent.name == "agents":
                 ids.add(wire_file.parent.parent.parent.name)
             elif wire_file.is_file():
                 ids.add(wire_file.parent.name or wire_file.stem)
+    elif agent_type == "codex":
+        ids.update(
+            item["instance_id"]
+            for item in scan_trajectories(trajs, agent_type="codex")
+        )
     else:
         for traj_file in trajs.rglob("*.traj"):
             ids.add(traj_file.stem)

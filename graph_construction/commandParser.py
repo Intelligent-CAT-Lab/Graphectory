@@ -305,8 +305,9 @@ class CommandParser:
         # Extract everything before << (command and args)
         before_heredoc = s[:heredoc_start].strip()
 
-        # Extract everything after the heredoc operator
-        after_operator = s[heredoc_match.end():].strip()
+        # Preserve the first newline: an empty heredoc is represented by the
+        # closing delimiter immediately following it.
+        after_operator = s[heredoc_match.end():].lstrip(" \t")
 
         # Parse command and args before <<
         try:
@@ -329,9 +330,14 @@ class CommandParser:
             output_file = redirect_match.group(1).strip()
             heredoc_content = after_operator[redirect_match.end():].strip()
 
-        # Remove closing delimiter if present
-        if f"\n{delimiter}" in heredoc_content:
-            heredoc_content = heredoc_content.split(f"\n{delimiter}")[0]
+        # Remove the closing delimiter, including the empty-body form
+        # ``<< EOF\nEOF``. The previous substring check retained ``EOF`` as a
+        # positional argument when the heredoc body was empty.
+        content_lines = heredoc_content.splitlines()
+        for index, line in enumerate(content_lines):
+            if line.strip() == delimiter:
+                heredoc_content = "\n".join(content_lines[:index]).strip("\n")
+                break
 
         # Add heredoc content to args
         if heredoc_content:

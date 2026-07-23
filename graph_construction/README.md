@@ -1,6 +1,6 @@
 # Graph Construction
 
-The **live server** interactively visualises SWE-agent, OpenHands, mini-swe-agent, and Kimi Code trajectories on demand in the browser. The existing **batch export script** pre-generates graph JSON files for the benchmark-oriented formats documented below.
+The **live server** interactively visualises SWE-agent, OpenHands, mini-swe-agent, Kimi Code, Claude Code, and Codex trajectories on demand in the browser. The existing **batch export script** pre-generates graph JSON files for the benchmark-oriented formats documented below.
 
 ---
 
@@ -35,6 +35,22 @@ python graph_construction/live_graph_server.py \
 
 On Windows, the default path is `%USERPROFILE%\.kimi-code\sessions`. Graphectory reads each session's `state.json` and `agents/main/wire.jsonl`; nested subagent streams are not listed as duplicate top-level trajectories.
 
+**Claude Code** - pass a compatible session root whose `state.json` records `custom.sourceFramework: "Claude Code"`. This preserves the Claude Code framework label even when a different model generated the trajectory. Shell executables are normalized by basename, so commands such as `/opt/venv/bin/pytest`, `/opt/venv/bin/mypy`, `black --check`, and `isort --check` are classified as localization before a source edit and validation after one:
+
+```bash
+python graph_construction/live_graph_server.py \
+    --trajs path/to/claude-code-sessions
+```
+
+**Codex** - pass the Codex session root or one persisted `rollout-*.jsonl` file. An evaluation report is optional:
+
+```bash
+python graph_construction/live_graph_server.py \
+    --trajs ~/.codex/sessions
+```
+
+In Windows PowerShell, use `$HOME\.codex\sessions`; in Command Prompt, use `%USERPROFILE%\.codex\sessions`. Graphectory recursively discovers rollout files, pairs tool calls with outputs by call ID, expands shell and `apply_patch` activity, and retains final responses. Codex does not persist private chain-of-thought in these logs, so the viewer's thought field contains only visible assistant commentary and any explicitly surfaced reasoning summaries.
+
 Then open **http://localhost:8000** in your browser.
 
 When Docker is used, expose the port when starting the container, for example:
@@ -52,7 +68,7 @@ Then run the server inside the container.
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
-| `--trajs` | ✓ | — | Supported trajectory directory or JSONL file. Kimi Code accepts `~/.kimi-code/sessions` or `agents/main/wire.jsonl`. |
+| `--trajs` | ✓ | — | Supported trajectory directory or JSONL file. Kimi Code and compatible Claude Code sessions use a session root; Codex accepts `~/.codex/sessions` or one rollout JSONL file. |
 | `--eval_report` | | — | Optional SWE-bench evaluation report JSON containing `"resolved_ids"` and `"unresolved_ids"` arrays. |
 | `--assets_dir` | | script directory | Directory containing `graph_template.html`, `styles.css`, and `graph_renderer.js`. Only needed if you have moved those files elsewhere. |
 | `--port` | | `8000` | Port to serve on. |
@@ -82,7 +98,7 @@ Nodes are coloured by **phase**:
 |---|---|---|
 | Purple | Localization | Reading files, searching code, running tests before any patch |
 | Orange | Patch | Creating or editing source files |
-| Blue | Validation | Running tests or inspecting test files after a patch exists |
+| Blue | Validation | Running tests, static analysis, or formatter checks after a patch exists |
 | Light blue | General | Everything else (think steps, navigation, etc.) |
 
 A node can show two colours as a horizontal gradient when the same action was visited in multiple phases across repeated steps.
@@ -184,7 +200,7 @@ Both `generatejson.py` and `live_graph_server.py` share the same graph construct
 3. **Phase Classification**: Actions categorized using heuristics ([mapPhase.py](mapPhase.py)):
    - **Localization**: Information gathering, searching, test generation before patching
    - **Patch**: Creating/editing non-test files
-   - **Validation**: Running tests or editing test files after patching
+   - **Validation**: Running tests, static analysis, formatter checks, or editing test files after patching
    - **General**: Other actions (planning, environment setup)
 4. **Edge Construction**: Temporal edges (sequential execution flow) + structural edges (hierarchical relationship in the code base) + Thought continuation (If the current step's thought is identical to or a prefix of the previous step's thought, the connecting edge is flagged as a thought continuation and drawn in red, making it easy to spot steps where the model reused cached reasoning.)
 5. **Output**:

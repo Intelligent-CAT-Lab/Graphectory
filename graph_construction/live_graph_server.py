@@ -57,6 +57,14 @@ Examples
   python live_graph_server.py \
       --trajs ~/.kimi-code/sessions
 
+  # Claude Code - pass a compatible session root (eval report is optional):
+  python live_graph_server.py \
+      --trajs path/to/claude-code-sessions
+
+  # Codex - pass the persisted session root (eval report is optional):
+  python live_graph_server.py \
+      --trajs ~/.codex/sessions
+
   # Start without paths and configure via the browser UI:
   python live_graph_server.py --port 8080
 
@@ -69,7 +77,7 @@ Examples
     )
     p.add_argument(
         "--trajs", default=None,
-        help="Supported trajectory directory or JSONL file, including Kimi Code sessions. "
+        help="Supported trajectory directory or JSONL file, including Kimi Code, Claude Code, and Codex sessions. "
              "Can be omitted and set later from the browser UI.",
     )
     p.add_argument(
@@ -149,7 +157,7 @@ def main() -> int:
     agent_type: str          = "sa"
 
     if args.trajs:
-        trajs = Path(args.trajs)
+        trajs = Path(args.trajs).expanduser()
         if not trajs.exists():
             logger.error("--trajs path does not exist: %s", trajs)
             return 1
@@ -166,7 +174,7 @@ def main() -> int:
             return 1
 
         if args.eval_report:
-            eval_report = Path(args.eval_report)
+            eval_report = Path(args.eval_report).expanduser()
             if not eval_report.exists():
                 logger.error("--eval_report path does not exist: %s", eval_report)
                 return 1
@@ -183,6 +191,9 @@ def main() -> int:
     httpd = ThreadingHTTPServer(("", args.port), GraphHandler)
 
     agent_label = (
+        "Codex (rollout sessions)" if agent_type == "codex" else
+        "Kimi Code SWE-Together (ShareGPT traces)" if agent_type == "kimi_swe_together" else
+        "Claude Code (wire sessions)" if agent_type == "claude" else
         "Kimi Code (wire sessions)" if agent_type == "kimi" else
         "OpenHands (.jsonl)"      if agent_type == "oh"  else
         "mini-swe-agent (directory)" if agent_type == "msa" else

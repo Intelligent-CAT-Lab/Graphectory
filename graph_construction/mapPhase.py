@@ -50,6 +50,11 @@ SRE_READONLY_SUBCMDS: Tuple[str, ...] = ("view",)
 # Python commands that usually execute code/tests.
 PY_CMDS: Tuple[str, ...] = ("python", "python3", "python2", "pytest", "pylint")
 
+# Static analysis tools verify a source tree without changing it. Formatters
+# only belong here when their explicit check mode prevents file modification.
+STATIC_ANALYSIS_CMDS: Tuple[str, ...] = ("mypy", "pyright", "ruff", "flake8")
+CHECK_ONLY_FORMATTERS: Tuple[str, ...] = ("black", "isort")
+
 # --------------------------- Utilities ---------------------------
 
 def _flatten_args(args: Any) -> List[str]:
@@ -144,6 +149,11 @@ def _normalize_command_and_merge_args(command: Any, args: Any) -> Tuple[str, Lis
     merged_tokens = arg_tokens + cmd_tokens
     merged_paths  = _extract_paths(args) + _extract_paths(command)
     return cmd_str, merged_tokens, merged_paths
+
+
+def _command_basename(command: str) -> str:
+    """Normalize a shell executable path to the command used for classification."""
+    return command.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
 
 def _extract_edited_files_from_python_code(code: str) -> List[str]:
     """
@@ -353,6 +363,7 @@ def get_phase(
     """
     flags = flags or {}
     cmd, tokens, paths = _normalize_command_and_merge_args(command, args)
+    cmd = _command_basename(cmd) if cmd else cmd
     has_patch = _has_prior_patch(prev_phases)
 
     # 0) Handle complex_command by analyzing the bash command text
@@ -431,6 +442,16 @@ def get_phase(
         # Default: test/code execution → key rule
         return "validation" if has_patch else "localization"
 
+    # 2.5) Static analysis and formatter checks. These commands inspect source
+    # trees but do not modify them in their check-only modes, so after a patch
+    # they are validation rather than general shell activity.
+    is_check_only_formatter = (
+        cmd in CHECK_ONLY_FORMATTERS
+        and any(flag in flags for flag in ("check", "check-only", "diff"))
+    )
+    if cmd in STATIC_ANALYSIS_CMDS or is_check_only_formatter:
+        return "validation" if has_patch else "localization"
+
     # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl/sed -n/perl -n/-p without -i)
     is_sed_readonly = (cmd == "sed" and "i" not in flags and "n" in flags)
     # perl -n/-p without -i and with file args = readonly viewing
@@ -488,6 +509,12 @@ if __name__ == "__main__":
         (None, None, "sed", ["s/foo/bar/g", "file.py"], None, {'i': True}, "patch"),
         (None, None, "python", ["script.py"], None, None, "localization"),
         (None, None, "python", ["script.py"], ["patch"], None, "validation"),
+        # Absolute virtual-environment executables and check-only tools are
+        # common in Claude Code traces and retain validation semantics.
+        (None, None, "/opt/venv/bin/pytest", ["tests/"], ["patch"], {"v": True}, "validation"),
+        (None, None, "/opt/venv/bin/mypy", ["src/"], ["patch"], None, "validation"),
+        (None, None, "/opt/venv/bin/black", ["src/", "tests/"], ["patch"], {"check": True}, "validation"),
+        (None, None, "/opt/venv/bin/isort", ["src/", "tests/"], ["patch"], {"check": True}, "validation"),
         (None, None, "python", ["-c", "'print(42)'", ">", "out.txt"], None, None, "patch"),
         (None, None, "python", ["-c", "'print(42)'", ">", "tests/test_out.py"], None, None, "localization"),
         (None, None, "python", ["-c", "'print(42)'", ">", "tests/test_out.py"], ["patch"], None, "validation"),

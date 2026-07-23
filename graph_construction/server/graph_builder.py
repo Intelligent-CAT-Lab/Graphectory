@@ -10,6 +10,7 @@ Responsible for:
 import json
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 # Ensure parent directory is importable
@@ -69,6 +70,30 @@ def check_command_outcome(observation: str, tool: str = None, subcommand: str = 
 # --- Agent-format detection -------------------------------------------------
 
 KIMI_TRAJECTORY_FORMAT = "kimi-code-wire-1"
+KIMI_SWE_TOGETHER_FORMAT = "kimi-code-swe-together-sharegpt-1"
+CLAUDE_CODE_TRAJECTORY_FORMAT = "claude-code-wire-1"
+CODEX_TRAJECTORY_FORMAT = "codex-rollout-jsonl-1"
+
+_KIMI_SWE_TOGETHER_FILENAME = "kimicode_swetogether_r3_sharegpt.json"
+_KIMI_SWE_TOGETHER_TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*(?P<name>[A-Za-z_][\w.-]*)\s*\("
+    r"(?P<args>.*?)\)\s*</tool_call>",
+    re.DOTALL,
+)
+_KIMI_SWE_TOGETHER_CALL_INDEX_RE = re.compile(r":call-(\d+)$")
+
+_CODEX_CALL_TYPES = {
+    "function_call",
+    "custom_tool_call",
+    "tool_search_call",
+    "web_search_call",
+    "image_generation_call",
+}
+_CODEX_OUTPUT_TYPES = {
+    "function_call_output",
+    "custom_tool_call_output",
+    "tool_search_output",
+}
 
 
 def _read_jsonl(path: Path):
@@ -87,7 +112,7 @@ def _read_jsonl(path: Path):
 
 
 def _is_kimi_wire_file(path: Path) -> bool:
-    """Return whether *path* looks like a current Kimi Code wire stream."""
+    """Return whether *path* looks like a compatible Code wire stream."""
     if not path.is_file() or path.suffix.lower() != ".jsonl":
         return False
     try:
@@ -109,8 +134,122 @@ def _is_kimi_wire_file(path: Path) -> bool:
     return False
 
 
+def _is_codex_rollout_file(path: Path) -> bool:
+    """Return whether *path* looks like a persisted Codex rollout stream."""
+    if not path.is_file() or path.suffix.lower() != ".jsonl":
+        return False
+
+    saw_session_meta = False
+    saw_codex_event = False
+    try:
+        for index, record in enumerate(_read_jsonl(path)):
+            record_type = record.get("type")
+            payload = record.get("payload")
+            if record_type == "session_meta" and isinstance(payload, dict):
+                saw_session_meta = bool(
+                    payload.get("id") or payload.get("session_id")
+                ) and bool(payload.get("cwd") or payload.get("originator"))
+            elif record_type in {"turn_context", "response_item", "event_msg"}:
+                saw_codex_event = True
+            if saw_session_meta and saw_codex_event:
+                return True
+            if index >= 40:
+                break
+    except OSError:
+        return False
+    return False
+
+
+def _codex_rollout_files(source: Path) -> list[Path]:
+    """Find Codex rollout JSONL files below a file or directory."""
+    if source.is_file():
+        return [source] if _is_codex_rollout_file(source) else []
+    return sorted(
+        path for path in source.rglob("*.jsonl")
+        if _is_codex_rollout_file(path)
+    )
+
+
+def _codex_content_text(content) -> str:
+    """Flatten Codex message/reasoning content blocks into visible text."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+
+    chunks = []
+    for block in content:
+        if isinstance(block, str):
+            chunks.append(block)
+        elif isinstance(block, dict):
+            text = block.get("text") or block.get("input_text") \
+                or block.get("output_text")
+            if isinstance(text, str):
+                chunks.append(text)
+    return "\n".join(chunk for chunk in chunks if chunk)
+
+
+@lru_cache(maxsize=2048)
+def _read_codex_rollout_metadata(path_text: str, size: int, mtime_ns: int) -> dict:
+    """Read lightweight list metadata without retaining a rollout in memory."""
+    del size, mtime_ns  # Values participate in cache invalidation.
+    path = Path(path_text)
+    metadata: dict = {}
+    title = ""
+    first_user_message = ""
+    model = ""
+    step_count = 0
+
+    for record in _read_jsonl(path):
+        record_type = record.get("type")
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            continue
+
+        if record_type == "session_meta" and not metadata:
+            metadata = payload
+        elif record_type == "turn_context" and not model:
+            model = str(payload.get("model") or "")
+        elif record_type == "response_item" and payload.get("type") in _CODEX_CALL_TYPES:
+            step_count += 1
+        elif record_type == "event_msg":
+            event_type = payload.get("type")
+            if event_type == "thread_name_updated":
+                title = str(payload.get("thread_name") or title).strip()
+            elif event_type == "user_message" and not first_user_message:
+                first_user_message = str(payload.get("message") or "").strip()
+
+    instance_id = str(
+        metadata.get("id") or metadata.get("session_id") or path.stem
+    )
+    if not title and first_user_message:
+        title = re.sub(r"\s+", " ", first_user_message).strip()
+    if len(title) > 96:
+        title = f"{title[:93].rstrip()}..."
+
+    cwd = str(metadata.get("cwd") or "")
+    fallback_name = Path(cwd).name if cwd else path.stem
+    return {
+        "instance_id": instance_id,
+        "display_name": title or fallback_name or instance_id,
+        "model": model,
+        "cwd": cwd,
+        "step_count": step_count,
+        "source_path": str(path),
+        "metadata": metadata,
+    }
+
+
+def _codex_rollout_metadata(path: Path) -> dict:
+    """Return cached metadata, invalidated when the rollout file changes."""
+    stat = path.stat()
+    return dict(_read_codex_rollout_metadata(
+        str(path.resolve()), stat.st_size, stat.st_mtime_ns,
+    ))
+
+
 def _kimi_wire_files(source: Path) -> list[Path]:
-    """Find main-agent Kimi Code wire streams below a file or directory."""
+    """Find main-agent compatible Code wire streams below a file or directory."""
     if source.is_file():
         return [source] if _is_kimi_wire_file(source) else []
 
@@ -141,17 +280,107 @@ def _load_kimi_state(wire_path: Path) -> dict:
         return {}
 
 
+def _wire_source_framework(wire_path: Path) -> str:
+    """Return a declared original framework for converted wire sessions."""
+    custom = _load_kimi_state(wire_path).get("custom")
+    if not isinstance(custom, dict):
+        return ""
+    return str(custom.get("sourceFramework") or "").strip().lower()
+
+
+def _claude_code_wire_files(source: Path) -> list[Path]:
+    """Find converted Claude Code sessions that use the compatible wire schema."""
+    return [
+        path for path in _kimi_wire_files(source)
+        if _wire_source_framework(path) == "claude code"
+    ]
+
+
+def _native_kimi_wire_files(source: Path) -> list[Path]:
+    """Find Kimi Code sessions, excluding sources explicitly marked as Claude Code."""
+    return [
+        path for path in _kimi_wire_files(source)
+        if _wire_source_framework(path) != "claude code"
+    ]
+
+
+def _kimi_swe_together_path(source: Path) -> Path | None:
+    """Locate the published Kimi Code SWE-Together ShareGPT export."""
+    if source.is_file():
+        return source if source.name == _KIMI_SWE_TOGETHER_FILENAME else None
+    candidate = source / _KIMI_SWE_TOGETHER_FILENAME
+    return candidate if candidate.is_file() else None
+
+
+def _is_kimi_swe_together_canonical_file(path: Path) -> bool:
+    """Return whether a JSONL file is a SWE-Together canonical request trace."""
+    if not path.is_file() or path.suffix.lower() != ".jsonl":
+        return False
+    try:
+        for record in _read_jsonl(path):
+            return record.get("schema") == "swe-together-agentic-trace-v2"
+    except OSError:
+        return False
+    return False
+
+
+def _load_kimi_swe_together_canonical_records(source: Path) -> list[dict]:
+    """Load valid per-call rows from a canonical SWE-Together JSONL trace."""
+    if not _is_kimi_swe_together_canonical_file(source):
+        return []
+    return [
+        record for record in _read_jsonl(source)
+        if record.get("schema") == "swe-together-agentic-trace-v2"
+    ]
+
+
+def _kimi_swe_together_call_index(record: dict) -> int:
+    match = _KIMI_SWE_TOGETHER_CALL_INDEX_RE.search(str(record.get("id") or ""))
+    return int(match.group(1)) if match else 0
+
+
+def _load_kimi_swe_together_rows(source: Path) -> list[dict]:
+    """Load valid conversation rows from the SWE-Together export."""
+    path = _kimi_swe_together_path(source)
+    if path is None:
+        return []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as stream:
+            rows = json.load(stream)
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+
+def _kimi_swe_together_session_id(row: dict) -> str:
+    metadata = row.get("metadata")
+    if isinstance(metadata, dict):
+        return str(metadata.get("session_id") or "").strip()
+    return ""
+
+
 def detect_agent_type(source: Path) -> str:
     """Infer the trajectory format represented by *source*."""
+    if _is_kimi_swe_together_canonical_file(source):
+        return "kimi_swe_together"
+    if _kimi_swe_together_path(source):
+        return "kimi_swe_together"
     if source.is_file():
+        if _is_codex_rollout_file(source):
+            return "codex"
         if _is_kimi_wire_file(source):
-            return "kimi"
+            return "claude" if _wire_source_framework(source) == "claude code" else "kimi"
         if source.suffix.lower() == ".jsonl":
             return "oh"
         return "sa"
 
-    if any(source.rglob("agents/main/wire.jsonl")):
+    if _claude_code_wire_files(source):
+        return "claude"
+    if _native_kimi_wire_files(source):
         return "kimi"
+    for jsonl_path in source.rglob("*.jsonl"):
+        if _is_codex_rollout_file(jsonl_path):
+            return "codex"
     if any(source.rglob("*.traj.json")):
         return "msa"
     return "sa"
@@ -169,7 +398,11 @@ def scan_trajectories(graphs_dir: Path,
     For SWE-agent (agent_type='sa'), graphs_dir is a directory tree of .traj files.
     For OpenHands (agent_type='oh'), graphs_dir is a path to an output.jsonl file.
     For mini-swe-agent (agent_type='msa'), graphs_dir is a directory tree of .traj.json files.
-    For Kimi Code (agent_type='kimi'), graphs_dir contains session wire.jsonl files.
+    For Kimi Code (agent_type='kimi') or Claude Code (agent_type='claude'),
+    graphs_dir contains session wire.jsonl files.
+    For Kimi Code SWE-Together (agent_type='kimi_swe_together'), graphs_dir
+    contains the published ShareGPT request-trace export.
+    For Codex (agent_type='codex'), graphs_dir contains rollout JSONL files.
     """
     resolved_set:   set[str] = set()
     unresolved_set: set[str] = set()
@@ -184,11 +417,92 @@ def scan_trajectories(graphs_dir: Path,
 
     results = []
 
-    if agent_type == "kimi":
-        for wire_path in _kimi_wire_files(graphs_dir):
+    if agent_type == "kimi_swe_together":
+        canonical_records = _load_kimi_swe_together_canonical_records(graphs_dir)
+        if canonical_records:
+            records_by_session: dict[str, list[dict]] = {}
+            for record in canonical_records:
+                session_id = str(record.get("session_id") or "").strip()
+                if session_id:
+                    records_by_session.setdefault(session_id, []).append(record)
+            for instance_id, records in records_by_session.items():
+                records.sort(key=_kimi_swe_together_call_index)
+                reconstructed_steps = _iter_kimi_swe_together_canonical_steps(records)
+                if not reconstructed_steps:
+                    continue
+                results.append({
+                    "instance_id": instance_id,
+                    "display_name": f"SWE-Together {instance_id}",
+                    "status": "none",
+                    "difficulty": "unknown",
+                    "step_count": len(reconstructed_steps),
+                    "model": str(records[0].get("model") or "Kimi K2.6"),
+                    "llm_calls": len(records),
+                })
+            results.sort(key=lambda item: (-item["step_count"], item["instance_id"]))
+            return results
+
+        for row in _load_kimi_swe_together_rows(graphs_dir):
+            instance_id = _kimi_swe_together_session_id(row)
+            if not instance_id:
+                continue
+            conversations = row.get("conversations")
+            step_count = sum(
+                1 for turn in conversations if isinstance(turn, dict)
+                and turn.get("from") == "gpt"
+            ) if isinstance(conversations, list) else 0
+            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            results.append({
+                "instance_id": instance_id,
+                "display_name": f"SWE-Together {instance_id}",
+                "status": "none",
+                "difficulty": "unknown",
+                "step_count": step_count,
+                "model": "Kimi K2.6",
+                "llm_calls": metadata.get("llm_calls"),
+            })
+
+        results.sort(key=lambda item: item["instance_id"])
+        return results
+
+    if agent_type == "codex":
+        for rollout_path in _codex_rollout_files(graphs_dir):
+            try:
+                metadata = _codex_rollout_metadata(rollout_path)
+            except OSError:
+                continue
+            instance_id = metadata["instance_id"]
+            if instance_id in resolved_set:
+                status = "resolved"
+            elif instance_id in unresolved_set:
+                status = "unresolved"
+            elif eval_report_path:
+                status = "unsubmitted"
+            else:
+                status = "none"
+            results.append({
+                "instance_id": instance_id,
+                "display_name": metadata["display_name"],
+                "status": status,
+                "difficulty": "unknown",
+                "step_count": metadata["step_count"],
+                "model": metadata["model"],
+            })
+
+        results.sort(key=lambda item: (item["display_name"].lower(), item["instance_id"]))
+        return results
+
+    if agent_type in {"kimi", "claude"}:
+        wire_files = (
+            _claude_code_wire_files(graphs_dir)
+            if agent_type == "claude" else _native_kimi_wire_files(graphs_dir)
+        )
+        for wire_path in wire_files:
             session_dir = _kimi_session_dir(wire_path)
             instance_id = session_dir.name or wire_path.stem
             state = _load_kimi_state(wire_path)
+            custom = state.get("custom")
+            model = str(custom.get("model") or "") if isinstance(custom, dict) else ""
             title = str(state.get("title") or "").strip()
             step_count = 0
             try:
@@ -207,6 +521,7 @@ def scan_trajectories(graphs_dir: Path,
                 "status": "none",
                 "difficulty": "unknown",
                 "step_count": step_count,
+                "model": model,
             })
 
         results.sort(key=lambda item: (item["display_name"].lower(), item["instance_id"]))
@@ -361,23 +676,78 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
     For SWE-agent, searches for a matching .traj file under graphs_dir.
     For OpenHands, scans the output.jsonl file for the matching instance.
     For mini-swe-agent, searches for a matching .traj.json file under graphs_dir.
-    For Kimi Code, loads the main agent's wire.jsonl event stream.
+    For Kimi Code or Claude Code, loads the main agent's wire.jsonl event stream.
+    For Kimi Code SWE-Together, loads one published ShareGPT conversation.
+    For Codex, loads one persisted rollout JSONL event stream.
 
     Raises FileNotFoundError if the trajectory cannot be found.
     """
-    if agent_type == "kimi":
-        for wire_path in _kimi_wire_files(graphs_dir):
+    if agent_type == "kimi_swe_together":
+        canonical_records = _load_kimi_swe_together_canonical_records(graphs_dir)
+        if canonical_records:
+            records = [
+                record for record in canonical_records
+                if str(record.get("session_id") or "") == instance_id
+            ]
+            if records:
+                return {
+                    "trajectory_format": KIMI_SWE_TOGETHER_FORMAT,
+                    "source_path": str(graphs_dir),
+                    "metadata": {
+                        "session_id": instance_id,
+                        "model": records[0].get("model") or "Kimi K2.6",
+                    },
+                    "canonical_records": records,
+                }
+
+        for row in _load_kimi_swe_together_rows(graphs_dir):
+            if _kimi_swe_together_session_id(row) != instance_id:
+                continue
+            return {
+                "trajectory_format": KIMI_SWE_TOGETHER_FORMAT,
+                "source_path": str(_kimi_swe_together_path(graphs_dir)),
+                "metadata": row.get("metadata") or {},
+                "conversations": row.get("conversations") or [],
+            }
+        raise FileNotFoundError(
+            f"No Kimi Code SWE-Together session '{instance_id}' found under {graphs_dir}"
+        )
+
+    if agent_type == "codex":
+        for rollout_path in _codex_rollout_files(graphs_dir):
+            metadata = _codex_rollout_metadata(rollout_path)
+            if metadata["instance_id"] != instance_id:
+                continue
+            return {
+                "trajectory_format": CODEX_TRAJECTORY_FORMAT,
+                "source_path": str(rollout_path),
+                "metadata": metadata,
+                "records": list(_read_jsonl(rollout_path)),
+            }
+        raise FileNotFoundError(
+            f"No Codex session '{instance_id}' found under {graphs_dir}"
+        )
+
+    if agent_type in {"kimi", "claude"}:
+        wire_files = (
+            _claude_code_wire_files(graphs_dir)
+            if agent_type == "claude" else _native_kimi_wire_files(graphs_dir)
+        )
+        for wire_path in wire_files:
             session_dir = _kimi_session_dir(wire_path)
             if (session_dir.name or wire_path.stem) != instance_id:
                 continue
             return {
-                "trajectory_format": KIMI_TRAJECTORY_FORMAT,
+                "trajectory_format": (
+                    CLAUDE_CODE_TRAJECTORY_FORMAT
+                    if agent_type == "claude" else KIMI_TRAJECTORY_FORMAT
+                ),
                 "wire_path": str(wire_path),
                 "state": _load_kimi_state(wire_path),
                 "records": list(_read_jsonl(wire_path)),
             }
         raise FileNotFoundError(
-            f"No Kimi Code session '{instance_id}' found under {graphs_dir}"
+            f"No {agent_type.title()} Code session '{instance_id}' found under {graphs_dir}"
         )
 
     if agent_type == "oh":
@@ -853,6 +1223,700 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
 
 # ── mini-swe-agent v1.0 graph construction ──────────────────────────────────
 
+# --- Codex rollout graph construction --------------------------------------
+
+_CODEX_SHELL_TOOLS = {
+    "shell_command", "exec_command", "local_shell", "local_shell_call",
+}
+_CODEX_PATCH_TOOLS = {"apply_patch", "patch"}
+_CODEX_READ_TOOL_HINTS = (
+    "read", "view", "find", "search", "list", "open", "grep", "fetch",
+)
+_CODEX_EDIT_TOOL_HINTS = ("write", "edit", "create", "replace", "patch")
+_CODEX_POST_PATCH_VALIDATION_COMMANDS = {
+    "curl", "sleep", "pgrep", "pidof", "ps", "lsof", "ss", "netstat",
+    "nc", "ncat", "telnet", "uvicorn", "gunicorn", "node", "deno", "bun",
+    "java", "pkill", "kill", "killall", "wait", "timeout",
+}
+_CODEX_SHELL_EDIT_COMMANDS = {
+    "mkdir", "rmdir", "cp", "mv", "rm", "ln", "install", "truncate",
+}
+_CODEX_JS_COMMAND_RE = re.compile(
+    r"\bcommand\s*:\s*(?:"
+    r'"(?P<double>(?:\\.|[^"\\])*)"|'
+    r"'(?P<single>(?:\\.|[^'\\])*)'|"
+    r"`(?P<template>(?:\\.|[^`\\])*)`"
+    r")",
+    re.DOTALL,
+)
+_CODEX_PATCH_PATH_RE = re.compile(
+    r"^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+?)\s*$",
+    re.MULTILINE,
+)
+_CODEX_DIFF_PATH_RE = re.compile(r"^\+\+\+\s+b/(.+?)\s*$", re.MULTILINE)
+
+
+def _codex_json_args(value) -> dict:
+    """Normalize Codex function arguments or custom-tool input to a dict."""
+    if isinstance(value, dict):
+        return dict(value)
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        return {"_raw": value}
+    return {"_raw": value}
+
+
+def _codex_output_text(value) -> str:
+    """Flatten Codex tool output while preserving structured error details."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        chunks = []
+        for item in value:
+            if isinstance(item, str):
+                chunks.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("output_text") \
+                    or item.get("content")
+                chunks.append(text if isinstance(text, str) else json.dumps(
+                    item, ensure_ascii=False, default=str,
+                ))
+        return "\n".join(chunks)
+    if value is None:
+        return ""
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except TypeError:
+        return str(value)
+
+
+def _codex_reasoning_text(payload: dict) -> str:
+    """Return only reasoning text explicitly surfaced in the rollout."""
+    chunks = []
+    for key in ("summary", "content"):
+        text = _codex_content_text(payload.get(key))
+        if text:
+            chunks.append(text)
+    return "\n".join(chunks)
+
+
+def _codex_call_from_payload(payload: dict, fallback_id: int) -> dict:
+    item_type = str(payload.get("type") or "")
+    name = str(payload.get("name") or "")
+    if item_type == "web_search_call":
+        name = name or "web_search"
+        raw_args = payload.get("action")
+    elif item_type == "image_generation_call":
+        name = name or "image_generation"
+        raw_args = {
+            key: payload.get(key) for key in ("revised_prompt", "status")
+            if payload.get(key) is not None
+        }
+    else:
+        raw_args = payload.get("arguments", payload.get("input"))
+
+    call_id = str(payload.get("call_id") or payload.get("id") or f"call-{fallback_id}")
+    return {
+        "id": call_id,
+        "name": name or item_type or "tool",
+        "args": _codex_json_args(raw_args),
+        "raw_input": raw_args if isinstance(raw_args, str) else "",
+        "observation": "",
+        "is_error": None,
+        "exit_code": None,
+        "item_type": item_type,
+    }
+
+
+def _codex_append_output(call: dict, value) -> None:
+    output = _codex_output_text(value)
+    if output and output not in call["observation"]:
+        call["observation"] = "\n".join(
+            part for part in (call["observation"], output) if part
+        )
+
+
+def iter_codex_steps(traj_data: dict) -> list[dict]:
+    """Reconstruct visible Codex actions from a rollout JSONL stream.
+
+    Codex does not expose private chain-of-thought. The ``thought`` field here
+    contains only persisted reasoning summaries and assistant commentary that
+    appeared immediately before a tool-call group.
+    """
+    ordered_steps: list[dict] = []
+    calls_by_id: dict[str, tuple[dict, dict]] = {}
+    pending_context: list[str] = []
+    current_step: dict | None = None
+
+    def start_step() -> dict:
+        nonlocal current_step, pending_context
+        current_step = {
+            "thought": "\n\n".join(part for part in pending_context if part),
+            "calls": [],
+            "received_output": False,
+        }
+        pending_context = []
+        ordered_steps.append(current_step)
+        return current_step
+
+    for record in traj_data.get("records", []):
+        record_type = record.get("type")
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        item_type = str(payload.get("type") or "")
+
+        if record_type == "response_item" and item_type == "reasoning":
+            text = _codex_reasoning_text(payload)
+            if text:
+                pending_context.append(text)
+            continue
+
+        if record_type == "response_item" and item_type == "message" \
+                and payload.get("role") == "assistant":
+            message_text = _codex_content_text(payload.get("content"))
+            if not message_text:
+                continue
+            if payload.get("phase") == "final_answer":
+                step = start_step()
+                call = {
+                    "id": f"final-{len(ordered_steps)}",
+                    "name": "final_answer",
+                    "args": {"text": message_text},
+                    "raw_input": message_text,
+                    "observation": "",
+                    "is_error": None,
+                    "exit_code": None,
+                    "item_type": "message",
+                }
+                step["calls"].append(call)
+                current_step = None
+            else:
+                pending_context.append(message_text)
+            continue
+
+        if record_type == "response_item" and item_type in _CODEX_CALL_TYPES:
+            if current_step is None or current_step["received_output"]:
+                start_step()
+            call = _codex_call_from_payload(payload, len(calls_by_id))
+            current_step["calls"].append(call)
+            calls_by_id[call["id"]] = (call, current_step)
+            continue
+
+        if record_type == "response_item" and item_type in _CODEX_OUTPUT_TYPES:
+            call_id = str(payload.get("call_id") or "")
+            match = calls_by_id.get(call_id)
+            if match:
+                call, step = match
+                _codex_append_output(call, payload.get("output", payload))
+                step["received_output"] = True
+            continue
+
+        if record_type != "event_msg":
+            continue
+
+        call_id = str(payload.get("call_id") or payload.get("callId") or "")
+        match = calls_by_id.get(call_id)
+        if not match:
+            continue
+        call, step = match
+
+        if item_type == "exec_command_end":
+            exit_code = payload.get("exit_code")
+            if isinstance(exit_code, int):
+                call["exit_code"] = exit_code
+                call["is_error"] = exit_code != 0
+            _codex_append_output(
+                call,
+                payload.get("formatted_output") or payload.get("aggregated_output")
+                or payload.get("stdout") or payload.get("stderr"),
+            )
+            step["received_output"] = True
+        elif item_type == "patch_apply_end":
+            success = payload.get("success")
+            if isinstance(success, bool):
+                call["is_error"] = not success
+            _codex_append_output(call, payload.get("stdout") or payload.get("stderr"))
+            step["received_output"] = True
+        elif item_type in {"mcp_tool_call_end", "dynamic_tool_call_response", "web_search_end"}:
+            if isinstance(payload.get("success"), bool):
+                call["is_error"] = not payload["success"]
+            if payload.get("error"):
+                call["is_error"] = True
+            _codex_append_output(call, payload.get("result") or payload.get("error"))
+            step["received_output"] = True
+
+    for step in ordered_steps:
+        step.pop("received_output", None)
+    return [step for step in ordered_steps if step.get("calls")]
+
+
+def _codex_patch_paths(text: str) -> list[str]:
+    paths = _CODEX_PATCH_PATH_RE.findall(text or "")
+    paths.extend(_CODEX_DIFF_PATH_RE.findall(text or ""))
+    return list(dict.fromkeys(path.strip() for path in paths if path.strip()))
+
+
+def _decode_codex_js_string(match: re.Match) -> str:
+    value = match.group("double")
+    if value is not None:
+        try:
+            return json.loads(f'"{value}"')
+        except json.JSONDecodeError:
+            return value
+    value = match.group("single")
+    if value is not None:
+        return value.replace("\\'", "'").replace("\\n", "\n").replace("\\\\", "\\")
+    value = match.group("template") or ""
+    return value.replace("\\`", "`").replace("\\n", "\n").replace("\\\\", "\\")
+
+
+def _codex_nested_exec_commands(source: str) -> list[str]:
+    """Extract literal shell commands from modern tools.exec JavaScript."""
+    commands = []
+    marker_re = re.compile(r"tools\.(?:shell_command|exec_command)\s*\(")
+    for marker in marker_re.finditer(source or ""):
+        match = _CODEX_JS_COMMAND_RE.search(source, marker.end(), marker.end() + 20000)
+        if match:
+            commands.append(_decode_codex_js_string(match))
+    return commands
+
+
+def _codex_split_shell_commands(source: str) -> list[str]:
+    """Split a shell script while keeping each heredoc body with its command."""
+    commands: list[str] = []
+    heredoc_lines: list[str] = []
+    delimiter = ""
+    strip_tabs = False
+
+    def split_operators(text: str) -> list[str]:
+        parts: list[str] = []
+        start = 0
+        quote = ""
+        escaped = False
+        index = 0
+        while index < len(text):
+            char = text[index]
+            if escaped:
+                escaped = False
+                index += 1
+                continue
+            if char == "\\" and quote != "'":
+                escaped = True
+                index += 1
+                continue
+            if quote:
+                if char == quote:
+                    quote = ""
+                index += 1
+                continue
+            if char in {"'", '"', "`"}:
+                quote = char
+                index += 1
+                continue
+            operator_length = 2 if text[index:index + 2] in {"&&", "||"} else 0
+            if char == ";" or operator_length:
+                part = text[start:index].strip()
+                if part:
+                    parts.append(part)
+                index += operator_length or 1
+                start = index
+                continue
+            index += 1
+        remainder = text[start:].strip()
+        if remainder:
+            parts.append(remainder)
+        return parts
+
+    heredoc_re = re.compile(r"<<(?P<strip>-)?\s*(['\"]?)(?P<name>[A-Za-z_]\w*)\2")
+    for raw_line in (source or "").splitlines(keepends=True):
+        if delimiter:
+            heredoc_lines.append(raw_line)
+            candidate = raw_line.rstrip("\r\n")
+            if strip_tabs:
+                candidate = candidate.lstrip("\t")
+            if candidate == delimiter:
+                command = "".join(heredoc_lines).strip()
+                if command:
+                    commands.append(command)
+                heredoc_lines = []
+                delimiter = ""
+                strip_tabs = False
+            continue
+
+        for part in split_operators(raw_line.rstrip("\r\n")):
+            match = heredoc_re.search(part)
+            if match:
+                heredoc_lines = [f"{part}\n"]
+                delimiter = match.group("name")
+                strip_tabs = bool(match.group("strip"))
+            else:
+                commands.append(part)
+
+    if heredoc_lines:
+        commands.append("".join(heredoc_lines).strip())
+    return commands
+
+
+def _codex_recover_edit_command(command_text: str) -> dict | None:
+    """Recover common edit commands whose nested quoting defeats ``shlex``."""
+    match = re.match(r"^\s*(?P<command>sed|perl)\s+(?P<body>.+?)\s+"
+                     r"(?P<path>(?:[/~.]|[A-Za-z]:[\\/])\S+)\s*$",
+                     command_text or "", re.DOTALL | re.IGNORECASE)
+    if not match:
+        return None
+
+    command = match.group("command").lower()
+    body = match.group("body").strip()
+    path = match.group("path")
+    flags: dict[str, object] = {}
+    remaining = body
+    flag_match = re.match(r"-(?P<flags>[A-Za-z]+)(?:\s+|$)", remaining)
+    if flag_match:
+        for flag in flag_match.group("flags"):
+            flags[flag] = True
+        remaining = remaining[flag_match.end():].strip()
+
+    args = [remaining, path] if remaining else [path]
+    return {"command": command, "args": args, "flags": flags}
+
+
+def _codex_parse_shell_commands(command_text: str, cmd_parser) -> list[dict]:
+    """Parse atomic Codex shell actions with tolerant edit-command recovery."""
+    # Let the Bash-aware parser see the complete source first. This preserves
+    # quoted multiline programs such as ``node -e "..."`` whose internal
+    # newlines and semicolons are not shell command boundaries.
+    whole_parse = cmd_parser.parse(command_text) if command_text else []
+    if whole_parse and all(
+        parsed.get("command") != "complex_command" for parsed in whole_parse
+    ):
+        return whole_parse
+
+    parsed_commands: list[dict] = []
+    for command in _codex_split_shell_commands(command_text) or [command_text]:
+        parsed = cmd_parser.parse(command) if command else []
+        if len(parsed) == 1 and parsed[0].get("command") == "complex_command":
+            recovered = _codex_recover_edit_command(command)
+            if recovered:
+                parsed = [recovered]
+        if not parsed:
+            parsed = [{
+                "tool": "", "subcommand": "", "flags": {},
+                "args": {"_raw": command}, "command": command,
+            }]
+        parsed_commands.extend(parsed)
+    return parsed_commands
+
+
+def codex_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str:
+    """Map non-shell Codex tools onto the Graphectory phase taxonomy."""
+    name = (tool_name or "").lower()
+    if name in _CODEX_PATCH_TOOLS or any(hint in name for hint in _CODEX_EDIT_TOOL_HINTS):
+        return "patch"
+    if name == "web_search" or any(hint in name for hint in _CODEX_READ_TOOL_HINTS):
+        return "localization"
+    return "general"
+
+
+def codex_shell_phase(parsed: dict, prev_phases: list[str]) -> str:
+    """Classify Bash or PowerShell commands commonly emitted by Codex."""
+    command = str(parsed.get("command") or "").strip().lower().replace("\\", "/")
+    command = command.rsplit("/", 1)[-1]
+    args = parsed.get("args", {})
+    if isinstance(args, dict):
+        arg_text = " ".join(str(value) for value in args.values())
+    elif isinstance(args, (list, tuple)):
+        arg_text = " ".join(str(value) for value in args)
+    else:
+        arg_text = str(args or "")
+    flags = parsed.get("flags", {})
+    if isinstance(flags, dict):
+        flag_text = " ".join(
+            f"{name} {value}" for name, value in flags.items()
+            if value not in (False, None)
+        )
+    else:
+        flag_text = str(flags or "")
+    full_text = f"{command} {flag_text} {arg_text}".lower()
+    has_patch = "patch" in prev_phases
+
+    # Codex often invokes apply_patch through exec_command. Treat that shell
+    # wrapper as an edit before the generic command mapper can label it general.
+    if command == "apply_patch":
+        return "patch"
+
+    # A Node one-liner can itself be the edit. Check for filesystem mutation
+    # before treating ordinary Node invocations as post-patch runtime probes.
+    if command == "node" and re.search(
+        r"\b(?:writefile|appendfile|rename|unlink|rm|mkdir|copyfile)(?:sync)?\s*\(",
+        full_text,
+    ):
+        return "patch"
+
+    # Runtime probes often redirect logs or suppress errors. Once source has
+    # been edited, those redirects support validation rather than file editing.
+    if command in _CODEX_POST_PATCH_VALIDATION_COMMANDS:
+        return "validation" if has_patch else "general"
+
+    try:
+        from mapPhase import get_phase
+    except ImportError:
+        return "general"
+
+    phase = get_phase(
+        parsed.get("tool", ""), parsed.get("subcommand", ""),
+        parsed.get("command", ""), parsed.get("args", {}),
+        prev_phases, parsed.get("flags", {}),
+    )
+    if phase != "general":
+        return phase
+
+    if command in {
+        "rg", "grep", "find", "fd", "cat", "ls", "dir", "tree",
+        "head", "tail", "type", "get-content", "get-childitem",
+        "select-string", "resolve-path",
+    }:
+        return "localization"
+    if command == "git" and re.search(r"\b(status|diff|show|log|grep|ls-files)\b", arg_text.lower()):
+        return "localization"
+    if command in {"set-content", "add-content", "out-file", "new-item", "remove-item"}:
+        return "patch"
+    if command in _CODEX_SHELL_EDIT_COMMANDS:
+        return "patch"
+
+    validation_markers = (
+        "pytest", "unittest", "npm test", "npm run test", "pnpm test",
+        "yarn test", "cargo test", "go test", "dotnet test", "mvn test",
+        "gradle test", "ruff check", "mypy", "pyright", "eslint",
+        "black --check", "isort --check", "node --check", "tsc --noemit",
+    )
+    if any(marker in full_text for marker in validation_markers):
+        return "validation" if has_patch else "localization"
+    return "general"
+
+
+def _codex_call_outcome(call: dict, observation: str,
+                        tool: str = "", subcommand: str = "",
+                        args: dict | None = None) -> str | None:
+    if call.get("is_error") is True:
+        return "failure"
+    if call.get("is_error") is False:
+        return "success"
+    if isinstance(call.get("exit_code"), int):
+        return "success" if call["exit_code"] == 0 else "failure"
+
+    exit_match = re.search(r"\bExit code:\s*(-?\d+)\b", observation, re.IGNORECASE)
+    if exit_match:
+        return "success" if int(exit_match.group(1)) == 0 else "failure"
+    return check_command_outcome(observation, tool, subcommand, args or {})
+
+
+def _codex_action_entries(call: dict, cmd_parser, filter_cd: bool) -> list[dict]:
+    """Expand one native Codex call into graphable atomic actions."""
+    name = str(call.get("name") or "tool")
+    lowered = name.lower()
+    args = dict(call.get("args") or {})
+    raw_input = str(call.get("raw_input") or args.get("_raw") or "")
+    observation = str(call.get("observation") or "")
+    entries: list[dict] = []
+
+    shell_commands = []
+    if lowered in _CODEX_SHELL_TOOLS:
+        command_value = args.get("command") or args.get("cmd") or args.get("_raw")
+        if isinstance(command_value, list):
+            command_value = " ".join(str(part) for part in command_value)
+        if command_value:
+            shell_commands.append(str(command_value))
+    elif lowered == "exec":
+        shell_commands.extend(_codex_nested_exec_commands(raw_input))
+
+    for command_text in shell_commands:
+        parsed_commands = _codex_parse_shell_commands(command_text, cmd_parser)
+
+        has_cd = False
+        if filter_cd and len(parsed_commands) > 1:
+            first = parsed_commands[0]
+            if str(first.get("command") or "").strip().lower() == "cd":
+                has_cd = True
+                parsed_commands = parsed_commands[1:]
+
+        for parsed in parsed_commands:
+            if _is_shell_noop(parsed):
+                continue
+            entries.append({
+                "parsed": parsed,
+                "native_tool": name,
+                "observation": observation,
+                "has_cd": has_cd,
+                "phase": None,
+            })
+
+    patch_source = raw_input
+    has_nested_patch = lowered == "exec" and "tools.apply_patch" in raw_input
+    if lowered in _CODEX_PATCH_TOOLS or has_nested_patch:
+        paths = _codex_patch_paths(patch_source) or [""]
+        for path in paths:
+            patch_args = {"path": path} if path else {"_raw": patch_source}
+            entries.append({
+                "parsed": {
+                    "tool": "str_replace_editor",
+                    "subcommand": "str_replace",
+                    "flags": {},
+                    "args": patch_args,
+                    "command": "",
+                },
+                "native_tool": "apply_patch",
+                "observation": observation,
+                "has_cd": False,
+                "phase": "patch",
+                "label": "apply_patch",
+            })
+
+    if entries:
+        return entries
+
+    entries.append({
+        "parsed": {
+            "tool": name,
+            "subcommand": "",
+            "flags": {},
+            "args": args,
+            "command": "",
+        },
+        "native_tool": name,
+        "observation": observation,
+        "has_cd": False,
+        "phase": codex_tool_phase(name, args, []),
+        "label": "final answer" if lowered == "final_answer" else name,
+    })
+    return entries
+
+
+def _build_graph_codex(traj_data: dict, instance_id: str,
+                       eval_report_path: str, cmd_parser,
+                       filter_cd: bool = True,
+                       unique_think: bool = True):
+    """Build a Graphectory from a persisted Codex rollout stream."""
+    builder = GraphBuilder()
+    prev_phases_list: list[str] = []
+    prev_thought = ""
+    prev_step_first_node: str | None = None
+
+    for step_idx, step in enumerate(iter_codex_steps(traj_data)):
+        thought = str(step.get("thought") or "")
+        calls = step.get("calls") or []
+        thought_len_raw = compute_thought_length_raw(thought)
+        thought_len_clean = compute_thought_length_clean(thought)
+        action_entries = []
+        action_parts = []
+        observation_parts = []
+
+        for call in calls:
+            name = str(call.get("name") or "tool")
+            args = call.get("args") or {}
+            raw_input = call.get("raw_input")
+            shown_args = raw_input if raw_input else json.dumps(
+                args, ensure_ascii=False, indent=2, default=str,
+            )
+            action_parts.append(f"{name}\n{shown_args}".strip())
+            observation = str(call.get("observation") or "")
+            if observation:
+                observation_parts.append(f"{name}: {observation}")
+            for entry in _codex_action_entries(call, cmd_parser, filter_cd):
+                entry["call"] = call
+                action_entries.append(entry)
+
+        action_str = "\n\n".join(action_parts)
+        step_observation = "\n\n".join(observation_parts)
+        is_first_in_step = True
+        step_first_node: str | None = None
+
+        for entry in action_entries:
+            parsed = entry["parsed"]
+            tool = str(parsed.get("tool") or "").strip()
+            subcommand = str(parsed.get("subcommand") or "").strip()
+            command = str(parsed.get("command") or "").strip()
+            raw_args = parsed.get("args", {})
+            args = dict(raw_args) if isinstance(raw_args, dict) else raw_args
+            flags = parsed.get("flags") or {}
+            observation = entry["observation"]
+
+            phase = entry.get("phase")
+            if phase is None:
+                phase = codex_shell_phase(parsed, prev_phases_list)
+            elif phase == "general":
+                phase = codex_tool_phase(entry["native_tool"], args, prev_phases_list)
+
+            node_label = entry.get("label") or (
+                f"{tool}: {subcommand}" if tool and subcommand
+                else (tool or command or entry["native_tool"])
+            )
+            outcome = _codex_call_outcome(
+                entry["call"], observation, tool, subcommand,
+                args if isinstance(args, dict) else {},
+            )
+            if outcome and isinstance(args, dict):
+                args.setdefault("command_outcome", outcome)
+
+            node_key = builder.add_or_update_node(
+                node_label=node_label, args=args, flags=flags, phase=phase,
+                step_idx=step_idx, tool=tool, command=command,
+                subcommand=subcommand, thought_length=thought_len_raw,
+                has_cd=entry["has_cd"],
+            )
+            node_data = builder.G.nodes[node_key]
+            node_data["thought_len_raw"] = thought_len_raw
+            node_data["thought_len_clean"] = thought_len_clean
+            if outcome:
+                node_data["command_outcome"] = outcome
+            _accumulate_observation(node_data, observation)
+            _accumulate_step_data(
+                node_data, step_idx, thought, action_str, step_observation,
+            )
+            builder.add_execution_edge(
+                node_key, step_idx, is_first_in_step=is_first_in_step,
+                thought_length_raw=thought_len_raw if is_first_in_step else 0,
+                thought_length_clean=thought_len_clean if is_first_in_step else 0,
+            )
+            if is_first_in_step:
+                _mark_thought_continuation(
+                    builder.G, prev_step_first_node, node_key,
+                    prev_thought, thought,
+                )
+                step_first_node = node_key
+
+            builder.update_previous_node(node_key)
+            prev_phases_list.append(phase)
+            builder.prev_phases.add(phase)
+            is_first_in_step = False
+
+        prev_step_first_node = step_first_node
+        prev_thought = thought
+
+    build_hierarchical_edges(builder.G, builder.localization_nodes)
+    resolution_status = determine_resolution_status(instance_id, eval_report_path) \
+        if eval_report_path else "none"
+    metadata = traj_data.get("metadata") or {}
+    builder.G.graph.update({
+        "resolution_status": resolution_status,
+        "debug_difficulty": "unknown",
+        "trajectory_format": CODEX_TRAJECTORY_FORMAT,
+        "instance_name": metadata.get("display_name") or instance_id,
+        "session_id": instance_id,
+        "model": metadata.get("model") or "",
+        "cwd": metadata.get("cwd") or "",
+        "thought_source": "visible Codex reasoning summaries and commentary",
+    })
+    return builder.G
+
+
 def _kimi_output_text(value) -> str:
     """Flatten Kimi tool output/content blocks into sidebar-friendly text."""
     if isinstance(value, str):
@@ -876,7 +1940,10 @@ def _kimi_output_text(value) -> str:
 
 
 def iter_kimi_steps(traj_data: dict) -> list[dict]:
-    """Fold Kimi Code wire records into ordered model steps and tool calls."""
+    """Fold compatible Kimi Code or Claude Code records into ordered steps."""
+    if traj_data.get("trajectory_format") == KIMI_SWE_TOGETHER_FORMAT:
+        return _iter_kimi_swe_together_steps(traj_data)
+
     ordered_steps: list[dict] = []
     steps_by_uuid: dict[str, dict] = {}
     calls_by_id: dict[str, dict] = {}
@@ -953,8 +2020,145 @@ def iter_kimi_steps(traj_data: dict) -> list[dict]:
     return ordered_steps
 
 
+def _iter_kimi_swe_together_steps(traj_data: dict) -> list[dict]:
+    """Reconstruct Kimi Code steps from the published ShareGPT export.
+
+    The dataset records assistant tool calls inline and places the corresponding
+    feedback in the next human turn. It is request-side data, so a session's
+    final assistant reply is intentionally unavailable.
+    """
+    canonical_records = traj_data.get("canonical_records")
+    if isinstance(canonical_records, list):
+        return _iter_kimi_swe_together_canonical_steps(canonical_records)
+
+    conversations = traj_data.get("conversations")
+    if not isinstance(conversations, list):
+        return []
+
+    ordered_steps: list[dict] = []
+    for index, turn in enumerate(conversations):
+        if not isinstance(turn, dict) or turn.get("from") != "gpt":
+            continue
+        value = str(turn.get("value") or "")
+        thought = _KIMI_SWE_TOGETHER_TOOL_CALL_RE.sub("", value).strip()
+        next_turn = conversations[index + 1] if index + 1 < len(conversations) else {}
+        observation = ""
+        if isinstance(next_turn, dict) and next_turn.get("from") == "human":
+            observation = str(next_turn.get("value") or "")
+        is_error = "<system>ERROR: Tool execution failed.</system>" in observation
+
+        calls = []
+        for call_index, match in enumerate(_KIMI_SWE_TOGETHER_TOOL_CALL_RE.finditer(value)):
+            args_text = match.group("args").strip()
+            try:
+                args = json.loads(args_text)
+            except json.JSONDecodeError:
+                args = {"_raw": args_text}
+            if not isinstance(args, dict):
+                args = {"_raw": args}
+            calls.append({
+                "id": f"sharegpt-{index}-{call_index}",
+                "name": match.group("name"),
+                "args": args,
+                "observation": observation,
+                "is_error": is_error,
+            })
+
+        if calls or thought:
+            ordered_steps.append({
+                "source_step": index,
+                "thought": thought,
+                "calls": calls,
+            })
+    return ordered_steps
+
+
+def _iter_kimi_swe_together_canonical_steps(records: list[dict]) -> list[dict]:
+    """Recover action turns from sequential canonical request snapshots."""
+    ordered_steps: list[dict] = []
+    seen_steps: set[str] = set()
+
+    for record in sorted(records, key=_kimi_swe_together_call_index):
+        messages = record.get("messages")
+        if not isinstance(messages, list):
+            continue
+
+        assistant_index = next(
+            (index for index in range(len(messages) - 1, -1, -1)
+             if isinstance(messages[index], dict)
+             and messages[index].get("role") == "assistant"),
+            None,
+        )
+        if assistant_index is None:
+            continue
+
+        assistant = messages[assistant_index]
+        thought = str(
+            assistant.get("reasoning_content") or assistant.get("content") or ""
+        ).strip()
+        raw_calls = assistant.get("tool_calls")
+        if not isinstance(raw_calls, list):
+            raw_calls = []
+
+        outputs_by_id: dict[str, str] = {}
+        for message in messages[assistant_index + 1:]:
+            if not isinstance(message, dict) or message.get("role") != "tool":
+                continue
+            call_id = str(message.get("tool_call_id") or message.get("toolCallId") or "")
+            content = _kimi_output_text(message.get("content"))
+            if call_id:
+                outputs_by_id[call_id] = content
+
+        calls = []
+        for call_index, raw_call in enumerate(raw_calls):
+            if not isinstance(raw_call, dict):
+                continue
+            function = raw_call.get("function")
+            if not isinstance(function, dict):
+                continue
+            raw_args = function.get("arguments")
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            except json.JSONDecodeError:
+                args = {"_raw": raw_args}
+            if not isinstance(args, dict):
+                args = {"_raw": args}
+            call_id = str(raw_call.get("id") or "")
+            observation = outputs_by_id.get(call_id, "")
+            calls.append({
+                "id": call_id or f"canonical-{_kimi_swe_together_call_index(record)}-{call_index}",
+                "name": str(function.get("name") or "tool"),
+                "args": args,
+                "observation": observation,
+                "is_error": "<system>ERROR: Tool execution failed.</system>" in observation,
+            })
+
+        signature = json.dumps(
+            {
+                "thought": thought,
+                "calls": [
+                    {"name": call["name"], "args": call["args"]}
+                    for call in calls
+                ],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        if signature in seen_steps or (not thought and not calls):
+            continue
+        seen_steps.add(signature)
+        ordered_steps.append({
+            "source_step": _kimi_swe_together_call_index(record),
+            "thought": thought,
+            "calls": calls,
+        })
+
+    return ordered_steps
+
+
 def kimi_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str:
-    """Map Kimi Code's native tools onto the Graphectory phase taxonomy."""
+    """Map compatible Kimi Code or Claude Code tools onto the phase taxonomy."""
     try:
         from mapPhase import get_phase
     except ImportError:
@@ -985,8 +2189,9 @@ def kimi_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str:
 def _build_graph_kimi(traj_data: dict, instance_id: str,
                       eval_report_path: str, cmd_parser,
                       filter_cd: bool = True,
-                      unique_think: bool = True):
-    """Build a graph from a current Kimi Code agents/main/wire.jsonl stream."""
+                      unique_think: bool = True,
+                      agent_type: str = "kimi"):
+    """Build a graph from a compatible Kimi Code or Claude Code wire stream."""
     try:
         from mapPhase import get_phase
     except ImportError:
@@ -1176,7 +2381,10 @@ def _build_graph_kimi(traj_data: dict, instance_id: str,
         if eval_report_path else "none"
     builder.G.graph["resolution_status"] = resolution_status
     builder.G.graph["debug_difficulty"] = "unknown"
-    builder.G.graph["trajectory_format"] = KIMI_TRAJECTORY_FORMAT
+    builder.G.graph["trajectory_format"] = (
+        CLAUDE_CODE_TRAJECTORY_FORMAT
+        if agent_type == "claude" else KIMI_TRAJECTORY_FORMAT
+    )
     title = str((traj_data.get("state") or {}).get("title") or "").strip()
     builder.G.graph["instance_name"] = title or instance_id
     builder.G.graph["session_id"] = instance_id
@@ -1691,9 +2899,14 @@ def build_graph(traj_data: dict, instance_id: str,
         )
 
     # Dispatch to agent-specific builder
-    if agent_type == "kimi":
+    if agent_type == "codex":
+        return _build_graph_codex(traj_data, instance_id, eval_report_path,
+                                  cmd_parser, filter_cd, unique_think=unique_think)
+
+    if agent_type in {"kimi", "claude", "kimi_swe_together"}:
         return _build_graph_kimi(traj_data, instance_id, eval_report_path,
-                                 cmd_parser, filter_cd, unique_think=unique_think)
+                                 cmd_parser, filter_cd, unique_think=unique_think,
+                                 agent_type=agent_type)
 
     if agent_type == "oh":
         return _build_graph_oh(traj_data, instance_id, eval_report_path,
