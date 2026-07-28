@@ -106,8 +106,18 @@
         window.addEventListener('error', (event) => {
             const graphEl = document.getElementById('graph');
             if (!graphEl || graphEl.querySelector('.render-error')) return;
-            graphEl.innerHTML = '<div class="render-error"><strong>Rendering error</strong><br><code>'
-                + (event.message || 'Unknown error') + '</code></div>';
+            // Preserve an already rendered graph when an interaction-only
+            // error occurs. Initialization errors still receive a readable
+            // panel because no SVG exists yet.
+            if (graphEl.querySelector('svg')) {
+                console.error('[graph] interaction error:', event.error || event.message);
+                return;
+            }
+            const errorPanel = document.createElement('div');
+            errorPanel.className = 'render-error';
+            errorPanel.innerHTML = '<strong>Rendering error</strong><br><code>'
+                + (event.message || 'Unknown error') + '</code>';
+            graphEl.appendChild(errorPanel);
         });
     </script>
     <script src="graph_renderer.js"></script>

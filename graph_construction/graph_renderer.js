@@ -791,20 +791,23 @@ let graphWidth;
 let graphHeight;
 
 function updateTransform() {
+    if (!svg || !svg.isConnected) return;
     svg.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
     svg.style.transformOrigin = '0 0';
 }
 
 function fitToScreen() {
+    if (!graphEl || !svg || !graphWidth || !graphHeight) return;
     // Use the #graph div's own dimensions — these are correct both in normal
     // layout (CSS height: 900px) and when fullscreen-active forces it to fill
     // the viewport via position:fixed.
     const w = graphEl.clientWidth  || graphEl.offsetWidth;
     const h = graphEl.clientHeight || graphEl.offsetHeight;
+    if (w <= 0 || h <= 0) return;
 
     const scaleX = w / graphWidth;
     const scaleY = h / graphHeight;
-    currentScale = Math.min(scaleX, scaleY, 1) * 0.95;
+    currentScale = Math.max(0.05, Math.min(scaleX, scaleY, 1) * 0.95);
 
     const scaledWidth  = graphWidth  * currentScale;
     const scaledHeight = graphHeight * currentScale;
@@ -815,6 +818,7 @@ function fitToScreen() {
 }
 
 function zoomIn() {
+    if (!graphEl || !svg) return;
     const centerX = graphEl.clientWidth  / 2;
     const centerY = graphEl.clientHeight / 2;
     
@@ -829,6 +833,7 @@ function zoomIn() {
 }
 
 function zoomOut() {
+    if (!graphEl || !svg) return;
     const centerX = graphEl.clientWidth  / 2;
     const centerY = graphEl.clientHeight / 2;
     

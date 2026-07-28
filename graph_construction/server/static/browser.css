@@ -297,6 +297,11 @@ body {
     pointer-events: none;
 }
 
+.graph-load-placeholder {
+    z-index: 5;
+    background: rgba(255, 255, 255, .78);
+}
+
 .placeholder-icon { font-size: 52px; opacity: .3; }
 
 .landing-placeholder {

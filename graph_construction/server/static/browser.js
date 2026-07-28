@@ -11,6 +11,7 @@ let sankeyActive       = false;  // true when Sankey pane is showing
 let dataSourceExpanded = true;
 let sidebarCollapsed   = false;
 let graphLoadToken     = 0;
+let graphRequestToken  = 0;
 const prefetchingGraphKeys = new Set();
 const prefetchedGraphKeys  = new Set();
 
@@ -125,6 +126,7 @@ async function applyDataSource() {
         if (!res.ok) { showDsError(data.error || `Server error (HTTP ${res.status})`); return; }
 
         activeId = null;
+        graphRequestToken += 1;
         clearGraphPane();
         setDataSourceExpanded(false);
 
@@ -289,10 +291,15 @@ function selectGraph(instanceId) {
 
 function showLoading() {
     const pane   = document.getElementById('graphPane');
-    const iframe = pane.querySelector('iframe');
-    if (iframe) iframe.remove();
     let ph = pane.querySelector('.placeholder');
-    if (!ph) { ph = document.createElement('div'); ph.className = 'placeholder'; pane.appendChild(ph); }
+    if (!ph) {
+        ph = document.createElement('div');
+        ph.className = 'placeholder graph-load-placeholder';
+        pane.appendChild(ph);
+    } else {
+        ph.classList.add('graph-load-placeholder');
+    }
+    ph.setAttribute('aria-live', 'polite');
     ph.innerHTML = '<div class="spinner"></div><span>Rendering graph…</span>';
 }
 
@@ -569,18 +576,25 @@ function landingGuideHtml() {
 }
 
 function clearGraphPane() {
+    graphRequestToken += 1;
     document.getElementById('graphPane').innerHTML = landingGuideHtml();
 }
 
 async function loadGraph(instanceId) {
+    const requestToken = ++graphRequestToken;
     showLoading();
     const params = graphRequestParams(instanceId);
     try {
         const res = await fetch(`/api/graph?${params}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        injectGraph(await res.text());
+        const html = await res.text();
+        // A slower request for a previous selection must not replace the graph
+        // the user is currently viewing.
+        if (requestToken !== graphRequestToken || activeId !== instanceId || sankeyActive) return;
+        injectGraph(html);
         scheduleAdjacentPrefetch(instanceId);
     } catch (err) {
+        if (requestToken !== graphRequestToken || activeId !== instanceId || sankeyActive) return;
         const ph = document.getElementById('graphPane').querySelector('.placeholder');
         if (ph) ph.innerHTML = `<span style="color:#e74c3c">⚠ ${escHtml(err.message)}</span>`;
     }
@@ -652,6 +666,7 @@ function injectGraph(html) {
 function selectSankey() {
     // Deselect any active graph item
     activeId = null;
+    graphRequestToken += 1;
     document.querySelectorAll('.graph-item').forEach(el => el.classList.remove('active'));
     setWorkspace('sankey');
 
