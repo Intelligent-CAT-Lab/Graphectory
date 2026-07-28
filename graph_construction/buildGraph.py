@@ -13,15 +13,19 @@ from pathlib import Path
 from networkx.readwrite import json_graph
 from collections import defaultdict
 
-# Optional datasets import for difficulty lookup. The live viewer should still
-# start if HuggingFace datasets is unavailable or broken in the active env.
-try:
-    from datasets import load_dataset
-    swe_bench_ds = load_dataset("princeton-nlp/SWE-bench_Verified", split="test")
-    difficulty_lookup = {row["instance_id"]: row["difficulty"] for row in swe_bench_ds}
-except Exception as exc:
-    print(f"[buildGraph] SWE-bench difficulty lookup disabled: {exc}")
-    difficulty_lookup = {}
+# SWE-bench difficulty is display metadata, not a graph-construction
+# requirement. Avoid importing or downloading Hugging Face data during server
+# startup; callers that need the labels can explicitly opt in.
+difficulty_lookup = {}
+if os.environ.get("GRAPHECTORY_LOAD_SWEBENCH_DIFFICULTIES") == "1":
+    try:
+        from datasets import load_dataset
+        swe_bench_ds = load_dataset("princeton-nlp/SWE-bench_Verified", split="test")
+        difficulty_lookup = {
+            row["instance_id"]: row["difficulty"] for row in swe_bench_ds
+        }
+    except Exception as exc:
+        print(f"[buildGraph] SWE-bench difficulty lookup disabled: {exc}")
 
 
 # ── Thought-length helpers ──────────────────────────────────────────────────
@@ -199,7 +203,7 @@ class GraphBuilder:
             node_label: Display label for the node
             args: Command arguments dictionary
             flags: Command flags dictionary
-            phase: Phase classification (localization/patch/validation/general)
+            phase: Phase classification (localization/patch/validation/plan/general)
             step_idx: Step index in trajectory
             tool: Tool name (if applicable)
             command: Command name (if applicable)

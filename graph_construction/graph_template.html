@@ -14,7 +14,10 @@
         <header class="graph-hud">
             <div class="trajectory-identity">
                 <span>Trajectory</span>
-                <h1 title="{{INSTANCE_NAME}}">{{INSTANCE_NAME}}</h1>
+                <div class="trajectory-name-row">
+                    <h1 id="trajectoryName" title="{{INSTANCE_NAME}}">{{INSTANCE_NAME}}</h1>
+                    <button class="trajectory-name-toggle" id="trajectoryNameToggle" type="button" onclick="toggleTrajectoryName()" title="Expand full trajectory name" aria-label="Expand full trajectory name" aria-expanded="false">+</button>
+                </div>
             </div>
             <div class="graph-hud-metadata">
                 {{STATUS_ITEM}}
@@ -44,7 +47,8 @@
                     <div class="legend-item"><i class="legend-color localization"></i><span>Localization: inspect, search, or reproduce.</span></div>
                     <div class="legend-item"><i class="legend-color patch"></i><span>Patch: edit source or tests.</span></div>
                     <div class="legend-item"><i class="legend-color validation"></i><span>Validation: evaluate a candidate fix.</span></div>
-                    <div class="legend-item"><i class="legend-color general"></i><span>General: plan, submit, or housekeeping.</span></div>
+                    <div class="legend-item"><i class="legend-color plan"></i><span>Plan: explicit planning and todo actions in Codex or Claude Code.</span></div>
+                    <div class="legend-item"><i class="legend-color general"></i><span>General: submit, housekeeping, or uncategorized activity.</span></div>
                 </div>
             </section>
             <section>

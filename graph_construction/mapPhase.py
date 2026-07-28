@@ -7,6 +7,7 @@ Phases:
   - "localization" : gathering info, searching, reading, or generating/trying tests *before* any patch
   - "patch"        : creating/editing/deleting non-test assets
   - "validation"   : (re-)running tests or test-like commands *after* a patch; viewing/creating/editing test assets *after* a patch
+  - "plan"         : explicit planning actions in Codex and Claude Code traces
   - "general"      : everything else
 
 Key rule (test generation & execution):
@@ -33,15 +34,51 @@ from typing import Iterable, List, Tuple, Any, Optional, Dict
 
 # Tokens/paths hinting that something is test-related.
 TEST_HINTS: Tuple[str, ...] = (
-    "test_", "repro", "reproduc", "debug", "_test", "/tests/", "/test/",
+    "test_", "repro", "reproduc", "debug", "_test", "tests/", "test/",
+    "/tests/", "/test/",
 )
 
+# Planning is an explicit phase only for frameworks that expose planning as a
+# first-class tool action. Keep these names framework-gated so an incidental
+# shell command or an older framework's todo text does not change its phase.
+PLAN_ACTION_NAMES = frozenset({
+    "updateplan",
+    "enterplanmode",
+    "exitplanmode",
+    "todowrite",
+})
+
 # Commands that typically *read/search* only; with redirection they can become edits.
-READONLY_CMDS: Tuple[str, ...] = ("grep", "find", "cat", "ls", "head", "tail", "awk", "nl")
+READONLY_CMDS: Tuple[str, ...] = (
+    "grep", "find", "cat", "ls", "head", "tail", "awk", "nl", "echo",
+)
 
 # Commands that are clearly *editing* or *creating* content.
 # Note: sed and perl handled explicitly below based on their flags
-EDIT_CMDS: Tuple[str, ...] = ("touch",)
+EDIT_CMDS: Tuple[str, ...] = ("touch", "cp")
+
+# Filesystem mutations that should be treated as patch operations unless they
+# target test artifacts, in which case the normal localization/validation rule
+# applies.
+EDIT_CMDS = EDIT_CMDS + ("rm", "mkdir")
+
+# Commands that observe or probe the environment. They are localization before
+# a patch and validation afterward, while ``set_env`` is intentionally kept as
+# general setup metadata rather than evidence that a patch was validated.
+CONTEXTUAL_OBSERVATION_CMDS: Tuple[str, ...] = (
+    "date", "echo", "sleep", "curl", "ps", "taskoutput", "wc",
+    "nvidia-smi", "which", "df", "free", "env", "pgrep", "write_stdin",
+    "timeout", "wait", "tmux", "exec", "exec_command", "powershell",
+    "run_shell_command", "bash", "mcp__environment__bash",
+)
+ENVIRONMENT_SETUP_CMDS: Tuple[str, ...] = ("set_env",)
+NAVIGATION_CMDS: Tuple[str, ...] = ("cd",)
+PATCH_CMDS: Tuple[str, ...] = ("apply_patch", "patch")
+GENERAL_TOOL_CMDS: Tuple[str, ...] = (
+    "taskstop", "taskupdate", "taskcreate", "export",
+    "mcp__environment__finish", "agent", "#",
+)
+WEB_LOOKUP_TOOLS: Tuple[str, ...] = ("toolsearch", "websearch", "webfetch")
 
 # str_replace_editor subcommands that indicate edits vs reads.
 SRE_EDIT_SUBCMDS: Tuple[str, ...] = ("create", "str_replace", "insert", "undo_edit")
@@ -83,6 +120,30 @@ def _extract_paths(args: Any) -> List[str]:
 
 def _has_prior_patch(prev_phases: Optional[Iterable[str]]) -> bool:
     return any(p == "patch" for p in (prev_phases or []))
+
+
+def is_plan_action(
+    tool: Optional[str],
+    subcommand: Optional[str] = None,
+    command: Optional[str | dict | list | tuple] = None,
+    args: Any = None,
+) -> bool:
+    """Return whether an action is one of the explicit planning tools.
+
+    The comparison uses only action/tool names, not arbitrary argument text,
+    so a plan mentioned in a prompt or file path is not misclassified.
+    """
+    candidates = [tool, subcommand]
+    if isinstance(command, str):
+        candidates.append(command)
+    for value in candidates:
+        if not isinstance(value, str):
+            continue
+        name = value.rsplit("/", 1)[-1].strip().lower()
+        name = name.replace("_", "").replace("-", "")
+        if name in PLAN_ACTION_NAMES:
+            return True
+    return False
 
 def _contains_redirection(tokens: List[str]) -> bool:
     """
@@ -352,10 +413,11 @@ def get_phase(
     args: Any,
     prev_phases: Optional[Iterable[str]] = None,
     flags: Optional[Dict[str, Any]] = None,
+    framework: Optional[str] = None,
 ) -> str:
     """
     Map a (tool, subcommand, command, args, prev_phases, flags) to a phase:
-        "localization" | "patch" | "validation" | "general"
+        "localization" | "patch" | "validation" | "plan" | "general"
 
     flags:
         Optional dict for additional context, e.g. {"c": "assert ..."} for python -c inline code,
@@ -366,9 +428,65 @@ def get_phase(
     cmd = _command_basename(cmd) if cmd else cmd
     has_patch = _has_prior_patch(prev_phases)
 
+    if framework in {"codex", "claude"} and is_plan_action(
+        tool, subcommand, command, args,
+    ):
+        return "plan"
+
+    tool_name = _command_basename(str(tool or "").strip().lower())
+    if cmd in NAVIGATION_CMDS or tool_name in NAVIGATION_CMDS:
+        return "localization"
+    if cmd in ENVIRONMENT_SETUP_CMDS or tool_name in ENVIRONMENT_SETUP_CMDS:
+        return "general"
+    if cmd in GENERAL_TOOL_CMDS or tool_name in GENERAL_TOOL_CMDS:
+        return "general"
+    if cmd in WEB_LOOKUP_TOOLS or tool_name in WEB_LOOKUP_TOOLS:
+        return "localization"
+    if cmd in PATCH_CMDS or tool_name in PATCH_CMDS:
+        return "patch"
+    if (
+        (cmd in CONTEXTUAL_OBSERVATION_CMDS or tool_name in CONTEXTUAL_OBSERVATION_CMDS)
+        and not _contains_redirection(tokens)
+    ):
+        return "validation" if has_patch else "localization"
+
     # 0) Handle complex_command by analyzing the bash command text
     if cmd == "complex_command":
         return _classify_complex_command(args, has_patch=has_patch)
+
+    if cmd == "node":
+        command_text = " ".join(tokens)
+        if re.search(
+            r"\b(?:writefile|appendfile|rename|unlink|rm|mkdir|copyfile)"
+            r"(?:sync)?\s*\(",
+            command_text,
+        ):
+            return "patch"
+        return "validation" if has_patch else "localization"
+
+    if cmd == "uv":
+        command_text = " ".join(tokens)
+        if re.search(r"\b(?:add|remove)\b", command_text):
+            return "patch"
+        if re.search(
+            r"\b(?:pytest|unittest|mypy|pyright|ruff|flake8|pylint|test)\b",
+            command_text,
+        ):
+            return "validation" if has_patch else "localization"
+        return "general"
+
+    if cmd == "git":
+        command_text = " ".join(tokens)
+        if re.search(r"\bdiff\s+--check\b", command_text):
+            return "validation" if has_patch else "localization"
+        if re.search(
+            r"\b(?:status|diff|show|log|grep|ls-files|branch|rev-parse)\b",
+            command_text,
+        ):
+            return "localization"
+        if re.search(r"\b(?:apply|cherry-pick|merge|revert)\b", command_text):
+            return "patch"
+        return "general"
 
     # 1) str_replace_editor decisions (tool-specific)
     if (tool or "").lower() == "str_replace_editor":
@@ -556,4 +674,40 @@ if __name__ == "__main__":
     for i, (tool, subcmd, cmd, args, prev, flag, expected) in enumerate(test_cases, 1):
         result = get_phase(tool, subcmd, cmd, args, prev, flag)
         assert result == expected, f"Test case {i} failed: got {result}, expected {expected}"
+    assert get_phase("update_plan", None, None, {}, framework="codex") == "plan"
+    assert get_phase("EnterPlanMode", None, None, {}, framework="claude") == "plan"
+    assert get_phase("TodoWrite", None, None, {}, framework="sa") == "general"
+
+    contextual_commands = ("echo", "sleep", "curl", "taskoutput", "ps")
+    for command in contextual_commands:
+        assert get_phase(None, None, command, [], [], {}) == "localization"
+        assert get_phase(None, None, command, [], ["patch"], {}) == "validation"
+    assert get_phase(None, None, "cd", [], [], {}) == "localization"
+    assert get_phase(None, None, "set_env", [], [], {}) == "general"
+    assert get_phase(None, None, "mcp__environment__bash", [], [], {}, framework="claude") == "localization"
+    assert get_phase(None, None, "cp", ["source.py", "dest.py"], [], {}) == "patch"
+
+    diagnostic_commands = (
+        "date", "wc", "nvidia-smi", "which", "df", "free", "env", "pgrep",
+        "write_stdin", "timeout", "wait", "tmux", "exec", "exec_command",
+        "powershell", "run_shell_command", "bash",
+    )
+    for command in diagnostic_commands:
+        assert get_phase(None, None, command, [], [], {}) == "localization"
+        assert get_phase(None, None, command, [], ["patch"], {}) == "validation"
+    for command in ("taskstop", "taskupdate", "taskcreate", "export", "agent", "#"):
+        assert get_phase(None, None, command, [], [], {}) == "general"
+    for command in ("toolsearch", "websearch", "webfetch"):
+        assert get_phase(None, None, command, [], [], {}) == "localization"
+    assert get_phase(None, None, "mcp__environment__finish", [], [], {}) == "general"
+    assert get_phase(None, None, "rm", ["source.py"], [], {}) == "patch"
+    assert get_phase(None, None, "mkdir", ["src"], [], {}) == "patch"
+    assert get_phase(None, None, "rm", ["./tests/test_output.py"], ["patch"], {}) == "validation"
+    assert get_phase(None, None, "node", ["-e", "console.log('ok')"], [], {}) == "localization"
+    assert get_phase(None, None, "node", ["-e", "console.log('ok')"], ["patch"], {}) == "validation"
+    assert get_phase(None, None, "node", ["-e", "fs.writeFileSync('app.js', 'x')"], [], {}) == "patch"
+    assert get_phase(None, None, "uv", ["run", "pytest", "tests"], [], {}) == "localization"
+    assert get_phase(None, None, "git", ["status"], [], {}) == "localization"
+    assert get_phase(None, None, "git", ["commit", "-m", "fix"], [], {}) == "general"
+    assert get_phase(None, None, "apply_patch", [], [], {}) == "patch"
     print("All test cases passed.")

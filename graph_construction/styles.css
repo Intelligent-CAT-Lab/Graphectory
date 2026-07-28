@@ -892,7 +892,15 @@ svg {
 
 .trajectory-identity { min-width: 0; }
 .trajectory-identity > span { display: block; margin-bottom: 3px; color: #0a817b; font: 800 9px/1 'Cascadia Code', Consolas, monospace; letter-spacing: .13em; text-transform: uppercase; }
+.trajectory-name-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .graph-document h1 { max-width: 380px; margin: 0; overflow: hidden; color: #192c3d; font: 700 clamp(18px, 2vw, 25px)/1.08 {{FONT_FAMILY}}; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
+.trajectory-identity.long h1 { font-size: clamp(15px, 1.5vw, 21px); line-height: 1.1; }
+.trajectory-identity.very-long h1 { font-size: clamp(13px, 1.2vw, 18px); line-height: 1.12; }
+.graph-document .graph-hud.trajectory-title-expanded { max-width: min(1100px, calc(100% - 152px)); }
+.trajectory-identity.expanded { flex: 1 1 auto; min-width: 0; }
+.trajectory-identity.expanded h1 { max-width: none; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
+.trajectory-name-toggle { width: 24px; height: 24px; flex: 0 0 auto; border: 1px solid #c8d9d2; border-radius: 7px; background: #f2f8f5; color: #28746f; cursor: pointer; font: 800 16px/1 'Cascadia Code', Consolas, monospace; }
+.trajectory-name-toggle:hover { border-color: #0a817b; background: #ddf1ec; color: #075e5a; }
 .graph-hud-metadata { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; color: #5a727e; font: 700 10px/1 'Cascadia Code', Consolas, monospace; }
 .graph-hud-metadata > span { padding: 5px 7px; border: 1px solid #d8e3de; border-radius: 6px; background: #f6f9f7; white-space: nowrap; }
 .graph-hud-metadata b { color: #192c3d; }
@@ -962,6 +970,7 @@ svg {
 .phase-legend .legend-color.localization { background: #b9a2ed; }
 .phase-legend .legend-color.patch { background: #f8ac84; }
 .phase-legend .legend-color.validation { background: #70d1df; }
+.phase-legend .legend-color.plan { background: #f4d06f; }
 .phase-legend .legend-color.general { background: #c4cfda; }
 .legend-line { width: 20px; height: 0; flex: 0 0 auto; border-top: 2px solid #86959a; }
 .legend-line.hierarchy { border-top: 2px dashed #2fbd79; }
@@ -992,6 +1001,8 @@ svg {
     .graph-document .graph-hud { top: 11px; left: 11px; max-width: calc(100% - 22px); padding-right: 54px; }
     .graph-hud-metadata { display: none; }
     .graph-document h1 { max-width: calc(100vw - 125px); font-size: 18px; }
+    .graph-document .graph-hud.trajectory-title-expanded { max-width: calc(100% - 22px); }
+    .trajectory-identity.expanded h1 { max-width: none; }
     .graph-document .controls { top: 65px; right: 11px; bottom: auto; }
     .graph-document .detail-sidebar.open { width: min(400px, 88vw); }
     .graph-document .phase-legend { top: 112px; right: 11px; width: calc(100% - 22px); }

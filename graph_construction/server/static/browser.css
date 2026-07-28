@@ -441,6 +441,12 @@ body {
     stroke-width: 3;
     marker-end: url(#landing-arrow-gray);
 }
+.edge-card-line.zero {
+    stroke: #7f8c8d;
+    stroke-width: 2.5;
+    stroke-dasharray: 2 6;
+    marker-end: url(#landing-arrow-gray);
+}
 .edge-card-line.thought {
     stroke: #7f8c8d;
     stroke-width: 6;
@@ -667,10 +673,12 @@ body {
 .phase-localization .phase-swatch { background: #C5B3F0; }
 .phase-patch .phase-swatch { background: #FCC9B0; }
 .phase-validation .phase-swatch { background: #A8E6F0; }
+.phase-plan .phase-swatch { background: #F4D06F; }
 .phase-general .phase-swatch { background: #CFE0F6; }
 .phase-localization { border-top: 5px solid #C5B3F0; }
 .phase-patch { border-top: 5px solid #FCC9B0; }
 .phase-validation { border-top: 5px solid #A8E6F0; }
+.phase-plan { border-top: 5px solid #F4D06F; }
 .phase-general { border-top: 5px solid #CFE0F6; }
 
 @media (max-width: 980px) {
@@ -863,6 +871,7 @@ body {
 .sk-chip.inactive { opacity: .28; }
 .sk-chip-loc { background: #b9a2ed; color: #2c2440; }
 .sk-chip-patch { background: #f8ac84; color: #4a281b; }
+.sk-chip-plan { background: #f4d06f; color: #4f4215; }
 .sk-chip-val { background: #70d1df; color: #153743; }
 .sk-stats { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 9px 20px; border-bottom: 1px solid var(--line); background: #f4f8f5; color: #5d737d; font: 700 10px var(--mono); }
 .sk-stats span { display: inline-flex; align-items: center; white-space: nowrap; }

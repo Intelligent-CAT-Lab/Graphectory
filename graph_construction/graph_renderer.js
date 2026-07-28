@@ -723,6 +723,46 @@ function toggleFullscreen() {
     }
 }
 
+function toggleTrajectoryName(forceExpanded) {
+    const identity = document.querySelector('.trajectory-identity');
+    const heading = document.getElementById('trajectoryName');
+    const button = document.getElementById('trajectoryNameToggle');
+    if (!identity || !heading || !button) return;
+
+    const expanded = typeof forceExpanded === 'boolean'
+        ? forceExpanded
+        : !identity.classList.contains('expanded');
+    identity.classList.toggle('expanded', expanded);
+    const hud = identity.closest('.graph-hud');
+    if (hud) hud.classList.toggle('trajectory-title-expanded', expanded);
+    button.textContent = expanded ? '-' : '+';
+    button.setAttribute('aria-expanded', String(expanded));
+    button.setAttribute(
+        'aria-label',
+        expanded ? 'Collapse full trajectory name' : 'Expand full trajectory name',
+    );
+    button.title = expanded ? 'Collapse full trajectory name' : 'Expand full trajectory name';
+}
+
+function prepareTrajectoryName() {
+    const identity = document.querySelector('.trajectory-identity');
+    const heading = document.getElementById('trajectoryName');
+    if (!identity || !heading) return;
+
+    const fullName = heading.dataset.fullName || heading.textContent || '';
+    const characters = Array.from(fullName);
+    const maxCharacters = 1000;
+    const displayName = characters.length > maxCharacters
+        ? `${characters.slice(0, maxCharacters).join('')}…`
+        : fullName;
+
+    heading.dataset.fullName = fullName;
+    heading.textContent = displayName;
+    heading.title = fullName;
+    identity.classList.toggle('long', characters.length > 80);
+    identity.classList.toggle('very-long', characters.length > 180);
+}
+
 // Handles Esc key, button click, and any other exit path uniformly.
 document.addEventListener('fullscreenchange', _onFullscreenChange);
 document.addEventListener('webkitfullscreenchange', _onFullscreenChange);
@@ -1263,6 +1303,7 @@ function initializeGraph() {
     }
 
     try {
+        prepareTrajectoryName();
         graphEl = document.getElementById('graph');
 
         const { g, graphWidth: gw, graphHeight: gh } = layoutGraph();

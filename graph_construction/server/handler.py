@@ -15,7 +15,7 @@ Routes
 ------
 GET  /                          → browser UI  (index.html)
 GET  /static/<file>             → static assets (browser.css, browser.js, …)
-GET  /api/graphs                → JSON list of available trajectories
+GET  /api/graphs                → incremental trajectory metadata and progress
 GET  /api/graph?id=X[&…]        → on-demand graph HTML for instance X
 GET  /api/sankey                → aggregated phase-per-step data for Sankey diagram
 GET  /api/config                → currently active trajs path and eval_report path
@@ -28,6 +28,7 @@ import logging
 import os
 import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
@@ -43,6 +44,7 @@ from server.graph_builder import (
     claude_tool_phase,
     iter_claude_steps,
     load_trajectory,
+    _claude_code_session_files,
     scan_trajectories,
 )
 from server.graph_renderer import render_graph_html
@@ -87,6 +89,11 @@ class GraphHandler(BaseHTTPRequestHandler):
     _cache_lock:   threading.RLock  = threading.RLock()
     _sankey_build_lock: threading.Lock = threading.Lock()
     _graphs_cache: Optional[list]   = None
+    _graphs_loading: bool = False
+    _graphs_progress: dict = {
+        "loaded": 0, "total": 0, "graphs": [], "error": None,
+    }
+    _graphs_generation: int = 0
     _render_cache: dict[tuple, str] = {}
     _sankey_cache: Optional[dict]   = None   # keyed on graphs_dir + eval_report_path
 
@@ -127,6 +134,7 @@ class GraphHandler(BaseHTTPRequestHandler):
                     thought_quotes   = _bool_param(params, "thought_quotes",   default=True),
                     show_observation = _bool_param(params, "show_observation", default=False),
                     unique_think     = _bool_param(params, "unique_think",     default=True),
+                    prefetch         = _bool_param(params, "prefetch",         default=False),
                 )
 
             elif path == "/api/sankey":
@@ -262,6 +270,11 @@ class GraphHandler(BaseHTTPRequestHandler):
             GraphHandler.agent_type       = agent_type
             GraphHandler.eval_report_path = str(report) if report else None
             GraphHandler._graphs_cache    = None
+            GraphHandler._graphs_generation += 1
+            GraphHandler._graphs_loading  = False
+            GraphHandler._graphs_progress  = {
+                "loaded": 0, "total": 0, "graphs": [], "error": None,
+            }
             GraphHandler._render_cache    = {}
             GraphHandler._sankey_cache    = None
 
@@ -291,17 +304,119 @@ class GraphHandler(BaseHTTPRequestHandler):
 
         self._respond_json({"path": selected or ""})
 
-    def _api_graphs(self):
-        """Return the trajectory list, using the cached copy when available."""
-        with self._cache_lock:
-            if self._graphs_cache is None:
-                logger.info("[handler] Building trajectory list (cache miss).")
-                GraphHandler._graphs_cache = scan_trajectories(
-                    self.graphs_dir, self.eval_report_path, agent_type=self.agent_type,
-                )
-            graphs = self._graphs_cache
+    @staticmethod
+    def _estimate_graph_total(trajs: Optional[Path], agent_type: str) -> int:
+        """Estimate source records without parsing every trajectory."""
+        if trajs is None:
+            return 0
+        if trajs.is_file():
+            if agent_type == "oh":
+                try:
+                    with open(trajs, encoding="utf-8", errors="replace") as stream:
+                        return sum(1 for line in stream if line.strip())
+                except OSError:
+                    return 0
+            return 1
+        if agent_type == "claude":
+            # A Claude Code dataset may contain auxiliary JSONL files beside
+            # each transcript. Count only the files the scanner will expose.
+            return len(_claude_code_session_files(trajs))
+        patterns = {
+            "codex": "*.jsonl",
+            "claude": "*.jsonl",
+            "msa": "*.traj.json",
+            "sa": "*.traj",
+        }
+        return sum(1 for _ in trajs.rglob(patterns.get(agent_type, "*.traj")))
 
-        self._respond_json(graphs)
+    def _start_graph_loading(self):
+        """Start a background trajectory scan if one is not already running."""
+        with self._cache_lock:
+            if self._graphs_cache is not None or self._graphs_loading:
+                return
+            if self.graphs_dir is None:
+                GraphHandler._graphs_cache = []
+                return
+
+            GraphHandler._graphs_loading = True
+            generation = self._graphs_generation
+            trajs = self.graphs_dir
+            report = self.eval_report_path
+            agent_type = self.agent_type
+            GraphHandler._graphs_progress = {
+                "loaded": 0,
+                "total": self._estimate_graph_total(trajs, agent_type),
+                "graphs": [],
+                "error": None,
+            }
+
+        def on_progress(loaded: int, total: int, partial: list[dict]):
+            with self._cache_lock:
+                if generation != self._graphs_generation:
+                    return
+                GraphHandler._graphs_progress = {
+                    "loaded": loaded,
+                    "total": total,
+                    "graphs": partial,
+                    "error": None,
+                }
+
+        def worker():
+            try:
+                graphs = scan_trajectories(
+                    trajs,
+                    report,
+                    agent_type=agent_type,
+                    progress_callback=on_progress,
+                    progress_batch_size=10,
+                )
+                with self._cache_lock:
+                    if generation != self._graphs_generation:
+                        return
+                    GraphHandler._graphs_cache = graphs
+                    GraphHandler._graphs_loading = False
+                    GraphHandler._graphs_progress = {
+                        "loaded": len(graphs),
+                        "total": max(
+                            self._graphs_progress.get("total", 0), len(graphs),
+                        ),
+                        "graphs": graphs,
+                        "error": None,
+                    }
+            except Exception as exc:
+                logger.exception("[handler] Failed to build trajectory list")
+                with self._cache_lock:
+                    if generation != self._graphs_generation:
+                        return
+                    GraphHandler._graphs_loading = False
+                    GraphHandler._graphs_progress = {
+                        "loaded": 0,
+                        "total": self._graphs_progress.get("total", 0),
+                        "graphs": [],
+                        "error": str(exc),
+                    }
+
+        threading.Thread(
+            target=worker,
+            name="graphectory-trajectory-loader",
+            daemon=True,
+        ).start()
+
+    def _api_graphs(self):
+        """Return cached or incremental trajectory metadata."""
+        self._start_graph_loading()
+        with self._cache_lock:
+            progress = dict(self._graphs_progress)
+            loading = self._graphs_loading
+            error = progress.get("error")
+
+        self._respond_json({
+            "status": "error" if error else ("loading" if loading else "complete"),
+            "loaded": progress.get("loaded", 0),
+            "total": progress.get("total", 0),
+            "graphs": progress.get("graphs", []),
+            "error": error,
+        })
 
     def _api_graph(
         self,
@@ -310,8 +425,13 @@ class GraphHandler(BaseHTTPRequestHandler):
         thought_quotes:   bool,
         show_observation: bool,
         unique_think:     bool,
+        prefetch:         bool = False,
     ):
-        """Build (or retrieve from cache) and serve the graph HTML for *instance_id*."""
+        """Build, cache, and serve graph HTML for *instance_id*.
+
+        Prefetch requests populate the same render cache as normal requests but
+        return an empty response because the browser only needs the cache warm.
+        """
         cache_key = (instance_id, filter_cd, thought_quotes,
                      show_observation, unique_think)
 
@@ -319,6 +439,9 @@ class GraphHandler(BaseHTTPRequestHandler):
             cached = self._render_cache.get(cache_key)
         if cached is not None:
             logger.info("[handler] Cache hit for '%s'.", instance_id)
+            if prefetch:
+                self._respond(204, "text/plain; charset=utf-8", b"")
+                return
             self._respond(200, "text/html; charset=utf-8", cached.encode())
             return
 
@@ -342,6 +465,9 @@ class GraphHandler(BaseHTTPRequestHandler):
         with self._cache_lock:
             self._render_cache[cache_key] = html
 
+        if prefetch:
+            self._respond(204, "text/plain; charset=utf-8", b"")
+            return
         self._respond(200, "text/html; charset=utf-8", html.encode())
 
     def _api_sankey(self):
@@ -362,6 +488,14 @@ class GraphHandler(BaseHTTPRequestHandler):
         per-step phase sequence, not the full node-link graph.  Results are
         cached after the first call and invalidated when the data source changes.
         """
+        self._start_graph_loading()
+        while True:
+            with self._cache_lock:
+                loading = self._graphs_loading
+            if not loading:
+                break
+            time.sleep(0.05)
+
         with self._cache_lock:
             cached = self._sankey_cache
         if cached is not None:
@@ -619,6 +753,7 @@ def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> lis
                             parsed.get("tool", ""), parsed.get("subcommand", ""),
                             parsed.get("command", ""), parsed.get("args", {}),
                             prev_phases_list, parsed.get("flags", {}),
+                            framework="claude",
                         )
                         if command_phase != "general":
                             candidate = command_phase

@@ -13,7 +13,7 @@ For OOPSLA Artifact Reviewers: Start Here → ARTIFACT_EVALUATION.md
 
 # Graphectory
 
-Graphectory transforms agent execution traces into structured graphs that capture the problem-solving patterns of AI software engineering agents. By modeling agent actions as directed graphs with phase classification (localization, patching, validation), this tool enables systematic analysis of how agents solve software engineering tasks.
+Graphectory transforms agent execution traces into structured graphs that capture the problem-solving patterns of AI software engineering agents. By modeling agent actions as directed graphs with phase classification (localization, patching, validation, and framework-specific planning), this tool enables systematic analysis of how agents solve software engineering tasks.
 
 Graphectory is very easy to adopt (please see "Supporting New Agents" and "Supporting New SWE Agent Tools" in the ReadMe). If you have any question or need help, please post on the issue tracker with a sample of your trajectory and we would be happy to assist. 
 

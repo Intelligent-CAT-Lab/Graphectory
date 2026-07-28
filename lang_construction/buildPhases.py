@@ -6,6 +6,7 @@ PHASE_ABBR = {
     'localization': 'L',
     'patch': 'P',
     'validation': 'V',
+    'plan': 'N',
 }
 
 

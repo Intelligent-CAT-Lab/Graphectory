@@ -434,8 +434,37 @@ class CommandParser:
         Extract environment variable prefix from command.
         Returns (env_part, remaining_command)
         """
-        env_pattern = re.compile(r"^((?:\w+=[^ \t\n\r\f\v]+[ \t]*)+)(.+)?")
-        match = env_pattern.match(cmd_str.strip())
+        source = cmd_str.strip()
+
+        # Use Bash's assignment nodes when available. The regex fallback below
+        # cannot tell ``tmp=$(mktemp -d)`` from an assignment followed by the
+        # stray command ``-d)``.
+        parsed = self._safe_bashlex_parse(source)
+        if parsed:
+            for root in parsed:
+                parts = getattr(root, "parts", []) or []
+                assignments = []
+                for part in parts:
+                    if getattr(part, "kind", None) == "assignment":
+                        assignments.append(part)
+                    else:
+                        break
+                if assignments:
+                    assignment_end = assignments[-1].pos[1]
+                    # Use the end of the assignment rather than the AST
+                    # command start. Bashlex does not include heredoc bodies
+                    # in the command node span, so slicing from the latter
+                    # would silently discard the body.
+                    rest_start = assignment_end
+                    return (
+                        source[:assignment_end].strip(),
+                        source[rest_start:].strip(),
+                    )
+
+        # Use a newline-tolerant remainder so an environment prefix before a
+        # heredoc does not truncate the script body.
+        env_pattern = re.compile(r"^((?:\w+=[^ \t\n\r\f\v]+[ \t]*)+)([\s\S]*)")
+        match = env_pattern.match(source)
 
         if match:
             env_part = match.group(1).strip()
@@ -451,6 +480,18 @@ class CommandParser:
         s = cmd_str.strip()
         if not s:
             return []
+
+        # Preserve environment prefixes while still parsing the command that
+        # follows them.  Heredocs are handled as a single command below, so
+        # they need this small pre-pass before the early heredoc return.
+        env_part, remaining = self._extract_env_prefix(s)
+        if env_part and remaining and self._is_simple_heredoc(remaining):
+            heredoc = self._parse_heredoc(remaining)
+            if heredoc:
+                return [
+                    {"command": "set_env", "args": [env_part]},
+                    heredoc,
+                ]
 
         # Check if this is a simple heredoc command (before complexity check)
         if self._is_simple_heredoc(s):
@@ -537,6 +578,16 @@ class CommandParser:
             "python", "python3", "bash", "sh", "zsh",
             "node", "ruby", "perl", "psql", "mysql", "sqlite3"
         }
+        short_options_with_values = {
+            "find": {"exec", "ok", "name", "iname", "path", "ipath", "type", "xtype",
+                     "regex", "iregex", "size", "atime", "mtime", "ctime", "maxdepth",
+                     "mindepth", "user", "group", "perm", "printf"},
+            "diff": {"label", "ignore-matching-lines"},
+        }
+        short_boolean_options = {
+            "find": {"print", "print0", "delete", "depth", "d", "xdev", "mount",
+                      "follow", "ignore_readdir_race", "noignore_readdir_race"},
+        }
 
         while i < len(tokens):
             token = tokens[i]
@@ -553,6 +604,19 @@ class CommandParser:
             elif token.startswith('-') and len(token) > 1:
                 # Short flag(s)
                 if len(token) > 2:
+                    option = token[1:]
+                    if option in short_options_with_values.get(command, set()):
+                        value = True
+                        if i + 1 < len(tokens):
+                            value = tokens[i + 1]
+                            i += 1
+                        flags[option] = value
+                        i += 1
+                        continue
+                    if option in short_boolean_options.get(command, set()):
+                        flags[option] = True
+                        i += 1
+                        continue
                     # Bundled short flags (e.g., -xzvf, -lc)
                     if command in interpreters_with_inline and 'c' in token[1:]:
                         # Set other bundled flags True, capture next token as code for -c
@@ -627,7 +691,7 @@ if __name__ == "__main__":
         "cd /project || python -c 'print(\"Failed to change directory\")'",
         "\ncd /workspace/django__django__4.0\necho \"SECRET_KEY = 'dummy'\" > test_settings.py\necho \"DATABASES = {'default': {'ENGINE': 'django.db.backends.dummy'}}\" >> test_settings.py\necho \"INSTALLED_APPS = []\" >> test_settings.py\n",
         "PYTHONPATH=/workspace/scikit-learn__scikit-learn__0.22",
-        "\ncd /workspace/astropy__astropy__4.3 && \nfind . -name \"*.py\" -exec grep -l \"class TimeSeries\" {} \;\n\n",
+        "\ncd /workspace/astropy__astropy__4.3 && \nfind . -name \"*.py\" -exec grep -l \"class TimeSeries\" {} \\;\n\n",
         "\ncd /workspace/psf__requests__2.0 && \n(grep -ri \"test\" README* || grep -ri \"test\" .github/workflows/* || grep -ri \"pytest\" setup.* || true) && \nfind . -name \"*test*.py\" | head -5",
         'cat << \'EOF\' > /workspace/test_hstack_fix.py\nimport sympy as sy\n\n# Test case 1: Zero-height matrices\nM1 = sy.Matrix.zeros(0, 0)\nM2 = sy.Matrix.zeros(0, 1)\nM3 = sy.Matrix.zeros(0, 2)\nM4 = sy.Matrix.zeros(0, 3)\nresult = sy.Matrix.hstack(M1, M2, M3, M4).shape\nprint(f"Zero-height hstack result: {result} (should be (0, 6))")\n\n# Test case 2: Non-zero height matrices\nM1 = sy.Matrix.zeros(1, 0)\nM2 = sy.Matrix.zeros(1, 1)\nM3 = sy.Matrix.zeros(1, 2)\nM4 = sy.Matrix.zeros(1, 3)\nresult = sy.Matrix.hstack(M1, M2, M3, M4).shape\nprint(f"Non-zero height hstack result: {result} (should be (1, 6))")\nEOF',
         "python3 - <<'PY'\ndef f(self):\n    return 1\nprop = property(f)\nprint(\"before:\", prop.__doc__)\nprop.__doc__ = \"assigned\"\nprint(\"after assign:\", prop.__doc__)\nclass C:\n    @classmethod\n    def cm(cls): \"cmm\"; return 1\nprint(\"classmethod doc before:\", C.cm.__doc__)\n# Try creating a standalone classmethod object and setting __doc__\ndef g(cls): \"gdoc\"; return 2\ncm_obj = classmethod(g)\nprint(\"cm_obj.__doc__ before:\", cm_obj.__doc__)\ncm_obj.__func__.__doc__ = \"changed_gdoc\"\nprint(\"cm_obj.__doc__ after func doc change:\", cm_obj.__doc__)\ncm_obj.__doc__ = \"assigned_cm\"\nprint(\"cm_obj.__doc__ after assign:\", cm_obj.__doc__)\nPY",

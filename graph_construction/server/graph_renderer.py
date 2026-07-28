@@ -31,6 +31,7 @@ PHASE_COLORS: dict[str, str] = {
     "localization": "#C5B3F0",
     "patch":        "#FCC9B0",
     "validation":   "#A8E6F0",
+    "plan":         "#F4D06F",
     "general":      "#CFE0F6",
 }
 
@@ -398,7 +399,7 @@ def _node_colors(data: dict) -> list[str]:
     is consistent across nodes that share the same set of phases.
     """
     phases = data.get("phases") or ["general"]
-    order  = ["localization", "patch", "validation", "general"]
+    order  = ["localization", "patch", "validation", "plan", "general"]
     seen:   set[str]  = set()
     result: list[str] = []
 

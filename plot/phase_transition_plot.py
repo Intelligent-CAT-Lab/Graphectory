@@ -151,7 +151,7 @@ def _iter_nodes(graph_json: dict):
 
 
 def _extract_phase_sequence(graph_json: dict) -> List[str]:
-    phase_abbr = {"localization": "L", "patch": "P", "validation": "V"}
+    phase_abbr = {"localization": "L", "patch": "P", "validation": "V", "plan": "N"}
     step_phase: List[Tuple[int, str]] = []
 
     for node in _iter_nodes(graph_json):

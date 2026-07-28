@@ -10,13 +10,17 @@ let activeId           = null;   // instance_id of selected graph, or null
 let sankeyActive       = false;  // true when Sankey pane is showing
 let dataSourceExpanded = true;
 let sidebarCollapsed   = false;
+let graphLoadToken     = 0;
+const prefetchingGraphKeys = new Set();
+const prefetchedGraphKeys  = new Set();
 
 /* =========================================================================
    Bootstrap
    ========================================================================= */
 async function init() {
     await loadConfig();
-    clearGraphPane();
+    // Do not overwrite a graph selected while the initial trajectory list was loading.
+    if (!activeId && !sankeyActive) clearGraphPane();
     wireSearch();
     wireToggles();
     wireEnterKey();
@@ -126,6 +130,8 @@ async function applyDataSource() {
 
         // Invalidate Sankey cache so next view triggers a fresh fetch
         skRawData = null;
+        prefetchingGraphKeys.clear();
+        prefetchedGraphKeys.clear();
 
         await loadGraphList();
 
@@ -158,27 +164,49 @@ function wireEnterKey() {
    Graph list
    ========================================================================= */
 async function loadGraphList() {
+    const token = ++graphLoadToken;
     document.getElementById('graphList').innerHTML =
         '<div class="placeholder" style="position:relative"><div class="spinner"></div></div>';
     document.getElementById('stats').textContent = 'Loading…';
+    if (!activeId) clearGraphPane();
 
     try {
-        const res = await fetch('/api/graphs');
-        allGraphs = await res.json();
-        renderStats(allGraphs);
-        const q = document.getElementById('searchInput').value.toLowerCase();
-        const visibleGraphs = q
-            ? allGraphs.filter(g => `${g.display_name || ''} ${g.instance_id}`.toLowerCase().includes(q))
-            : allGraphs;
-        renderList(visibleGraphs);
-    } catch (_) {
+        while (token === graphLoadToken) {
+            const res = await fetch('/api/graphs');
+            const payload = await res.json();
+            if (!res.ok || payload.status === 'error') {
+                throw new Error(payload.error || `HTTP ${res.status}`);
+            }
+
+            // Accept the old bare-array response as a compatibility fallback.
+            const progress = Array.isArray(payload)
+                ? { status: 'complete', loaded: payload.length, total: payload.length, graphs: payload }
+                : payload;
+            allGraphs = progress.graphs || [];
+            renderStats(allGraphs, progress);
+            const q = document.getElementById('searchInput').value.toLowerCase();
+            const visibleGraphs = q
+                ? allGraphs.filter(g => `${g.display_name || ''} ${g.instance_id}`.toLowerCase().includes(q))
+                : allGraphs;
+            renderList(visibleGraphs);
+
+            if (progress.status !== 'loading') return;
+            await new Promise(resolve => setTimeout(resolve, 250));
+        }
+    } catch (err) {
         document.getElementById('graphList').innerHTML =
-            '<div class="placeholder" style="position:relative">Failed to load graphs.</div>';
+            `<div class="placeholder" style="position:relative">Failed to load graphs: ${escHtml(err.message)}</div>`;
         document.getElementById('stats').textContent = '—';
     }
 }
 
-function renderStats(graphs) {
+function renderStats(graphs, progress = null) {
+    if (progress?.status === 'loading') {
+        const total = progress.total ? progress.total : '?';
+        document.getElementById('stats').textContent =
+            `${progress.loaded || 0} out of ${total} loaded`;
+        return;
+    }
     const total      = graphs.length;
     const resolved   = graphs.filter(g => g.status === 'resolved').length;
     const unresolved = graphs.filter(g => g.status === 'unresolved').length;
@@ -293,33 +321,41 @@ function landingGuideHtml() {
                                     <marker id="landing-arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#27ae60"></path></marker>
                                     <marker id="landing-arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#e74c3c"></path></marker>
                                 </defs>
-                                <rect class="edge-card-node loc" x="18" y="38" width="96" height="54" rx="12"></rect>
-                                <rect class="edge-card-node patch" x="206" y="38" width="96" height="54" rx="12"></rect>
-                                <path class="edge-card-line exec" d="M114 65 C142 65 174 65 206 65"></path>
-                                <text class="edge-card-text" x="66" y="60">view</text>
-                                <text class="edge-card-subtext" x="66" y="77">step 1</text>
-                                <text class="edge-card-text" x="254" y="60">edit</text>
-                                <text class="edge-card-subtext" x="254" y="77">step 2</text>
+                                <rect class="edge-card-node loc" x="18" y="45" width="96" height="42" rx="12"></rect>
+                                <rect class="edge-card-node patch" x="206" y="45" width="96" height="42" rx="12"></rect>
+                                <path class="edge-card-line exec" d="M114 66 C142 66 174 66 206 66"></path>
+                                <text class="edge-card-text" x="66" y="63">view</text>
+                                <text class="edge-card-subtext" x="66" y="78">step 1</text>
+                                <text class="edge-card-text" x="254" y="63">edit</text>
+                                <text class="edge-card-subtext" x="254" y="78">step 2</text>
                                 <text class="edge-card-label" x="160" y="52">normal order</text>
                             </svg>
                         </div>
                         <div>
                             <h3>Execution edge</h3>
-                            <p>The standard gray arrow means the agent moved from one action to the next in chronological order.</p>
+                            <p>Gray arrows show chronological execution. A dotted gray arrow means the same transition has 0 recorded thought length, so it uses a lighter dotted cue.</p>
                         </div>
                     </div>
 
                     <div class="edge-example-card">
                         <div class="edge-example-visual">
-                            <svg viewBox="0 0 320 132" role="img" aria-label="Thought length edge example">
-                                <rect class="edge-card-node general" x="18" y="38" width="96" height="54" rx="12"></rect>
-                                <rect class="edge-card-node loc" x="206" y="38" width="96" height="54" rx="12"></rect>
-                                <path class="edge-card-line thought" d="M114 65 C142 65 174 65 206 65"></path>
-                                <text class="edge-card-text" x="66" y="60">think</text>
-                                <text class="edge-card-subtext" x="66" y="77">148 chars</text>
-                                <text class="edge-card-text" x="254" y="60">grep</text>
-                                <text class="edge-card-subtext" x="254" y="77">step 4</text>
-                                <text class="edge-card-label" x="160" y="52">larger thought</text>
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Thought length edge examples, including a zero thought length dotted arrow">
+                                <rect class="edge-card-node general" x="18" y="8" width="96" height="42" rx="12"></rect>
+                                <rect class="edge-card-node loc" x="206" y="8" width="96" height="42" rx="12"></rect>
+                                <path class="edge-card-line thought" d="M114 29 C142 29 174 29 206 29"></path>
+                                <text class="edge-card-text" x="66" y="26">think</text>
+                                <text class="edge-card-subtext" x="66" y="41">148 chars</text>
+                                <text class="edge-card-text" x="254" y="26">grep</text>
+                                <text class="edge-card-subtext" x="254" y="41">step 4</text>
+                                <text class="edge-card-label" x="160" y="15">larger thought</text>
+                                <rect class="edge-card-node general" x="18" y="78" width="96" height="42" rx="12"></rect>
+                                <rect class="edge-card-node val" x="206" y="78" width="96" height="42" rx="12"></rect>
+                                <path class="edge-card-line zero" d="M114 99 C142 99 174 99 206 99"></path>
+                                <text class="edge-card-text" x="66" y="96">think</text>
+                                <text class="edge-card-subtext" x="66" y="111">0 chars</text>
+                                <text class="edge-card-text" x="254" y="96">test</text>
+                                <text class="edge-card-subtext" x="254" y="111">step 2</text>
+                                <text class="edge-card-label" x="160" y="85">0 thought length</text>
                             </svg>
                         </div>
                         <div>
@@ -525,7 +561,8 @@ function landingGuideHtml() {
                     <div class="phase-card phase-localization"><div class="phase-swatch"></div><div><h3>Localization</h3><p>Finding where the bug lives: searching, reading files, reproducing failures, and inspecting stack traces.</p><code>grep "class Pipeline"</code></div></div>
                     <div class="phase-card phase-patch"><div class="phase-swatch"></div><div><h3>Patch</h3><p>Changing the code or tests: edits, replacements, file writes, and patch-generation steps.</p><code>str_replace pipeline.py</code></div></div>
                     <div class="phase-card phase-validation"><div class="phase-swatch"></div><div><h3>Validation</h3><p>Checking whether the candidate fix works after edits, usually through tests or reproduction scripts.</p><code>pytest tests/test_pipeline.py</code></div></div>
-                    <div class="phase-card phase-general"><div class="phase-swatch"></div><div><h3>General</h3><p>Planning, submitting, housekeeping, or actions that do not cleanly belong to the repair phases.</p><code>think / submit</code></div></div>
+                    <div class="phase-card phase-plan"><div class="phase-swatch"></div><div><h3>Plan</h3><p>Explicit planning or todo actions exposed by Codex and Claude Code.</p><code>update_plan / TodoWrite</code></div></div>
+                    <div class="phase-card phase-general"><div class="phase-swatch"></div><div><h3>General</h3><p>Submitting, housekeeping, or actions that do not cleanly belong to the repair phases.</p><code>think / submit</code></div></div>
                 </div>
             </div>
         </div>`;
@@ -537,6 +574,19 @@ function clearGraphPane() {
 
 async function loadGraph(instanceId) {
     showLoading();
+    const params = graphRequestParams(instanceId);
+    try {
+        const res = await fetch(`/api/graph?${params}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        injectGraph(await res.text());
+        scheduleAdjacentPrefetch(instanceId);
+    } catch (err) {
+        const ph = document.getElementById('graphPane').querySelector('.placeholder');
+        if (ph) ph.innerHTML = `<span style="color:#e74c3c">⚠ ${escHtml(err.message)}</span>`;
+    }
+}
+
+function graphRequestParams(instanceId, prefetch = false) {
     const params = new URLSearchParams({
         id:               instanceId,
         filter_cd:        filterCd(),
@@ -544,14 +594,42 @@ async function loadGraph(instanceId) {
         show_observation: showObservation(),
         unique_think:     uniqueThink(),
     });
-    try {
-        const res = await fetch(`/api/graph?${params}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        injectGraph(await res.text());
-    } catch (err) {
-        const ph = document.getElementById('graphPane').querySelector('.placeholder');
-        if (ph) ph.innerHTML = `<span style="color:#e74c3c">⚠ ${escHtml(err.message)}</span>`;
+    if (prefetch) params.set('prefetch', 'true');
+    return params;
+}
+
+function graphCacheKey(instanceId) {
+    return graphRequestParams(instanceId).toString();
+}
+
+function scheduleAdjacentPrefetch(instanceId) {
+    const run = () => prefetchAdjacentGraphs(instanceId);
+    if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 800 });
+    } else {
+        window.setTimeout(run, 100);
     }
+}
+
+async function prefetchAdjacentGraphs(instanceId) {
+    const index = allGraphs.findIndex(graph => graph.instance_id === instanceId);
+    if (index < 0) return;
+
+    const nextGraphs = allGraphs.slice(index + 1, index + 3);
+    await Promise.all(nextGraphs.map(async graph => {
+        const key = graphCacheKey(graph.instance_id);
+        if (prefetchedGraphKeys.has(key) || prefetchingGraphKeys.has(key)) return;
+
+        prefetchingGraphKeys.add(key);
+        try {
+            const res = await fetch(`/api/graph?${graphRequestParams(graph.instance_id, true)}`);
+            if (res.ok) prefetchedGraphKeys.add(key);
+        } catch (_) {
+            // Prefetch is best effort and must never interrupt graph viewing.
+        } finally {
+            prefetchingGraphKeys.delete(key);
+        }
+    }));
 }
 
 function injectGraph(html) {
@@ -608,21 +686,24 @@ const SK_PHASE_COLOR = {
     localization: '#C5B3F0',
     patch:        '#FCC9B0',
     validation:   '#A8E6F0',
+    plan:         '#F4D06F',
 };
 const SK_PHASE_STROKE = {
     localization: '#9b7fe8',
     patch:        '#f5956a',
     validation:   '#5bbfd6',
+    plan:         '#c39b26',
 };
 const SK_PHASE_RIBBON = {
     localization: '#b89fe8',
     patch:        '#f5aa80',
     validation:   '#78d0e8',
+    plan:         '#e2bb50',
 };
-const SK_PHASE_ORDER = ['localization', 'patch', 'validation'];
+const SK_PHASE_ORDER = ['localization', 'patch', 'validation', 'plan'];
 
 let skRawData      = null;
-let skActivePhases = new Set(['localization', 'patch', 'validation']);
+let skActivePhases = new Set(['localization', 'patch', 'validation', 'plan']);
 
 function skNormalizePhaseSequence(phases) {
     const normalized = [];

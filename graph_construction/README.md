@@ -44,6 +44,10 @@ In Windows PowerShell, use `$HOME\.codex\sessions`; in Command Prompt, use `%USE
 
 Then open **http://localhost:8000** in your browser.
 
+The live server starts without downloading SWE-bench metadata. If you need
+dataset difficulty labels in locally constructed graphs, set
+`GRAPHECTORY_LOAD_SWEBENCH_DIFFICULTIES=1` before starting it.
+
 When Docker is used, expose the port when starting the container, for example:
 
 ```bash
@@ -66,7 +70,7 @@ Then run the server inside the container.
 
 ### The Browser UI
 
-The left sidebar lists every trajectory found in the provided path. Each entry shows the instance ID, a coloured status badge (resolved / unresolved / unsubmitted), and a step count. The search box filters the list in real time by instance ID substring. The collapsible **Data source** section accepts manually entered paths and, when the server runs on a local desktop, native file and folder pickers.
+The left sidebar lists every trajectory found in the provided path. Large sources are scanned in background batches of ten, so the tutorial remains visible in the main canvas while the sidebar reports progress such as `20 out of 217 loaded`. Each entry shows the instance ID, a coloured status badge (resolved / unresolved / unsubmitted), and a step count. The search box filters the list in real time by instance ID substring. The collapsible **Data source** section accepts manually entered paths and, when the server runs on a local desktop, native file and folder pickers.
 
 Clicking an entry loads its graph into the main canvas. The graph is rendered inside a sandboxed iframe; switching instances swaps the content without reloading the page. Its floating question-mark control opens the phase and edge legend.
 
@@ -90,7 +94,8 @@ Nodes are coloured by **phase**:
 | Purple | Localization | Reading files, searching code, running tests before any patch |
 | Orange | Patch | Creating or editing source files |
 | Blue | Validation | Running tests, static analysis, or formatter checks after a patch exists |
-| Light blue | General | Everything else (think steps, navigation, etc.) |
+| Gold | Plan | Explicit planning and todo actions in Codex and Claude Code |
+| Light blue | General | Everything else (think steps, submission, navigation, etc.) |
 
 A node can show two colours as a horizontal gradient when the same action was visited in multiple phases across repeated steps.
 

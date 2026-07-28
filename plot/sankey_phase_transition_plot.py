@@ -37,14 +37,15 @@ MODEL_ABBR = {
     "openrouter/anthropic/claude-sonnet-4": "CLD-4",
 }
 
-PHASE_ABBR = {"localization": "L", "patch": "P", "validation": "V"}
-PHASES = ("L", "P", "V", "T")                    # include termination
+PHASE_ABBR = {"localization": "L", "patch": "P", "validation": "V", "plan": "N"}
+PHASES = ("L", "P", "V", "N", "T")              # N = explicit plan phase
 PHASE_ORDER = {p: i for i, p in enumerate(PHASES)}
 
 PASTEL = {
     "L": (0.62, 0.52, 0.95, 0.7),   # vivid lilac / purple
     "P": (0.98, 0.78, 0.25, 0.7),   # rich amber / gold
     "V": (0.55, 0.82, 0.55, 0.7),   # saturated soft green
+    "N": (0.95, 0.75, 0.25, 0.7),   # explicit plan phase
     "T": (0.65, 0.65, 0.65, 0.7),   # darker neutral gray
 }
 

@@ -1,5 +1,7 @@
 data/SWE-agent/trajectories/
 data/OpenHands/trajectories/
+*.download
+tmp/
 __pycache__/
 *.egg-info/
 dist/

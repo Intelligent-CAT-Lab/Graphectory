@@ -12,6 +12,7 @@ import re
 import sys
 from functools import lru_cache
 from pathlib import Path
+from typing import Callable
 
 # Ensure parent directory is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -25,6 +26,7 @@ from buildGraph import (
     detect_observation_outcome,
     build_hierarchical_edges,
 )
+from mapPhase import is_plan_action
 
 # ── Test-outcome helpers ─────────────────────────────────────────────────────
 
@@ -286,6 +288,112 @@ def _claude_code_wire_files(source: Path) -> list[Path]:
     ]
 
 
+def _is_raw_claude_code_file(path: Path) -> bool:
+    """Return whether a JSONL file is a native Claude Code transcript."""
+    if not path.is_file() or path.suffix.lower() != ".jsonl":
+        return False
+    saw_assistant = False
+    saw_tool_block = False
+    try:
+        for index, record in enumerate(_read_jsonl(path)):
+            record_type = record.get("type")
+            message = record.get("message")
+            if not isinstance(message, dict):
+                continue
+            if record_type == "assistant" and message.get("role") == "assistant":
+                saw_assistant = True
+            content = message.get("content")
+            if isinstance(content, list):
+                if any(
+                    isinstance(block, dict)
+                    and block.get("type") in {"tool_use", "tool_result"}
+                    for block in content
+                ):
+                    saw_tool_block = True
+            if saw_assistant and saw_tool_block:
+                return True
+            if index >= 80:
+                break
+    except OSError:
+        return False
+    return False
+
+
+def _claude_code_session_files(source: Path) -> list[Path]:
+    """Find both converted and native Claude Code session files."""
+    if source.is_file():
+        if _is_claude_code_wire_file(source) or _is_raw_claude_code_file(source):
+            return [source]
+        return []
+
+    paths = set(_claude_code_wire_files(source))
+    paths.update(
+        path for path in source.rglob("*.jsonl")
+        if _is_raw_claude_code_file(path)
+    )
+    return sorted(paths)
+
+
+def _raw_claude_metadata(path: Path) -> dict:
+    """Extract lightweight metadata from a native Claude Code transcript."""
+    # Native Claude Code exports commonly use a generic filename such as
+    # ``transcript.jsonl``. Prefer the session identifier embedded in the
+    # records so datasets containing many such files do not collapse into one
+    # repeated navigation entry.
+    instance_id = ""
+    title = ""
+    model = ""
+    cwd = ""
+    step_count = 0
+
+    for record in _read_jsonl(path):
+        if not cwd:
+            cwd = str(record.get("cwd") or "")
+        if not instance_id:
+            instance_id = str(
+                record.get("session_id")
+                or record.get("sessionId")
+                or ""
+            ).strip()
+        record_type = record.get("type")
+        message = record.get("message")
+        if not isinstance(message, dict):
+            continue
+        if not model and record_type == "assistant":
+            model = str(message.get("model") or "")
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        tool_blocks = [
+            block for block in content
+            if isinstance(block, dict) and block.get("type") == "tool_use"
+        ]
+        if record_type == "assistant" and tool_blocks:
+            step_count += 1
+        if record_type == "user" and not title:
+            text = "\n".join(
+                str(block.get("text") or "").strip()
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ).strip()
+            if text:
+                title = re.sub(r"\s+", " ", text)
+
+    if not instance_id:
+        instance_id = path.stem
+
+    if len(title) > 96:
+        title = f"{title[:93].rstrip()}..."
+    return {
+        "instance_id": instance_id,
+        "display_name": title or instance_id,
+        "model": model,
+        "cwd": cwd,
+        "step_count": step_count,
+        "source_path": str(path),
+    }
+
+
 def _is_claude_code_wire_file(path: Path) -> bool:
     """Return whether *path* is a compatible stream declared as Claude Code."""
     return (
@@ -305,7 +413,7 @@ def detect_agent_type(source: Path) -> str:
             return "oh"
         return "sa"
 
-    if _claude_code_wire_files(source):
+    if _claude_code_session_files(source):
         return "claude"
     for jsonl_path in source.rglob("*.jsonl"):
         if _is_codex_rollout_file(jsonl_path):
@@ -319,7 +427,9 @@ def detect_agent_type(source: Path) -> str:
 
 def scan_trajectories(graphs_dir: Path,
                       eval_report_path: str | None = None,
-                      agent_type: str = "sa") -> list[dict]:
+                      agent_type: str = "sa",
+                      progress_callback: Callable[[int, int, list[dict]], None] | None = None,
+                      progress_batch_size: int = 10) -> list[dict]:
     """Return a sorted list of trajectory metadata dicts.
 
     Each dict has: instance_id, status, difficulty, step_count.
@@ -330,6 +440,9 @@ def scan_trajectories(graphs_dir: Path,
     For Claude Code (agent_type='claude'), graphs_dir contains session wire.jsonl
     files that declare ``custom.sourceFramework: "Claude Code"`` in state.json.
     For Codex (agent_type='codex'), graphs_dir contains rollout JSONL files.
+
+    When ``progress_callback`` is provided, it receives ``(processed, total,
+    partial_results)`` after each batch.
     """
     resolved_set:   set[str] = set()
     unresolved_set: set[str] = set()
@@ -343,12 +456,27 @@ def scan_trajectories(graphs_dir: Path,
             pass
 
     results = []
+    processed = 0
+    batch_size = max(1, int(progress_batch_size or 1))
+
+    def mark_processed(total: int):
+        nonlocal processed
+        processed += 1
+        if progress_callback and processed % batch_size == 0:
+            progress_callback(processed, total, list(results))
+
+    def finish_progress(total: int):
+        if progress_callback:
+            progress_callback(processed, total, list(results))
 
     if agent_type == "codex":
-        for rollout_path in _codex_rollout_files(graphs_dir):
+        rollout_paths = _codex_rollout_files(graphs_dir)
+        total = len(rollout_paths)
+        for rollout_path in rollout_paths:
             try:
                 metadata = _codex_rollout_metadata(rollout_path)
             except OSError:
+                mark_processed(total)
                 continue
             instance_id = metadata["instance_id"]
             if instance_id in resolved_set:
@@ -367,27 +495,37 @@ def scan_trajectories(graphs_dir: Path,
                 "step_count": metadata["step_count"],
                 "model": metadata["model"],
             })
+            mark_processed(total)
 
         results.sort(key=lambda item: (item["display_name"].lower(), item["instance_id"]))
+        finish_progress(total)
         return results
 
     if agent_type == "claude":
-        for wire_path in _claude_code_wire_files(graphs_dir):
-            session_dir = _wire_session_dir(wire_path)
-            instance_id = session_dir.name or wire_path.stem
-            state = _load_wire_state(wire_path)
-            custom = state.get("custom")
-            model = str(custom.get("model") or "") if isinstance(custom, dict) else ""
-            title = str(state.get("title") or "").strip()
-            step_count = 0
+        session_paths = _claude_code_session_files(graphs_dir)
+        total = len(session_paths)
+        for session_path in session_paths:
             try:
-                for record in _read_jsonl(wire_path):
-                    if record.get("type") != "context.append_loop_event":
-                        continue
-                    event = record.get("event") or {}
-                    if event.get("type") == "step.begin":
-                        step_count += 1
+                if _is_claude_code_wire_file(session_path):
+                    session_dir = _wire_session_dir(session_path)
+                    instance_id = session_dir.name or session_path.stem
+                    state = _load_wire_state(session_path)
+                    custom = state.get("custom")
+                    model = str(custom.get("model") or "") if isinstance(custom, dict) else ""
+                    title = str(state.get("title") or "").strip()
+                    step_count = sum(
+                        1 for record in _read_jsonl(session_path)
+                        if record.get("type") == "context.append_loop_event"
+                        and (record.get("event") or {}).get("type") == "step.begin"
+                    )
+                else:
+                    metadata = _raw_claude_metadata(session_path)
+                    instance_id = metadata["instance_id"]
+                    model = metadata["model"]
+                    title = metadata["display_name"]
+                    step_count = metadata["step_count"]
             except OSError:
+                mark_processed(total)
                 continue
 
             results.append({
@@ -398,15 +536,20 @@ def scan_trajectories(graphs_dir: Path,
                 "step_count": step_count,
                 "model": model,
             })
+            mark_processed(total)
 
         results.sort(key=lambda item: (item["display_name"].lower(), item["instance_id"]))
+        finish_progress(total)
         return results
 
     if agent_type == "oh":
         # OpenHands: graphs_dir is actually the output.jsonl file
         jsonl_path = graphs_dir
         if not jsonl_path.is_file():
+            finish_progress(0)
             return results
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
+            total = sum(1 for line in f if line.strip())
         with open(jsonl_path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
@@ -415,9 +558,11 @@ def scan_trajectories(graphs_dir: Path,
                 try:
                     entry = json.loads(line)
                 except json.JSONDecodeError:
+                    mark_processed(total)
                     continue
                 instance_id = entry.get("instance_id")
                 if not instance_id:
+                    mark_processed(total)
                     continue
 
                 if instance_id in resolved_set:
@@ -441,14 +586,18 @@ def scan_trajectories(graphs_dir: Path,
                     "difficulty":  "unknown",
                     "step_count":  step_count,
                 })
+                mark_processed(total)
 
         results.sort(key=lambda x: x["instance_id"])
+        finish_progress(total)
         return results
 
     if agent_type == "msa":
         # mini-swe-agent: directory tree of .traj.json files
         # Each instance lives at: graphs_dir/{instance_id}/{instance_id}.traj.json
-        for traj_file in sorted(graphs_dir.rglob("*.traj.json")):
+        traj_files = sorted(graphs_dir.rglob("*.traj.json"))
+        total = len(traj_files)
+        for traj_file in traj_files:
             instance_id = traj_file.name[: -len(".traj.json")]
 
             if instance_id in resolved_set:
@@ -487,12 +636,16 @@ def scan_trajectories(graphs_dir: Path,
                 "difficulty":  "unknown",
                 "step_count":  step_count,
             })
+            mark_processed(total)
 
         results.sort(key=lambda x: x["instance_id"])
+        finish_progress(total)
         return results
 
     # SWE-agent: directory tree of .traj files
-    for traj_file in sorted(graphs_dir.rglob("*.traj")):
+    traj_files = sorted(graphs_dir.rglob("*.traj"))
+    total = len(traj_files)
+    for traj_file in traj_files:
         instance_id = traj_file.stem
 
         if instance_id in resolved_set:
@@ -538,7 +691,9 @@ def scan_trajectories(graphs_dir: Path,
             "difficulty":  difficulty,
             "step_count":  step_count,
         })
+        mark_processed(total)
 
+    finish_progress(total)
     return results
 
 
@@ -572,15 +727,32 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
         )
 
     if agent_type == "claude":
-        for wire_path in _claude_code_wire_files(graphs_dir):
-            session_dir = _wire_session_dir(wire_path)
-            if (session_dir.name or wire_path.stem) != instance_id:
+        for session_path in _claude_code_session_files(graphs_dir):
+            if _is_claude_code_wire_file(session_path):
+                session_dir = _wire_session_dir(session_path)
+                if (session_dir.name or session_path.stem) != instance_id:
+                    continue
+                return {
+                    "trajectory_format": CLAUDE_CODE_TRAJECTORY_FORMAT,
+                    "wire_path": str(session_path),
+                    "state": _load_wire_state(session_path),
+                    "records": list(_read_jsonl(session_path)),
+                }
+
+            metadata = _raw_claude_metadata(session_path)
+            if metadata["instance_id"] != instance_id:
                 continue
             return {
                 "trajectory_format": CLAUDE_CODE_TRAJECTORY_FORMAT,
-                "wire_path": str(wire_path),
-                "state": _load_wire_state(wire_path),
-                "records": list(_read_jsonl(wire_path)),
+                "source_path": str(session_path),
+                "state": {
+                    "title": metadata["display_name"],
+                    "custom": {
+                        "sourceFramework": "Claude Code",
+                        "model": metadata["model"],
+                    },
+                },
+                "records": list(_read_jsonl(session_path)),
             }
         raise FileNotFoundError(
             f"No Claude Code session '{instance_id}' found under {graphs_dir}"
@@ -1063,6 +1235,7 @@ def _build_graph_oh(traj_data: dict, instance_id: str,
 
 _CODEX_SHELL_TOOLS = {
     "shell_command", "exec_command", "local_shell", "local_shell_call",
+    "powershell", "run_shell_command", "bash", "mcp__environment__bash",
 }
 _CODEX_PATCH_TOOLS = {"apply_patch", "patch"}
 _CODEX_READ_TOOL_HINTS = (
@@ -1070,13 +1243,18 @@ _CODEX_READ_TOOL_HINTS = (
 )
 _CODEX_EDIT_TOOL_HINTS = ("write", "edit", "create", "replace", "patch")
 _CODEX_POST_PATCH_VALIDATION_COMMANDS = {
-    "curl", "sleep", "pgrep", "pidof", "ps", "lsof", "ss", "netstat",
+    "date", "curl", "sleep", "pgrep", "pidof", "ps", "lsof", "ss", "netstat",
     "nc", "ncat", "telnet", "uvicorn", "gunicorn", "node", "deno", "bun",
-    "java", "pkill", "kill", "killall", "wait", "timeout",
+    "java", "pkill", "kill", "killall", "wait", "timeout", "npm", "printf",
+    "chmod", "pwd", "which", "wc", "file", "du", "free", "df", "env",
+    "nvidia-smi", "tmux", "write_stdin", "command", "bash",
+    "diff", "playwright",
 }
 _CODEX_SHELL_EDIT_COMMANDS = {
     "mkdir", "rmdir", "cp", "mv", "rm", "ln", "install", "truncate",
 }
+
+
 _CODEX_JS_COMMAND_RE = re.compile(
     r"\bcommand\s*:\s*(?:"
     r'"(?P<double>(?:\\.|[^"\\])*)"|'
@@ -1190,6 +1368,7 @@ def iter_codex_steps(traj_data: dict) -> list[dict]:
     calls_by_id: dict[str, tuple[dict, dict]] = {}
     pending_context: list[str] = []
     current_step: dict | None = None
+    final_answer_texts: set[str] = set()
 
     def start_step() -> dict:
         nonlocal current_step, pending_context
@@ -1201,6 +1380,26 @@ def iter_codex_steps(traj_data: dict) -> list[dict]:
         pending_context = []
         ordered_steps.append(current_step)
         return current_step
+
+    def append_final_answer(message_text: str) -> None:
+        """Add one visible final-answer action, even if two log records mirror it."""
+        nonlocal current_step
+        message_text = message_text.strip()
+        if not message_text or message_text in final_answer_texts:
+            return
+        final_answer_texts.add(message_text)
+        step = start_step()
+        step["calls"].append({
+            "id": f"final-{len(ordered_steps)}",
+            "name": "final_answer",
+            "args": {"text": message_text},
+            "raw_input": message_text,
+            "observation": "",
+            "is_error": None,
+            "exit_code": None,
+            "item_type": "message",
+        })
+        current_step = None
 
     for record in traj_data.get("records", []):
         record_type = record.get("type")
@@ -1221,19 +1420,7 @@ def iter_codex_steps(traj_data: dict) -> list[dict]:
             if not message_text:
                 continue
             if payload.get("phase") == "final_answer":
-                step = start_step()
-                call = {
-                    "id": f"final-{len(ordered_steps)}",
-                    "name": "final_answer",
-                    "args": {"text": message_text},
-                    "raw_input": message_text,
-                    "observation": "",
-                    "is_error": None,
-                    "exit_code": None,
-                    "item_type": "message",
-                }
-                step["calls"].append(call)
-                current_step = None
+                append_final_answer(message_text)
             else:
                 pending_context.append(message_text)
             continue
@@ -1256,6 +1443,16 @@ def iter_codex_steps(traj_data: dict) -> list[dict]:
             continue
 
         if record_type != "event_msg":
+            continue
+
+        # Some Codex versions persist the final response only as an event_msg;
+        # newer versions commonly mirror it as a response_item message too.
+        if payload.get("phase") == "final_answer":
+            message_text = _codex_content_text(
+                payload.get("message") or payload.get("content")
+            )
+            if message_text:
+                append_final_answer(message_text)
             continue
 
         call_id = str(payload.get("call_id") or payload.get("callId") or "")
@@ -1454,11 +1651,19 @@ def _codex_parse_shell_commands(command_text: str, cmd_parser) -> list[dict]:
 def codex_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str:
     """Map non-shell Codex tools onto the Graphectory phase taxonomy."""
     name = (tool_name or "").lower()
+    if is_plan_action(tool_name, args=args):
+        return "plan"
     if name in _CODEX_PATCH_TOOLS or any(hint in name for hint in _CODEX_EDIT_TOOL_HINTS):
         return "patch"
     if name == "web_search" or any(hint in name for hint in _CODEX_READ_TOOL_HINTS):
         return "localization"
-    return "general"
+    try:
+        from mapPhase import get_phase
+        return get_phase(
+            "", "", name, args or {}, prev_phases, {}, framework="codex",
+        )
+    except ImportError:
+        return "general"
 
 
 def codex_shell_phase(parsed: dict, prev_phases: list[str]) -> str:
@@ -1483,6 +1688,12 @@ def codex_shell_phase(parsed: dict, prev_phases: list[str]) -> str:
     full_text = f"{command} {flag_text} {arg_text}".lower()
     has_patch = "patch" in prev_phases
 
+    if is_plan_action(
+        parsed.get("tool", ""), parsed.get("subcommand", ""),
+        parsed.get("command", ""), parsed.get("args", {}),
+    ):
+        return "plan"
+
     # Codex often invokes apply_patch through exec_command. Treat that shell
     # wrapper as an edit before the generic command mapper can label it general.
     if command == "apply_patch":
@@ -1496,10 +1707,11 @@ def codex_shell_phase(parsed: dict, prev_phases: list[str]) -> str:
     ):
         return "patch"
 
-    # Runtime probes often redirect logs or suppress errors. Once source has
-    # been edited, those redirects support validation rather than file editing.
+    # Runtime probes and environment-inspection commands are localization
+    # before a patch and validation after one. A file-mutating node command was
+    # handled above and remains a patch action.
     if command in _CODEX_POST_PATCH_VALIDATION_COMMANDS:
-        return "validation" if has_patch else "general"
+        return "validation" if has_patch else "localization"
 
     try:
         from mapPhase import get_phase
@@ -1701,8 +1913,19 @@ def _build_graph_codex(traj_data: dict, instance_id: str,
             if outcome and isinstance(args, dict):
                 args.setdefault("command_outcome", outcome)
 
+            # Final responses are semantically one action type. Keep their
+            # complete text in step_data, but do not let different summaries
+            # create separate graph nodes.
+            signature_args = args
+            is_final_answer = (
+                entry["native_tool"].strip().lower().replace(" ", "_")
+                == "final_answer"
+            )
+            if is_final_answer:
+                signature_args = {}
+
             node_key = builder.add_or_update_node(
-                node_label=node_label, args=args, flags=flags, phase=phase,
+                node_label=node_label, args=signature_args, flags=flags, phase=phase,
                 step_idx=step_idx, tool=tool, command=command,
                 subcommand=subcommand, thought_length=thought_len_raw,
                 has_cd=entry["has_cd"],
@@ -1775,8 +1998,73 @@ def _claude_output_text(value) -> str:
         return str(value)
 
 
+def _iter_raw_claude_steps(records: list[dict]) -> list[dict]:
+    """Convert native Claude Code assistant/tool records into graph steps."""
+    ordered_steps: list[dict] = []
+    calls_by_id: dict[str, dict] = {}
+
+    for record in records:
+        record_type = record.get("type")
+        message = record.get("message")
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+
+        if record_type == "assistant" and message.get("role") == "assistant":
+            thought = "\n".join(
+                str(block.get("text") or "").strip()
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ).strip()
+            calls = []
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                args = block.get("input")
+                if not isinstance(args, dict):
+                    args = {"_raw": args} if args is not None else {}
+                call = {
+                    "id": str(block.get("id") or ""),
+                    "name": str(block.get("name") or "tool"),
+                    "args": args,
+                    "description": "",
+                    "observation": "",
+                    "is_error": None,
+                }
+                calls.append(call)
+                if call["id"]:
+                    calls_by_id[call["id"]] = call
+            if calls:
+                ordered_steps.append({
+                    "source_step": record.get("uuid"),
+                    "uuid": str(record.get("uuid") or len(ordered_steps)),
+                    "thought": thought,
+                    "calls": calls,
+                })
+            continue
+
+        if record_type == "user" and message.get("role") == "user":
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                call = calls_by_id.get(str(block.get("tool_use_id") or ""))
+                if call is None:
+                    continue
+                call["observation"] = _claude_output_text(block.get("content"))
+                if isinstance(block.get("is_error"), bool):
+                    call["is_error"] = block["is_error"]
+
+    return ordered_steps
+
+
 def iter_claude_steps(traj_data: dict) -> list[dict]:
     """Fold Claude Code wire records into ordered model steps and tool calls."""
+
+    records = traj_data.get("records", [])
+    if any(record.get("type") in {"assistant", "user"} for record in records):
+        return _iter_raw_claude_steps(records)
 
     ordered_steps: list[dict] = []
     steps_by_uuid: dict[str, dict] = {}
@@ -1863,6 +2151,8 @@ def claude_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str
 
     name = (tool_name or "").lower()
     phase_args = dict(args or {})
+    if is_plan_action(tool_name, args=phase_args):
+        return "plan"
     for key in ("path", "file", "file_path", "filename"):
         value = phase_args.get(key)
         if isinstance(value, str) and value and not value.startswith(("/", "./", "../", "~")):
@@ -1871,16 +2161,33 @@ def claude_tool_phase(tool_name: str, args: dict, prev_phases: list[str]) -> str
             # classify the same way as absolute /tests/... paths.
             phase_args[key] = f"./{value}"
     if name in {"read", "readfile", "readmediafile"}:
-        return get_phase("str_replace_editor", "view", "", phase_args, prev_phases, {})
+        return get_phase(
+            "str_replace_editor", "view", "", phase_args,
+            prev_phases, {}, framework="claude",
+        )
     if name in {"write", "writefile"}:
-        return get_phase("str_replace_editor", "create", "", phase_args, prev_phases, {})
+        return get_phase(
+            "str_replace_editor", "create", "", phase_args,
+            prev_phases, {}, framework="claude",
+        )
     if name in {"edit", "strreplace", "str_replace"}:
-        return get_phase("str_replace_editor", "str_replace", "", phase_args, prev_phases, {})
+        return get_phase(
+            "str_replace_editor", "str_replace", "", phase_args,
+            prev_phases, {}, framework="claude",
+        )
     if name == "grep":
-        return get_phase("", "", "grep", phase_args, prev_phases, {})
+        return get_phase(
+            "", "", "grep", phase_args,
+            prev_phases, {}, framework="claude",
+        )
     if name == "glob":
-        return get_phase("", "", "find", phase_args, prev_phases, {})
-    return "general"
+        return get_phase(
+            "", "", "find", phase_args,
+            prev_phases, {}, framework="claude",
+        )
+    return get_phase(
+        "", "", name, phase_args, prev_phases, {}, framework="claude",
+    )
 
 
 def _build_graph_claude(traj_data: dict, instance_id: str,
@@ -1915,8 +2222,17 @@ def _build_graph_claude(traj_data: dict, instance_id: str,
             observation = str(call.get("observation") or "")
             is_error = call.get("is_error")
 
-            if tool_name.lower() in {"bash", "shell", "execute_bash"}:
-                command_text = str(args.get("command") or "").strip()
+            if tool_name.lower() in {
+                "bash", "shell", "execute_bash", "exec", "exec_command",
+                "powershell", "run_shell_command", "mcp__environment__bash",
+            }:
+                command_text = str(
+                    args.get("command")
+                    or args.get("cmd")
+                    or args.get("script")
+                    or args.get("input")
+                    or ""
+                ).strip()
                 action_parts.append(command_text or tool_name)
                 parsed_commands = cmd_parser.parse(command_text) if command_text else []
                 if not parsed_commands:
@@ -2017,7 +2333,8 @@ def _build_graph_claude(traj_data: dict, instance_id: str,
                 phase = claude_tool_phase(entry["native_tool"], args, prev_phases_list)
             else:
                 phase = entry["phase"] or get_phase(
-                    tool, subcommand, command, args, prev_phases_list, flags,
+                    tool, subcommand, command, args,
+                    prev_phases_list, flags, framework="claude",
                 )
             node_label = f"{tool}: {subcommand}" if tool and subcommand else (tool or command or entry["native_tool"])
 
