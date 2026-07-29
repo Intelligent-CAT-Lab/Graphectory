@@ -350,6 +350,77 @@ body {
     max-width: 760px;
 }
 
+.large-graph-guide {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 18px;
+    border: 1px solid rgba(10, 129, 123, .22);
+    border-radius: 18px;
+    background: linear-gradient(115deg, rgba(231, 247, 242, .92), rgba(255, 255, 255, .9));
+    box-shadow: 0 12px 28px rgba(42, 51, 82, .08);
+}
+.large-graph-guide-mark {
+    display: grid;
+    width: 54px;
+    height: 54px;
+    place-items: center;
+    border: 2px solid #0a817b;
+    border-radius: 15px;
+    background: #d8f0e9;
+}
+.dropdown-icon {
+    position: relative;
+    display: grid;
+    gap: 4px;
+    width: 28px;
+    padding-bottom: 7px;
+}
+.dropdown-icon i {
+    display: block;
+    height: 3px;
+    border-radius: 999px;
+    background: #075e5a;
+}
+.dropdown-icon i:nth-child(2) { width: 22px; }
+.dropdown-icon i:nth-child(3) { width: 16px; }
+.dropdown-icon b {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 8px;
+    height: 8px;
+    border-right: 3px solid #0a817b;
+    border-bottom: 3px solid #0a817b;
+    transform: rotate(45deg);
+}
+.large-graph-guide h3 {
+    margin-bottom: 5px;
+    color: #1f3e4b;
+    font-size: 15px;
+}
+.large-graph-guide p {
+    color: #5c7078;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.large-graph-guide-flow {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: #54717b;
+    font: 800 9px/1 var(--mono);
+    white-space: nowrap;
+}
+.large-graph-guide-flow span {
+    padding: 7px 8px;
+    border: 1px solid #b9d9cf;
+    border-radius: 7px;
+    background: rgba(255,255,255,.75);
+}
+.large-graph-guide-flow b { color: #0a817b; font-size: 10px; }
+
 .eyebrow {
     color: #667eea;
     font-size: 12px;
@@ -628,6 +699,11 @@ body {
     stroke-width: 3;
     filter: drop-shadow(0 5px 7px rgba(44, 62, 80, .12));
 }
+.cat-ear-card {
+    fill: #8e44ad;
+    stroke: #2c3e50;
+    stroke-width: 1.2;
+}
 
 .phase-card-grid {
     display: grid;
@@ -694,6 +770,13 @@ body {
 }
 
 @media (max-width: 640px) {
+    .large-graph-guide {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+    .large-graph-guide-flow {
+        grid-column: 1 / -1;
+        flex-wrap: wrap;
+    }
     .edge-example-gallery { grid-template-columns: 1fr; }
     .edge-example-wide { grid-column: span 1; }
     .thought-continuation-visual,
@@ -825,8 +908,17 @@ body {
 .ds-apply-btn:hover:not(:disabled) { background: var(--teal-deep); }
 
 .library-controls { display: grid; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.library-search-row { display: flex; align-items: center; gap: 6px; }
+.library-search-row .search-input { min-width: 0; flex: 1; }
 .search-input { border-color: #c5d4ce; border-radius: 9px; background: #fff; color: var(--ink); font-family: var(--ui); }
 .search-input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(10, 129, 123, .1); }
+.sort-menu { position: relative; flex: 0 0 auto; }
+.sort-icon-btn { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #c5d4ce; border-radius: 7px; background: #fff; color: var(--teal-deep); cursor: pointer; font: 800 17px/1 var(--ui); list-style: none; }
+.sort-icon-btn::-webkit-details-marker { display: none; }
+.sort-icon-btn:hover, .sort-menu[open] .sort-icon-btn { border-color: var(--teal); background: #e7f4f0; }
+.sort-menu-popover { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; display: grid; min-width: 126px; padding: 4px; border: 1px solid #c5d4ce; border-radius: 8px; background: #fff; box-shadow: 0 8px 22px rgba(34, 59, 65, .16); }
+.sort-menu-option { border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; font: 600 11px/1.2 var(--ui); padding: 7px 9px; text-align: left; }
+.sort-menu-option:hover, .sort-menu-option.selected { background: #e7f4f0; color: var(--teal-deep); }
 .view-options { border: 1px solid #d6e2dc; border-radius: 9px; background: #f7faf8; }
 .view-options summary { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; color: var(--ink); cursor: pointer; font-family: var(--mono); font-size: 10px; font-weight: 800; letter-spacing: .04em; list-style: none; text-transform: uppercase; }
 .view-options summary::-webkit-details-marker { display: none; }

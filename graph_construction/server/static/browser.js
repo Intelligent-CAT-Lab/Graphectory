@@ -6,12 +6,17 @@
    Shared state
    ========================================================================= */
 let allGraphs          = [];
+let trajectorySortMode = 'load';
 let activeId           = null;   // instance_id of selected graph, or null
 let sankeyActive       = false;  // true when Sankey pane is showing
 let dataSourceExpanded = true;
 let sidebarCollapsed   = false;
 let graphLoadToken     = 0;
 let graphRequestToken  = 0;
+let graphFrameToken    = 0;
+let graphFrameTimer    = null;
+let activeGraphAbortController = null;
+const GRAPH_RENDER_TIMEOUT_MS = 5 * 60 * 1000;
 const prefetchingGraphKeys = new Set();
 const prefetchedGraphKeys  = new Set();
 
@@ -23,6 +28,7 @@ async function init() {
     // Do not overwrite a graph selected while the initial trajectory list was loading.
     if (!activeId && !sankeyActive) clearGraphPane();
     wireSearch();
+    wireTrajectorySort();
     wireToggles();
     wireEnterKey();
     skWireControls();
@@ -186,11 +192,7 @@ async function loadGraphList() {
                 : payload;
             allGraphs = progress.graphs || [];
             renderStats(allGraphs, progress);
-            const q = document.getElementById('searchInput').value.toLowerCase();
-            const visibleGraphs = q
-                ? allGraphs.filter(g => `${g.display_name || ''} ${g.instance_id}`.toLowerCase().includes(q))
-                : allGraphs;
-            renderList(visibleGraphs);
+            renderFilteredGraphList();
 
             if (progress.status !== 'loading') return;
             await new Promise(resolve => setTimeout(resolve, 250));
@@ -248,25 +250,85 @@ function renderList(graphs) {
 /* =========================================================================
    Search
    ========================================================================= */
-function wireSearch() {
-    document.getElementById('searchInput').addEventListener('input', e => {
-        const q = e.target.value.toLowerCase();
-        renderList(allGraphs.filter(g => `${g.display_name || ''} ${g.instance_id}`.toLowerCase().includes(q)));
+function sortGraphs(graphs) {
+    if (trajectorySortMode === 'load') return graphs;
+    return [...graphs].sort((left, right) => {
+        if (trajectorySortMode === 'steps-asc' || trajectorySortMode === 'steps-desc') {
+            const leftSteps = Number(left.step_count);
+            const rightSteps = Number(right.step_count);
+            const leftMissing = left.step_count == null || !Number.isFinite(leftSteps);
+            const rightMissing = right.step_count == null || !Number.isFinite(rightSteps);
+            if (leftMissing !== rightMissing) return leftMissing ? 1 : -1;
+            if (!leftMissing && leftSteps !== rightSteps) {
+                return trajectorySortMode === 'steps-asc'
+                    ? leftSteps - rightSteps
+                    : rightSteps - leftSteps;
+            }
+        }
+        const leftName = `${left.display_name || left.instance_id || ''}`.toLowerCase();
+        const rightName = `${right.display_name || right.instance_id || ''}`.toLowerCase();
+        return leftName.localeCompare(rightName)
+            || `${left.instance_id || ''}`.localeCompare(`${right.instance_id || ''}`);
     });
+}
+
+function renderFilteredGraphList() {
+    const query = document.getElementById('searchInput').value.trim().toLowerCase();
+    const filteredGraphs = query
+        ? allGraphs.filter(g => `${g.display_name || ''} ${g.instance_id}`.toLowerCase().includes(query))
+        : allGraphs;
+    renderList(sortGraphs(filteredGraphs));
+}
+
+function wireSearch() {
+    document.getElementById('searchInput').addEventListener('input', renderFilteredGraphList);
+}
+
+function setTrajectorySort(mode) {
+    const allowedModes = new Set(['load', 'alpha', 'steps-asc', 'steps-desc']);
+    trajectorySortMode = allowedModes.has(mode) ? mode : 'load';
+    const sortLabels = {
+        load: 'load order',
+        alpha: 'alphabetical order',
+        'steps-asc': 'step count, ascending',
+        'steps-desc': 'step count, descending',
+    };
+    document.querySelectorAll('[data-sort-mode]').forEach(button => {
+        const selected = button.dataset.sortMode === trajectorySortMode;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-checked', String(selected));
+    });
+    const summary = document.querySelector('#trajectorySortMenu > summary');
+    if (summary) {
+        const label = `Sort trajectories: ${sortLabels[trajectorySortMode]}`;
+        summary.title = label;
+        summary.setAttribute('aria-label', label);
+    }
+    const menu = document.getElementById('trajectorySortMenu');
+    if (menu) menu.open = false;
+    renderFilteredGraphList();
+}
+
+function wireTrajectorySort() {
+    const options = document.querySelectorAll('[data-sort-mode]');
+    options.forEach(option => {
+        option.addEventListener('click', () => setTrajectorySort(option.dataset.sortMode));
+    });
+    setTrajectorySort(trajectorySortMode);
 }
 
 /* =========================================================================
    Graph view toggles
    ========================================================================= */
 function wireToggles() {
-    ['filterCdToggle', 'thoughtQuotesToggle', 'observationToggle', 'uniqueThinkToggle'].forEach(id => {
+    ['filterRepeatedToggle', 'thoughtQuotesToggle', 'observationToggle', 'uniqueThinkToggle'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => {
             if (activeId) loadGraph(activeId);
         });
     });
 }
 
-const filterCd        = () => document.getElementById('filterCdToggle').checked;
+const filterRepeated  = () => document.getElementById('filterRepeatedToggle').checked;
 const thoughtQuotes   = () => document.getElementById('thoughtQuotesToggle').checked;
 const showObservation = () => document.getElementById('observationToggle').checked;
 const uniqueThink     = () => document.getElementById('uniqueThinkToggle').checked;
@@ -494,26 +556,27 @@ function landingGuideHtml() {
 
                     <div class="edge-example-card">
                         <div class="edge-example-visual">
-                            <svg viewBox="0 0 320 132" role="img" aria-label="Filter cd nodes example">
+                            <svg viewBox="0 0 320 132" role="img" aria-label="Repeated command filter example">
                                 <line class="split-divider" x1="160" y1="18" x2="160" y2="114"></line>
                                 <text class="edge-card-label" x="80" y="24">before</text>
                                 <text class="edge-card-label" x="240" y="24">after</text>
                                 <rect class="edge-card-node general" x="18" y="46" width="54" height="42" rx="11"></rect>
                                 <rect class="edge-card-node val" x="96" y="46" width="54" height="42" rx="11"></rect>
                                 <path class="edge-card-line multi" d="M72 67 C80 67 88 67 96 67"></path>
-                                <text class="edge-card-text tiny" x="45" y="64">cd</text>
-                                <text class="edge-card-subtext" x="45" y="79">tests/</text>
+                                <text class="edge-card-text tiny" x="45" y="64">bash</text>
+                                <text class="edge-card-subtext" x="45" y="79">repeated</text>
                                 <text class="edge-card-text tiny" x="123" y="64">python</text>
                                 <text class="edge-card-subtext" x="123" y="79">run</text>
                                 <rect class="edge-card-node val" x="196" y="45" width="88" height="48" rx="12"></rect>
-                                <path class="cd-hat" d="M213 45 L240 26 L267 45 Z"></path>
+                                <path class="cat-ear-card" d="M215 45 L221 28 L230 45 Z"></path>
+                                <path class="cat-ear-card" d="M250 45 L259 28 L265 45 Z"></path>
                                 <text class="edge-card-text small" x="240" y="63">python</text>
-                                <text class="edge-card-subtext" x="240" y="80">cd compressed</text>
+                                <text class="edge-card-subtext" x="240" y="80">ears = collapsed</text>
                             </svg>
                         </div>
                         <div>
-                            <h3>Filter cd nodes</h3>
-                            <p>Many SWE-agent runs repeatedly re-enter the same directory before patching or testing. The cd filter compresses that boilerplate so the meaningful action stays prominent.</p>
+                            <h3>Filter repeated commands</h3>
+                            <p>When one action sends 10 or more blue intra-step arrows, the filter collapses repeated connections while keeping each distinct neighbor connected, then gives affected target nodes colored cat ears. Each ear color identifies the repeated source action.</p>
                         </div>
                     </div>
 
@@ -564,6 +627,25 @@ function landingGuideHtml() {
                     </div>
                 </div>
 
+                <div class="large-graph-guide" role="note">
+                    <div class="large-graph-guide-mark" aria-hidden="true">
+                        <span class="dropdown-icon">
+                            <i></i><i></i><i></i><b></b>
+                        </span>
+                    </div>
+                    <div>
+                        <h3>Large graphs are divided for visual clarity</h3>
+                        <p>
+                            When a trajectory grows beyond 100 nodes, the viewer prepares compact subgraphs so dense edges
+                            remain readable. Use the selector beside the trajectory title to move between segments or choose
+                            <strong>Full graph</strong> when you need the complete structure; the raw trajectory is always preserved.
+                        </p>
+                    </div>
+                    <div class="large-graph-guide-flow" aria-label="Full graph can be explored as subgraphs">
+                        <span>Full graph</span><b>or</b><span>Subgraph 1</span><span>Subgraph 2</span>
+                    </div>
+                </div>
+
                 <div class="phase-card-grid">
                     <div class="phase-card phase-localization"><div class="phase-swatch"></div><div><h3>Localization</h3><p>Finding where the bug lives: searching, reading files, reproducing failures, and inspecting stack traces.</p><code>grep "class Pipeline"</code></div></div>
                     <div class="phase-card phase-patch"><div class="phase-swatch"></div><div><h3>Patch</h3><p>Changing the code or tests: edits, replacements, file writes, and patch-generation steps.</p><code>str_replace pipeline.py</code></div></div>
@@ -576,16 +658,28 @@ function landingGuideHtml() {
 }
 
 function clearGraphPane() {
+    if (activeGraphAbortController) {
+        activeGraphAbortController.abort();
+        activeGraphAbortController = null;
+    }
+    graphFrameToken += 1;
+    if (graphFrameTimer) {
+        window.clearTimeout(graphFrameTimer);
+        graphFrameTimer = null;
+    }
     graphRequestToken += 1;
     document.getElementById('graphPane').innerHTML = landingGuideHtml();
 }
 
 async function loadGraph(instanceId) {
     const requestToken = ++graphRequestToken;
+    if (activeGraphAbortController) activeGraphAbortController.abort();
+    const abortController = new AbortController();
+    activeGraphAbortController = abortController;
     showLoading();
     const params = graphRequestParams(instanceId);
     try {
-        const res = await fetch(`/api/graph?${params}`);
+        const res = await fetch(`/api/graph?${params}`, { signal: abortController.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const html = await res.text();
         // A slower request for a previous selection must not replace the graph
@@ -594,16 +688,24 @@ async function loadGraph(instanceId) {
         injectGraph(html);
         scheduleAdjacentPrefetch(instanceId);
     } catch (err) {
+        if (err.name === 'AbortError') return;
         if (requestToken !== graphRequestToken || activeId !== instanceId || sankeyActive) return;
         const ph = document.getElementById('graphPane').querySelector('.placeholder');
         if (ph) ph.innerHTML = `<span style="color:#e74c3c">⚠ ${escHtml(err.message)}</span>`;
+    } finally {
+        if (activeGraphAbortController === abortController) {
+            activeGraphAbortController = null;
+        }
     }
 }
 
 function graphRequestParams(instanceId, prefetch = false) {
     const params = new URLSearchParams({
         id:               instanceId,
-        filter_cd:        filterCd(),
+        // Keep the legacy graph-construction filter disabled. Repeated-command
+        // filtering is a renderer-only view option and must not alter the data.
+        filter_cd:        false,
+        filter_repeated:  filterRepeated(),
         thought_quotes:   thoughtQuotes(),
         show_observation: showObservation(),
         unique_think:     uniqueThink(),
@@ -626,10 +728,11 @@ function scheduleAdjacentPrefetch(instanceId) {
 }
 
 async function prefetchAdjacentGraphs(instanceId) {
-    const index = allGraphs.findIndex(graph => graph.instance_id === instanceId);
+    const orderedGraphs = sortGraphs(allGraphs);
+    const index = orderedGraphs.findIndex(graph => graph.instance_id === instanceId);
     if (index < 0) return;
 
-    const nextGraphs = allGraphs.slice(index + 1, index + 3);
+    const nextGraphs = orderedGraphs.slice(index + 1, index + 3);
     await Promise.all(nextGraphs.map(async graph => {
         const key = graphCacheKey(graph.instance_id);
         if (prefetchedGraphKeys.has(key) || prefetchingGraphKeys.has(key)) return;
@@ -648,16 +751,79 @@ async function prefetchAdjacentGraphs(instanceId) {
 
 function injectGraph(html) {
     const pane = document.getElementById('graphPane');
-    const ph   = pane.querySelector('.placeholder');
-    if (ph) ph.remove();
-    let iframe = pane.querySelector('iframe');
-    if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.sandbox = 'allow-scripts allow-same-origin';
-        pane.appendChild(iframe);
-    }
+    const frameToken = ++graphFrameToken;
+    if (graphFrameTimer) window.clearTimeout(graphFrameTimer);
+
+    // A rewritten iframe can retain top-level lexical declarations in some
+    // browsers. Render into a fresh browsing context, then swap it in only
+    // after its SVG is ready.
+    pane.querySelectorAll('iframe[data-pending="true"]').forEach(frame => frame.remove());
+    const iframe = document.createElement('iframe');
+    iframe.sandbox = 'allow-scripts allow-same-origin';
+    iframe.dataset.pending = 'true';
+    iframe.style.visibility = 'hidden';
+    pane.appendChild(iframe);
+
+    let documentWritten = false;
+    const frameDeadline = Date.now() + GRAPH_RENDER_TIMEOUT_MS;
+    const showFrameError = (message) => {
+        if (frameToken !== graphFrameToken) {
+            iframe.remove();
+            return;
+        }
+        if (graphFrameTimer) window.clearTimeout(graphFrameTimer);
+        iframe.remove();
+        const placeholder = pane.querySelector('.placeholder');
+        if (!placeholder) return;
+        placeholder.innerHTML = `<span style="color:#e74c3c;text-align:center;max-width:520px;padding:24px">⚠ ${escHtml(message)}</span>`;
+    };
+
+    const checkFrameReady = () => {
+        if (frameToken !== graphFrameToken) {
+            iframe.remove();
+            return;
+        }
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        const hasGraph = Boolean(doc?.querySelector('svg'));
+        const renderError = doc?.querySelector('.render-error');
+        if (renderError) {
+            showFrameError(renderError.textContent || 'The graph renderer reported an error.');
+            return;
+        }
+        if (hasGraph) {
+            iframe.style.visibility = '';
+            delete iframe.dataset.pending;
+            pane.querySelectorAll('iframe').forEach(frame => {
+                if (frame !== iframe) frame.remove();
+            });
+            const placeholder = pane.querySelector('.placeholder');
+            if (placeholder) placeholder.remove();
+            return;
+        }
+        if (Date.now() >= frameDeadline) {
+            showFrameError('This trajectory is taking too long to render. Try Fit to screen after it finishes, or select it again to retry.');
+            return;
+        }
+        graphFrameTimer = window.setTimeout(checkFrameReady, 50);
+    };
+
+    // Keep the loading panel above the old frame until the new document has
+    // actually created an SVG. This prevents a slow or failed large render
+    // from appearing as an unexplained empty canvas.
+    iframe.onload = () => {
+        // Ignore the iframe's initial about:blank load. It can fire before
+        // document.write() replaces the old frame contents.
+        if (!documentWritten || frameToken !== graphFrameToken) return;
+        checkFrameReady();
+    };
+    iframe.onerror = () => showFrameError('The graph document could not be loaded. Try selecting the trajectory again.');
+
     const doc = iframe.contentDocument || iframe.contentWindow.document;
-    doc.open(); doc.write(html); doc.close();
+    doc.open();
+    doc.write(html);
+    documentWritten = true;
+    doc.close();
+    checkFrameReady();
 }
 
 /* =========================================================================

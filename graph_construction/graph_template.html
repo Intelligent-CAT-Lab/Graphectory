@@ -11,6 +11,7 @@
     <main class="graph-container">
         <div id="graph" aria-label="Trajectory graph canvas"></div>
 
+        <div class="graph-top-hud">
         <header class="graph-hud">
             <div class="trajectory-identity">
                 <span>Trajectory</span>
@@ -25,6 +26,11 @@
                 <span><b>{{EDGE_COUNT}}</b> edges</span>
             </div>
         </header>
+
+        <div class="subgraph-picker" id="subgraphPicker" hidden>
+            <select id="subgraphSelect" aria-label="Select trajectory view" onchange="setActiveSubgraph(this.value)"></select>
+        </div>
+        </div>
 
         <nav class="controls" aria-label="Graph controls">
             <button class="control-icon-btn" type="button" onclick="fitToScreen()" title="Fit graph to screen" aria-label="Fit graph to screen">&#x2922;</button>
@@ -63,17 +69,17 @@
             <p class="legend-note">Click a node to read every original thought, action, and observation represented by it.</p>
         </aside>
 
-        <aside class="file-footprint" id="fileFootprint" aria-label="File footprint">
+        <aside class="file-footprint" id="fileFootprint" aria-label="File and plan footprint">
             <div class="file-footprint-header">
                 <div>
-                    <div class="file-footprint-kicker">FILE ACTIVITY</div>
+                    <div class="file-footprint-kicker">TRAJECTORY FOOTPRINT</div>
                     <div class="file-footprint-title">File footprint</div>
                 </div>
                 <button class="file-footprint-close" type="button" onclick="closeFileFootprint()" title="Close file footprint" aria-label="Close file footprint">x</button>
             </div>
-            <p class="file-footprint-copy">Trace every file or path the agent referenced, viewed, or edited. Click a row to spotlight its graph nodes.</p>
+            <p class="file-footprint-copy">Trace every file, path, or plan the agent referenced, viewed, or edited. Click a row to spotlight its graph nodes.</p>
             <div class="file-footprint-toolbar">
-                <input id="fileFootprintFilter" class="file-footprint-filter" type="search" placeholder="Filter files and paths" aria-label="Filter files and paths">
+                <input id="fileFootprintFilter" class="file-footprint-filter" type="search" placeholder="Filter files, paths, and plans" aria-label="Filter files, paths, and plans">
                 <div class="file-footprint-key" aria-label="Activity legend">
                     <span><i class="footprint-dot seen"></i>Seen</span>
                     <span><i class="footprint-dot view"></i>Viewed</span>

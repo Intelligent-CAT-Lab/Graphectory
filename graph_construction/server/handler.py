@@ -29,6 +29,7 @@ import os
 import socket
 import threading
 import time
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Optional
@@ -45,6 +46,7 @@ from server.graph_builder import (
     iter_claude_steps,
     load_trajectory,
     _claude_code_session_files,
+    clear_trajectory_caches,
     scan_trajectories,
 )
 from server.graph_renderer import render_graph_html
@@ -94,7 +96,18 @@ class GraphHandler(BaseHTTPRequestHandler):
         "loaded": 0, "total": 0, "graphs": [], "error": None,
     }
     _graphs_generation: int = 0
-    _render_cache: dict[tuple, str] = {}
+    # Rendered graph pages can be large because they include the raw step
+    # tuples needed by the detail sidebar. Keep this cache bounded so browsing
+    # a large corpus cannot gradually exhaust the server process's memory.
+    _render_cache: OrderedDict[tuple, str] = OrderedDict()
+    _render_cache_chars: int = 0
+    _RENDER_CACHE_MAX_ENTRIES = 8
+    _RENDER_CACHE_MAX_CHARS = 64 * 1024 * 1024
+    # Graph construction is independent of thought-length display,
+    # observations, and repeated-edge filtering. Retain a few recent graphs
+    # so changing a view option only rerenders HTML instead of reparsing data.
+    _graph_cache: OrderedDict[tuple, object] = OrderedDict()
+    _GRAPH_CACHE_MAX_ENTRIES = 4
     _sankey_cache: Optional[dict]   = None   # keyed on graphs_dir + eval_report_path
 
     # ── Logging ──────────────────────────────────────────────────────────────
@@ -131,6 +144,7 @@ class GraphHandler(BaseHTTPRequestHandler):
                 self._api_graph(
                     instance_id      = instance_id,
                     filter_cd        = _bool_param(params, "filter_cd",        default=False),
+                    filter_repeated  = _bool_param(params, "filter_repeated",  default=False),
                     thought_quotes   = _bool_param(params, "thought_quotes",   default=True),
                     show_observation = _bool_param(params, "show_observation", default=False),
                     unique_think     = _bool_param(params, "unique_think",     default=True),
@@ -265,6 +279,7 @@ class GraphHandler(BaseHTTPRequestHandler):
         logger.info(
             "[handler] Reconfiguring data source: trajs=%s  report=%s", trajs, report,
         )
+        clear_trajectory_caches()
         with self._cache_lock:
             GraphHandler.graphs_dir       = trajs
             GraphHandler.agent_type       = agent_type
@@ -275,7 +290,9 @@ class GraphHandler(BaseHTTPRequestHandler):
             GraphHandler._graphs_progress  = {
                 "loaded": 0, "total": 0, "graphs": [], "error": None,
             }
-            GraphHandler._render_cache    = {}
+            GraphHandler._render_cache    = OrderedDict()
+            GraphHandler._render_cache_chars = 0
+            GraphHandler._graph_cache      = OrderedDict()
             GraphHandler._sankey_cache    = None
 
         self._respond_json({
@@ -422,6 +439,7 @@ class GraphHandler(BaseHTTPRequestHandler):
         self,
         instance_id:      str,
         filter_cd:        bool,
+        filter_repeated:  bool,
         thought_quotes:   bool,
         show_observation: bool,
         unique_think:     bool,
@@ -432,11 +450,14 @@ class GraphHandler(BaseHTTPRequestHandler):
         Prefetch requests populate the same render cache as normal requests but
         return an empty response because the browser only needs the cache warm.
         """
-        cache_key = (instance_id, filter_cd, thought_quotes,
-                     show_observation, unique_think)
+        cache_key = (instance_id, filter_cd, filter_repeated,
+                     thought_quotes, show_observation, unique_think)
 
         with self._cache_lock:
-            cached = self._render_cache.get(cache_key)
+            cached = self._render_cache.pop(cache_key, None)
+            if cached is not None:
+                # Treat recently viewed pages as the most useful cache entries.
+                self._render_cache[cache_key] = cached
         if cached is not None:
             logger.info("[handler] Cache hit for '%s'.", instance_id)
             if prefetch:
@@ -445,25 +466,53 @@ class GraphHandler(BaseHTTPRequestHandler):
             self._respond(200, "text/html; charset=utf-8", cached.encode())
             return
 
-        logger.info("[handler] Building graph for '%s'.", instance_id)
-        traj_data = load_trajectory(
-            self.graphs_dir, instance_id, agent_type=self.agent_type,
-        )
-        G = build_graph(
-            traj_data        = traj_data,
-            instance_id      = instance_id,
-            eval_report_path = self.eval_report_path,
-            cmd_parser       = self.cmd_parser,
-            filter_cd        = filter_cd,
-            agent_type       = self.agent_type,
-            unique_think     = unique_think,
-        )
+        graph_key = (instance_id, filter_cd, unique_think)
+        with self._cache_lock:
+            G = self._graph_cache.pop(graph_key, None)
+            if G is not None:
+                self._graph_cache[graph_key] = G
+
+        if G is None:
+            logger.info("[handler] Building graph for '%s'.", instance_id)
+            traj_data = load_trajectory(
+                self.graphs_dir, instance_id, agent_type=self.agent_type,
+            )
+            G = build_graph(
+                traj_data        = traj_data,
+                instance_id      = instance_id,
+                eval_report_path = self.eval_report_path,
+                cmd_parser       = self.cmd_parser,
+                filter_cd        = filter_cd,
+                agent_type       = self.agent_type,
+                unique_think     = unique_think,
+            )
+            with self._cache_lock:
+                self._graph_cache[graph_key] = G
+                while len(self._graph_cache) > self._GRAPH_CACHE_MAX_ENTRIES:
+                    self._graph_cache.popitem(last=False)
+        else:
+            logger.info("[handler] Graph cache hit for '%s'.", instance_id)
+
         html = render_graph_html(
-            G, filter_cd, thought_quotes, show_observation, self.assets_dir,
+            G, filter_cd, thought_quotes, show_observation,
+            self.assets_dir, filter_repeated=filter_repeated,
         )
 
         with self._cache_lock:
-            self._render_cache[cache_key] = html
+            html_chars = len(html)
+            if html_chars <= self._RENDER_CACHE_MAX_CHARS:
+                old = self._render_cache.pop(cache_key, None)
+                if old is not None:
+                    self._render_cache_chars -= len(old)
+                self._render_cache[cache_key] = html
+                self._render_cache_chars += html_chars
+
+                while (
+                    len(self._render_cache) > self._RENDER_CACHE_MAX_ENTRIES
+                    or self._render_cache_chars > self._RENDER_CACHE_MAX_CHARS
+                ):
+                    _, evicted = self._render_cache.popitem(last=False)
+                    self._render_cache_chars -= len(evicted)
 
         if prefetch:
             self._respond(204, "text/plain; charset=utf-8", b"")

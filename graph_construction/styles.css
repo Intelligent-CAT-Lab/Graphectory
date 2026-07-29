@@ -137,6 +137,37 @@ svg {
     display: block;
 }
 
+.large-graph-svg {
+    position: absolute;
+    inset: 0;
+}
+
+#graph.is-navigating {
+    user-select: none;
+}
+
+#graph.is-navigating .node,
+#graph.is-navigating .edge {
+    pointer-events: none;
+}
+
+#graph.is-navigating .node {
+    transition: none;
+}
+
+#graph.is-navigating .node:hover rect {
+    filter: none;
+}
+
+#graph.is-navigating .edge text {
+    visibility: hidden;
+}
+
+#graph.is-navigating svg {
+    shape-rendering: optimizeSpeed;
+    text-rendering: optimizeSpeed;
+}
+
 .node {
     cursor: pointer;
     transition: all 0.2s ease;
@@ -154,6 +185,16 @@ svg {
     stroke-width: 3;
     filter: drop-shadow(0 4px 8px rgba(52, 152, 219, 0.3));
 }
+
+.node.trajectory-first rect,
+.node.trajectory-last rect {
+    stroke-width: 4;
+}
+.node.trajectory-first rect { stroke: #c89327; }
+.node.trajectory-last rect { stroke: #0a817b; }
+.boundary-badge { pointer-events: none; }
+.node.context-node { opacity: .8; }
+.node.context-node rect { stroke: #8b9ba1; stroke-dasharray: 4 3; }
 
 .node text {
     pointer-events: none;
@@ -749,6 +790,23 @@ svg {
     color: #b4d0e9;
 }
 
+.file-footprint-row.plan-activity {
+    border-color: #6f5925;
+    background: #29271f;
+}
+
+.file-footprint-row.plan-activity:hover,
+.file-footprint-row.plan-activity.selected {
+    border-color: #d5aa3d;
+    background: #353021;
+    box-shadow: inset 3px 0 0 #f4d06f;
+}
+
+.file-footprint-row.plan-activity .file-footprint-kind {
+    background: #5a4820;
+    color: #f4d06f;
+}
+
 .file-footprint-path {
     justify-content: space-between;
     gap: 12px;
@@ -938,6 +996,65 @@ svg {
 .graph-document .controls .help-btn { border-color: #e7c46e; background: #fff3cb; color: #84631e; font-family: {{FONT_FAMILY}}; }
 .graph-document .controls .help-btn:hover { border-color: #c89327; background: #ffe7a3; color: #5f440c; }
 .graph-document .control-icon-btn.active { border-color: #0a817b; background: #ddf1ec; color: #075e5a; box-shadow: none; }
+.graph-document .subgraph-picker {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 170px;
+    max-width: 205px;
+    margin-left: auto;
+    padding-left: 8px;
+    border-left: 1px solid #d8e3de;
+    color: #58717d;
+    font: 800 9px/1 'Cascadia Code', Consolas, monospace;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+.graph-document .subgraph-picker[hidden] { display: none; }
+.graph-document .subgraph-picker label { flex: 0 0 auto; }
+.graph-document .subgraph-picker select {
+    width: 100%;
+    min-width: 0;
+    height: 27px;
+    padding: 3px 7px;
+    border: 1px solid #c8d9d2;
+    border-radius: 7px;
+    background: #f6f9f7;
+    color: #294757;
+    font: 700 10px/1 'Cascadia Code', Consolas, monospace;
+}
+.graph-document .graph-top-hud {
+    position: absolute;
+    z-index: 12;
+    top: 16px;
+    left: 18px;
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    max-width: calc(100% - 152px);
+    pointer-events: none;
+}
+.graph-document .graph-top-hud .graph-hud {
+    position: relative;
+    top: auto;
+    left: auto;
+    z-index: auto;
+    pointer-events: auto;
+}
+.graph-document .graph-top-hud .subgraph-picker {
+    align-self: stretch;
+    min-width: 170px;
+    max-width: 205px;
+    margin: 0;
+    padding: 7px;
+    border: 1px solid rgba(25, 44, 61, .16);
+    border-radius: 13px;
+    background: rgba(255, 254, 249, .92);
+    box-shadow: 0 12px 32px rgba(25, 44, 61, .13);
+    backdrop-filter: blur(10px);
+    pointer-events: auto;
+}
+.graph-document .graph-top-hud .subgraph-picker select { min-width: 156px; }
 
 .graph-document .phase-legend {
     position: absolute;
@@ -998,10 +1115,13 @@ svg {
 .render-error { position: absolute; top: 50%; left: 50%; padding: 22px; border: 1px solid #e7b0a8; border-radius: 10px; background: #fffaf8; color: #b93a2c; font-family: 'Cascadia Code', Consolas, monospace; transform: translate(-50%, -50%); }
 
 @media (max-width: 760px) {
-    .graph-document .graph-hud { top: 11px; left: 11px; max-width: calc(100% - 22px); padding-right: 54px; }
+    .graph-document .graph-top-hud { top: 11px; left: 11px; right: 11px; max-width: none; gap: 7px; }
+    .graph-document .graph-top-hud .graph-hud { top: auto; left: auto; max-width: none; flex: 1 1 auto; padding-right: 54px; }
     .graph-hud-metadata { display: none; }
     .graph-document h1 { max-width: calc(100vw - 125px); font-size: 18px; }
-    .graph-document .graph-hud.trajectory-title-expanded { max-width: calc(100% - 22px); }
+    .graph-document .graph-top-hud .graph-hud.trajectory-title-expanded { max-width: none; }
+    .graph-document .graph-top-hud .subgraph-picker { min-width: 150px; max-width: 180px; }
+    .graph-document .graph-top-hud .subgraph-picker select { min-width: 136px; }
     .trajectory-identity.expanded h1 { max-width: none; }
     .graph-document .controls { top: 65px; right: 11px; bottom: auto; }
     .graph-document .detail-sidebar.open { width: min(400px, 88vw); }

@@ -7,7 +7,8 @@ in graph_template.html with inlined CSS, JS, and serialised graph data.
 Public surface:
 
     html: str = render_graph_html(G, filter_cd, thought_quotes,
-                                  show_observation, assets_dir)
+                                  show_observation, assets_dir,
+                                  filter_repeated=filter_repeated)
 """
 
 import json
@@ -42,6 +43,10 @@ _DAGRE_LOCAL_NAME = "dagre.min.js"
 _PATH_ARGUMENT_NAMES = {
     "path", "file", "file_path", "filename", "source", "destination", "target",
 }
+_PLAN_FOOTPRINT_PATH = "Plan"
+_PLAN_UPDATE_ACTIONS = {
+    "updateplan", "todowrite", "taskcreate", "taskupdate",
+}
 _FILE_SUFFIX_RE = re.compile(r"\.[A-Za-z0-9_-]{1,12}$")
 _PATH_FRAGMENT_RE = re.compile(
     r"(?<![\w.-])(?P<path>(?:~?/|\.?\.?/)(?:[\w@+=,.:~-]+/)*[\w@+=,.:~-]+(?:\.[\w-]+)?)(?![\w.-])"
@@ -58,6 +63,7 @@ def render_graph_html(
     thought_quotes: bool,
     show_observation: bool,
     assets_dir: Path,
+    filter_repeated: bool = False,
 ) -> str:
     """Return a complete, self-contained HTML page for *G*.
 
@@ -85,6 +91,7 @@ def render_graph_html(
     settings = {
         "thoughtQuotes":   thought_quotes,
         "showObservation": show_observation,
+        "filterRepeated":  filter_repeated,
     }
 
     template = _load(assets_dir / "graph_template.html")
@@ -141,12 +148,16 @@ def render_graph_html(
 def _dagre_script_tag(assets_dir: Path) -> str:
     """Return a ``<script>`` tag for dagre, preferring a local copy over the CDN.
 
-    Searches for ``dagre.min.js`` in *assets_dir* and in its ``static/``
-    sub-directory (the path already served by the HTTP handler).  If found,
-    the file is referenced via ``/static/dagre.min.js``; otherwise the CDN
-    URL is used with an ``onerror`` console warning.
+    Searches for ``dagre.min.js`` in the asset root and the server's static
+    directory (the path already served by the HTTP handler).  If found, the
+    file is referenced via ``/static/dagre.min.js``; otherwise the CDN URL is
+    used with an ``onerror`` console warning.
     """
-    for search_path in (assets_dir, assets_dir / "static"):
+    for search_path in (
+        assets_dir,
+        assets_dir / "static",
+        assets_dir / "server" / "static",
+    ):
         if (search_path / _DAGRE_LOCAL_NAME).exists():
             logger.debug("[renderer] Using local dagre at '%s'", search_path)
             return f'<script src="/static/{_DAGRE_LOCAL_NAME}"></script>'
@@ -156,7 +167,7 @@ def _dagre_script_tag(assets_dir: Path) -> str:
         assets_dir,
     )
     return (
-        f'<script src="{_DAGRE_CDN_URL}" '
+        f'<script async src="{_DAGRE_CDN_URL}" '
         f"onerror=\"console.error('[graph] Failed to load dagre from CDN.')\"></script>"
     )
 
@@ -213,10 +224,13 @@ def _prepare_nodes(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
             "tooltip":            _make_tooltip(data),
             "color":              colors[0] if colors else PHASE_COLORS["general"],
             "colors":             colors,
+            "phases":             list(data.get("phases", []) or []),
             "has_cd":             bool(data.get("has_cd", False)),
+            "command":            str(data.get("command", "") or ""),
             "observation_length": int(data.get("observation_length", 0)),
             "tool":               data.get("tool", ""),
             "subcommand":         data.get("subcommand", ""),
+            "step_indices":       list(data.get("step_indices", []) or []),
             "step_data":          _sanitize_step_data(data.get("step_data", [])),
         })
     return nodes
@@ -234,10 +248,15 @@ def _prepare_file_activity(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
 
     for node_id, data in G.nodes(data=True):
         paths = _extract_node_paths(data)
+        is_plan = _is_plan_node(data)
+        if is_plan:
+            # Planning actions are not files, but they are a persistent
+            # trajectory artifact that agents inspect and update over time.
+            paths = [_PLAN_FOOTPRINT_PATH, *paths]
         if not paths:
             continue
 
-        activity = _classify_file_activity(data)
+        activity = _classify_plan_activity(data) if is_plan else _classify_file_activity(data)
         step_indices = sorted({int(step) for step in data.get("step_indices", [])})
         if not step_indices:
             continue
@@ -245,7 +264,8 @@ def _prepare_file_activity(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
         for path in paths:
             record = records.setdefault(path, {
                 "path": path,
-                "kind": "file" if _looks_like_file(path) else "path",
+                "kind": "plan" if is_plan and path == _PLAN_FOOTPRINT_PATH
+                else ("file" if _looks_like_file(path) else "path"),
                 "seen_steps": set(),
                 "view_steps": set(),
                 "edit_steps": set(),
@@ -299,6 +319,31 @@ def _prepare_file_activity(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
             item["path"],
         ),
     )
+
+
+def _is_plan_node(data: dict[str, Any]) -> bool:
+    return any(
+        str(phase).strip().lower() == "plan"
+        for phase in (data.get("phases") or [])
+    )
+
+
+def _plan_action_names(data: dict[str, Any]) -> set[str]:
+    names = set()
+    for key in ("tool", "subcommand", "command"):
+        value = str(data.get(key, "") or "").strip().lower()
+        if not value:
+            continue
+        for part in re.split(r"[/.:]", value):
+            normalized = part.replace("_", "").replace("-", "")
+            if normalized:
+                names.add(normalized)
+    return names
+
+
+def _classify_plan_activity(data: dict[str, Any]) -> str:
+    """Treat plan updates as edits and plan-mode transitions as views."""
+    return "edit" if _plan_action_names(data) & _PLAN_UPDATE_ACTIONS else "view"
 
 
 def _extract_node_paths(data: dict[str, Any]) -> list[str]:

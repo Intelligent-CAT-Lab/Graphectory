@@ -23,9 +23,3 @@ This file records improvements made after for the ASE Tool Track submission.
   nodes, and clearer phase/edge explanations in the tutorial.
 - Improved graph rendering for long thoughts, arrow scaling, phase colors, and
   interactive controls.
-
-## Analysis and Reproducibility
-
-- Added trajectory statistics and corpus-level analysis utilities.
-- Preserved precomputed graphs and paper-analysis outputs under `data/` while
-  retaining the original sample-data workflow.

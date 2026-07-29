@@ -74,6 +74,10 @@ The left sidebar lists every trajectory found in the provided path. Large source
 
 Clicking an entry loads its graph into the main canvas. The graph is rendered inside a sandboxed iframe; switching instances swaps the content without reloading the page. Its floating question-mark control opens the phase and edge legend.
 
+The optional **File footprint** panel organizes referenced paths into a nested tree and links each entry back to the graph nodes that touched it. Codex and Claude Code planning actions also appear as a synthetic **Plan** entry, with plan updates shown as edits so planning activity can be inspected alongside source-file activity.
+
+For trajectories with more than 100 graph nodes, a compact view selector beside the title offers the full graph and selectable 50--150-node segments. Runs under 200 nodes open to the full graph by default; larger runs open to subgraph 1 to keep the initial canvas responsive. Segment boundaries prefer nodes in the **Plan** phase so that planning transitions remain visible; when a long trajectory has no plan nodes, the viewer chooses low-degree boundary nodes to avoid introducing additional visual hubs. Segments overlap at their boundary node, and crossing edges use muted previous/next-segment context anchors so nodes do not lose visible connections when their neighbor is outside the selected window. The underlying trajectory and all raw step tuples remain available through node inspection. The first and last nodes of the displayed view are marked directly on the canvas.
+
 #### View Toggles
 
 Four toggles sit inside the expandable gear menu at the top right of the graph canvas. Changing any of them immediately re-requests the current graph with the new settings applied.
@@ -81,7 +85,7 @@ Four toggles sit inside the expandable gear menu at the top right of the graph c
 | Toggle | Default | Effect |
 |---|---|---|
 | **Exclude quotes in thought length** | On | Strips content inside backticks and quote characters before measuring thought length, so arrowhead sizes reflect genuine reasoning rather than copied code. |
-| **Filter cd (show ▲ hat)** | Off | Strips leading `cd` commands from multi-command steps and replaces them with a small orange triangle (▲) on the node. |
+| **Filter repeated commands (show cat ears)** | Off | When one action has 10 or more outgoing blue edges, collapses repeated edges while retaining one connection to every distinct target neighbor, then marks affected targets with colored cat ears. Ear colors identify the collapsed source action. |
 | **Show observation indicators** | Off | Draws a small coloured square on each edge at the 25% point, encoding the length and success/failure outcome of the previous step's tool response. |
 | **Unique think nodes (by thought)** | Off | When on, each `think` step with distinct thought text becomes its own node rather than all think steps collapsing into one. Two steps with identical thought text still share a node. |
 
@@ -107,6 +111,8 @@ Edges are styled by **type**:
 | Red solid | Thought continuation — the model's thought for this step was identical to or a prefix of the previous step's, indicating cached reasoning. |
 | Blue dashed | Intra-step — connects sub-actions within a single `&&`-chained step. |
 | Green dashed | Hierarchy — drawn between `str_replace_editor view` nodes when one path is a subdirectory or line-range subset of another. |
+
+When consecutive execution edges connect the same two nodes, the viewer combines them into one arrow and labels it with the covered step range, such as `12-16`. Non-consecutive repetitions remain separate so loops and revisits stay visible.
 
 Click any node to open a detail sidebar showing the full thought, action, and observation text for that node. If the node was visited multiple times, tab buttons let you page through each visit. The sidebar's left edge is draggable to resize it.
 
@@ -197,7 +203,8 @@ Both `generatejson.py` and `live_graph_server.py` share the same graph construct
    - **Localization**: Information gathering, searching, test generation before patching
    - **Patch**: Creating/editing non-test files
    - **Validation**: Running tests, static analysis, formatter checks, or editing test files after patching
-   - **General**: Other actions (planning, environment setup)
+   - **Plan**: Explicit planning and todo actions in Codex and Claude Code
+   - **General**: Other actions (environment setup, navigation, and submission)
 4. **Edge Construction**: Temporal edges (sequential execution flow) + structural edges (hierarchical relationship in the code base) + Thought continuation (If the current step's thought is identical to or a prefix of the previous step's thought, the connecting edge is flagged as a thought continuation and drawn in red, making it easy to spot steps where the model reused cached reasoning.)
 5. **Output**:
    - `generatejson.py`: JSON files (NetworkX node-link format)

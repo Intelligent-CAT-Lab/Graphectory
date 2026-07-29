@@ -28,6 +28,9 @@ from buildGraph import (
 )
 from mapPhase import is_plan_action
 
+
+_CLAUDE_SESSION_INDEXES: dict[Path, dict[str, Path]] = {}
+
 # ── Test-outcome helpers ─────────────────────────────────────────────────────
 
 RE_PYTEST_FAIL  = re.compile(r"\b(\d+)\s+failed\b",  re.IGNORECASE)
@@ -156,10 +159,10 @@ def _codex_rollout_files(source: Path) -> list[Path]:
     """Find Codex rollout JSONL files below a file or directory."""
     if source.is_file():
         return [source] if _is_codex_rollout_file(source) else []
-    return sorted(
+    return [
         path for path in source.rglob("*.jsonl")
         if _is_codex_rollout_file(path)
-    )
+    ]
 
 
 def _codex_content_text(content) -> str:
@@ -251,7 +254,7 @@ def _compatible_wire_files(source: Path) -> list[Path]:
         # agents/<subagentId>/wire.jsonl so one session remains one trajectory.
         if path.parent.name == "main" and path.parent.parent.name == "agents":
             wires.append(path)
-    return sorted(wires)
+    return wires
 
 
 def _wire_session_dir(wire_path: Path) -> Path:
@@ -319,6 +322,7 @@ def _is_raw_claude_code_file(path: Path) -> bool:
     return False
 
 
+@lru_cache(maxsize=32)
 def _claude_code_session_files(source: Path) -> list[Path]:
     """Find both converted and native Claude Code session files."""
     if source.is_file():
@@ -326,14 +330,16 @@ def _claude_code_session_files(source: Path) -> list[Path]:
             return [source]
         return []
 
-    paths = set(_claude_code_wire_files(source))
-    paths.update(
-        path for path in source.rglob("*.jsonl")
-        if _is_raw_claude_code_file(path)
-    )
-    return sorted(paths)
+    paths = _claude_code_wire_files(source)
+    seen = set(paths)
+    for path in source.rglob("*.jsonl"):
+        if path not in seen and _is_raw_claude_code_file(path):
+            paths.append(path)
+            seen.add(path)
+    return paths
 
 
+@lru_cache(maxsize=4096)
 def _raw_claude_metadata(path: Path) -> dict:
     """Extract lightweight metadata from a native Claude Code transcript."""
     # Native Claude Code exports commonly use a generic filename such as
@@ -394,6 +400,18 @@ def _raw_claude_metadata(path: Path) -> dict:
     }
 
 
+def _claude_code_session_index(source: Path) -> dict[str, Path] | None:
+    """Return the completed scan index, if the source has been scanned."""
+    return _CLAUDE_SESSION_INDEXES.get(source)
+
+
+def clear_trajectory_caches() -> None:
+    """Clear discovery and metadata caches after a data-source change."""
+    _claude_code_session_files.cache_clear()
+    _raw_claude_metadata.cache_clear()
+    _CLAUDE_SESSION_INDEXES.clear()
+
+
 def _is_claude_code_wire_file(path: Path) -> bool:
     """Return whether *path* is a compatible stream declared as Claude Code."""
     return (
@@ -430,7 +448,7 @@ def scan_trajectories(graphs_dir: Path,
                       agent_type: str = "sa",
                       progress_callback: Callable[[int, int, list[dict]], None] | None = None,
                       progress_batch_size: int = 10) -> list[dict]:
-    """Return a sorted list of trajectory metadata dicts.
+    """Return trajectory metadata in source discovery/load order.
 
     Each dict has: instance_id, status, difficulty, step_count.
 
@@ -497,13 +515,13 @@ def scan_trajectories(graphs_dir: Path,
             })
             mark_processed(total)
 
-        results.sort(key=lambda item: (item["display_name"].lower(), item["instance_id"]))
         finish_progress(total)
         return results
 
     if agent_type == "claude":
         session_paths = _claude_code_session_files(graphs_dir)
         total = len(session_paths)
+        session_index: dict[str, Path] = {}
         for session_path in session_paths:
             try:
                 if _is_claude_code_wire_file(session_path):
@@ -536,9 +554,10 @@ def scan_trajectories(graphs_dir: Path,
                 "step_count": step_count,
                 "model": model,
             })
+            session_index.setdefault(instance_id, session_path)
             mark_processed(total)
 
-        results.sort(key=lambda item: (item["display_name"].lower(), item["instance_id"]))
+        _CLAUDE_SESSION_INDEXES[graphs_dir] = session_index
         finish_progress(total)
         return results
 
@@ -588,14 +607,13 @@ def scan_trajectories(graphs_dir: Path,
                 })
                 mark_processed(total)
 
-        results.sort(key=lambda x: x["instance_id"])
         finish_progress(total)
         return results
 
     if agent_type == "msa":
         # mini-swe-agent: directory tree of .traj.json files
         # Each instance lives at: graphs_dir/{instance_id}/{instance_id}.traj.json
-        traj_files = sorted(graphs_dir.rglob("*.traj.json"))
+        traj_files = list(graphs_dir.rglob("*.traj.json"))
         total = len(traj_files)
         for traj_file in traj_files:
             instance_id = traj_file.name[: -len(".traj.json")]
@@ -638,12 +656,11 @@ def scan_trajectories(graphs_dir: Path,
             })
             mark_processed(total)
 
-        results.sort(key=lambda x: x["instance_id"])
         finish_progress(total)
         return results
 
     # SWE-agent: directory tree of .traj files
-    traj_files = sorted(graphs_dir.rglob("*.traj"))
+    traj_files = list(graphs_dir.rglob("*.traj"))
     total = len(traj_files)
     for traj_file in traj_files:
         instance_id = traj_file.stem
@@ -727,21 +744,30 @@ def load_trajectory(graphs_dir: Path, instance_id: str,
         )
 
     if agent_type == "claude":
-        for session_path in _claude_code_session_files(graphs_dir):
-            if _is_claude_code_wire_file(session_path):
-                session_dir = _wire_session_dir(session_path)
-                if (session_dir.name or session_path.stem) != instance_id:
-                    continue
-                return {
-                    "trajectory_format": CLAUDE_CODE_TRAJECTORY_FORMAT,
-                    "wire_path": str(session_path),
-                    "state": _load_wire_state(session_path),
-                    "records": list(_read_jsonl(session_path)),
-                }
+        session_index = _claude_code_session_index(graphs_dir)
+        session_path = session_index.get(instance_id) if session_index else None
+        if session_index is None:
+            # If the background scanner has not finished yet, preserve the
+            # old early-stop behavior rather than building a full index.
+            for candidate in _claude_code_session_files(graphs_dir):
+                if _is_claude_code_wire_file(candidate):
+                    candidate_id = _wire_session_dir(candidate).name or candidate.stem
+                else:
+                    candidate_id = _raw_claude_metadata(candidate)["instance_id"]
+                if candidate_id == instance_id:
+                    session_path = candidate
+                    break
 
+        if session_path is not None and _is_claude_code_wire_file(session_path):
+            return {
+                "trajectory_format": CLAUDE_CODE_TRAJECTORY_FORMAT,
+                "wire_path": str(session_path),
+                "state": _load_wire_state(session_path),
+                "records": list(_read_jsonl(session_path)),
+            }
+
+        if session_path is not None:
             metadata = _raw_claude_metadata(session_path)
-            if metadata["instance_id"] != instance_id:
-                continue
             return {
                 "trajectory_format": CLAUDE_CODE_TRAJECTORY_FORMAT,
                 "source_path": str(session_path),

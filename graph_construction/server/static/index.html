@@ -67,7 +67,18 @@
             </section>
 
             <section class="library-controls">
-                <input type="search" id="searchInput" class="search-input" placeholder="Search trajectories" autofocus>
+                <div class="library-search-row">
+                    <input type="search" id="searchInput" class="search-input" placeholder="Search trajectories" autofocus>
+                    <details class="sort-menu" id="trajectorySortMenu">
+                        <summary class="sort-icon-btn" title="Sort trajectories" aria-label="Sort trajectories">&#x21C5;</summary>
+                        <div class="sort-menu-popover" role="menu" aria-label="Trajectory order">
+                            <button type="button" class="sort-menu-option" data-sort-mode="load" role="menuitemradio">Load order</button>
+                            <button type="button" class="sort-menu-option" data-sort-mode="alpha" role="menuitemradio">Alphabetical</button>
+                            <button type="button" class="sort-menu-option" data-sort-mode="steps-asc" role="menuitemradio">Fewest steps</button>
+                            <button type="button" class="sort-menu-option" data-sort-mode="steps-desc" role="menuitemradio">Most steps</button>
+                        </div>
+                    </details>
+                </div>
             </section>
 
             <div class="stats" id="stats">No trajectories loaded</div>
@@ -97,9 +108,9 @@
                     </span>
                 </label>
                 <label class="toggle-row">
-                    <span class="toggle-label">Filter repeated <code>cd</code> commands</span>
+                    <span class="toggle-label">Filter repeated commands</span>
                     <span class="toggle-wrap">
-                        <input type="checkbox" id="filterCdToggle">
+                        <input type="checkbox" id="filterRepeatedToggle">
                         <span class="toggle-slider"></span>
                     </span>
                 </label>
