@@ -34,9 +34,9 @@ from typing import Iterable, List, Tuple, Any, Optional, Dict
 
 # Tokens/paths hinting that something is test-related.
 TEST_HINTS: Tuple[str, ...] = (
-    "test_", "repro", "reproduc", "debug", "_test", "tests/", "test/",
-    "/tests/", "/test/",
+    "test_", "repro", "reproduc", "debug", "_test", "/tests/", "/test/",
 )
+EXTENDED_TEST_HINTS: Tuple[str, ...] = TEST_HINTS + ("tests/", "test/")
 
 # Planning is an explicit phase only for frameworks that expose planning as a
 # first-class tool action. Keep these names framework-gated so an incidental
@@ -50,17 +50,13 @@ PLAN_ACTION_NAMES = frozenset({
 
 # Commands that typically *read/search* only; with redirection they can become edits.
 READONLY_CMDS: Tuple[str, ...] = (
-    "grep", "find", "cat", "ls", "head", "tail", "awk", "nl", "echo",
+    "grep", "find", "cat", "ls", "head", "tail", "awk", "nl",
 )
 
 # Commands that are clearly *editing* or *creating* content.
 # Note: sed and perl handled explicitly below based on their flags
-EDIT_CMDS: Tuple[str, ...] = ("touch", "cp")
-
-# Filesystem mutations that should be treated as patch operations unless they
-# target test artifacts, in which case the normal localization/validation rule
-# applies.
-EDIT_CMDS = EDIT_CMDS + ("rm", "mkdir")
+EDIT_CMDS: Tuple[str, ...] = ("touch",)
+EXTENDED_EDIT_CMDS: Tuple[str, ...] = ("touch", "cp", "rm", "mkdir")
 
 # Commands that observe or probe the environment. They are localization before
 # a patch and validation afterward, while ``set_env`` is intentionally kept as
@@ -178,9 +174,13 @@ def _is_piped_readonly_operation(cmd: str, tokens: List[str]) -> bool:
     has_output_redir = _contains_redirection(tokens)
     return has_pipe and not has_output_redir
 
-def _is_test_related(tokens: List[str], paths: List[str]) -> bool:
-    """Test-related if any path contains a hint from TEST_HINTS."""
-    return any(any(h in s for h in TEST_HINTS) for s in paths)
+def _is_test_related(
+    tokens: List[str],
+    paths: List[str],
+    test_hints: Tuple[str, ...] = TEST_HINTS,
+) -> bool:
+    """Test-related if any path contains a configured test hint."""
+    return any(any(h in s for h in test_hints) for s in paths)
 
 def _sre_phase(subcommand: Optional[str]) -> str:
     sub = (subcommand or "").lower()
@@ -343,6 +343,7 @@ def _classify_complex_command(
     args: Any,
     *,
     has_patch: bool,
+    test_hints: Tuple[str, ...] = TEST_HINTS,
 ) -> str:
     """
     Classify a complex_command by analyzing the bash command text.
@@ -378,8 +379,11 @@ def _classify_complex_command(
     edited_files = python_heredoc_edits + shell_redirected_files
 
     # Classify edited files as test vs non-test
-    edited_test_files = [f for f in edited_files if _is_test_related([], [f.lower()])]
-    edited_nontest_files = [f for f in edited_files if f and not _is_test_related([], [f.lower()])]
+    edited_test_files = [f for f in edited_files if _is_test_related([], [f.lower()], test_hints)]
+    edited_nontest_files = [
+        f for f in edited_files
+        if f and not _is_test_related([], [f.lower()], test_hints)
+    ]
 
     # Detect inline test execution (python heredoc without file writes)
     is_inline_test_exec = (
@@ -400,7 +404,7 @@ def _classify_complex_command(
         return "validation" if has_patch else "localization"
     else:
         # Fallback: check for any test hints in the command
-        if any(hint in bash_lower for hint in TEST_HINTS):
+        if any(hint in bash_lower for hint in test_hints):
             return "validation" if has_patch else "localization"
         return "general"
 
@@ -425,36 +429,42 @@ def get_phase(
     """
     flags = flags or {}
     cmd, tokens, paths = _normalize_command_and_merge_args(command, args)
-    cmd = _command_basename(cmd) if cmd else cmd
+    extended_framework = framework in {"codex", "claude"}
+    test_hints = EXTENDED_TEST_HINTS if extended_framework else TEST_HINTS
+    if extended_framework and cmd:
+        cmd = _command_basename(cmd)
     has_patch = _has_prior_patch(prev_phases)
 
-    if framework in {"codex", "claude"} and is_plan_action(
+    if extended_framework and is_plan_action(
         tool, subcommand, command, args,
     ):
         return "plan"
 
-    tool_name = _command_basename(str(tool or "").strip().lower())
-    if cmd in NAVIGATION_CMDS or tool_name in NAVIGATION_CMDS:
-        return "localization"
-    if cmd in ENVIRONMENT_SETUP_CMDS or tool_name in ENVIRONMENT_SETUP_CMDS:
-        return "general"
-    if cmd in GENERAL_TOOL_CMDS or tool_name in GENERAL_TOOL_CMDS:
-        return "general"
-    if cmd in WEB_LOOKUP_TOOLS or tool_name in WEB_LOOKUP_TOOLS:
-        return "localization"
-    if cmd in PATCH_CMDS or tool_name in PATCH_CMDS:
-        return "patch"
-    if (
-        (cmd in CONTEXTUAL_OBSERVATION_CMDS or tool_name in CONTEXTUAL_OBSERVATION_CMDS)
-        and not _contains_redirection(tokens)
-    ):
-        return "validation" if has_patch else "localization"
+    if extended_framework:
+        tool_name = _command_basename(str(tool or "").strip().lower())
+        if cmd in NAVIGATION_CMDS or tool_name in NAVIGATION_CMDS:
+            return "localization"
+        if cmd in ENVIRONMENT_SETUP_CMDS or tool_name in ENVIRONMENT_SETUP_CMDS:
+            return "general"
+        if cmd in GENERAL_TOOL_CMDS or tool_name in GENERAL_TOOL_CMDS:
+            return "general"
+        if cmd in WEB_LOOKUP_TOOLS or tool_name in WEB_LOOKUP_TOOLS:
+            return "localization"
+        if cmd in PATCH_CMDS or tool_name in PATCH_CMDS:
+            return "patch"
+        if (
+            (cmd in CONTEXTUAL_OBSERVATION_CMDS or tool_name in CONTEXTUAL_OBSERVATION_CMDS)
+            and not _contains_redirection(tokens)
+        ):
+            return "validation" if has_patch else "localization"
 
     # 0) Handle complex_command by analyzing the bash command text
     if cmd == "complex_command":
-        return _classify_complex_command(args, has_patch=has_patch)
+        return _classify_complex_command(
+            args, has_patch=has_patch, test_hints=test_hints,
+        )
 
-    if cmd == "node":
+    if extended_framework and cmd == "node":
         command_text = " ".join(tokens)
         if re.search(
             r"\b(?:writefile|appendfile|rename|unlink|rm|mkdir|copyfile)"
@@ -464,7 +474,7 @@ def get_phase(
             return "patch"
         return "validation" if has_patch else "localization"
 
-    if cmd == "uv":
+    if extended_framework and cmd == "uv":
         command_text = " ".join(tokens)
         if re.search(r"\b(?:add|remove)\b", command_text):
             return "patch"
@@ -475,7 +485,7 @@ def get_phase(
             return "validation" if has_patch else "localization"
         return "general"
 
-    if cmd == "git":
+    if extended_framework and cmd == "git":
         command_text = " ".join(tokens)
         if re.search(r"\bdiff\s+--check\b", command_text):
             return "validation" if has_patch else "localization"
@@ -493,13 +503,13 @@ def get_phase(
         phase = _sre_phase(subcommand)
         if phase == "patch":
             # If SRE edit targets tests, apply key rule (loc vs val by prior patch)
-            if _is_test_related(tokens, paths):
+            if _is_test_related(tokens, paths, test_hints):
                 return "validation" if has_patch else "localization"
             return "patch"
 
         # 'view' (read-only) remains localization unless it's test-related AFTER a patch → validation
         if phase == "localization" and (subcommand or "").lower() in SRE_READONLY_SUBCMDS:
-            if _is_test_related(tokens, paths) and has_patch:
+            if _is_test_related(tokens, paths, test_hints) and has_patch:
                 return "validation"
 
         return phase  # "localization" or "general"
@@ -516,7 +526,7 @@ def get_phase(
         # (heredocs contain << which looks like redirection but needs code analysis first)
         if _contains_redirection(tokens) and not is_heredoc:
             # Edit-like via redirection (e.g., python -c '...' > tests/test_x.py)
-            return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
+            return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths, test_hints) else "patch"
         code_content = None
 
         # Source 1: heredoc (stdin)
@@ -549,7 +559,10 @@ def get_phase(
 
         # If inline code is editing files, classify based on what files are being edited
         if edited_files_from_code:
-            test_files_edited = [f for f in edited_files_from_code if _is_test_related([], [f.lower()])]
+            test_files_edited = [
+                f for f in edited_files_from_code
+                if _is_test_related([], [f.lower()], test_hints)
+            ]
             if test_files_edited:
                 # Editing/creating test files
                 return "validation" if has_patch else "localization"
@@ -563,12 +576,13 @@ def get_phase(
     # 2.5) Static analysis and formatter checks. These commands inspect source
     # trees but do not modify them in their check-only modes, so after a patch
     # they are validation rather than general shell activity.
-    is_check_only_formatter = (
-        cmd in CHECK_ONLY_FORMATTERS
-        and any(flag in flags for flag in ("check", "check-only", "diff"))
-    )
-    if cmd in STATIC_ANALYSIS_CMDS or is_check_only_formatter:
-        return "validation" if has_patch else "localization"
+    if extended_framework:
+        is_check_only_formatter = (
+            cmd in CHECK_ONLY_FORMATTERS
+            and any(flag in flags for flag in ("check", "check-only", "diff"))
+        )
+        if cmd in STATIC_ANALYSIS_CMDS or is_check_only_formatter:
+            return "validation" if has_patch else "localization"
 
     # 3) Read-only commands (grep/find/cat/ls/head/tail/awk/echo/nl/sed -n/perl -n/-p without -i)
     is_sed_readonly = (cmd == "sed" and "i" not in flags and "n" in flags)
@@ -579,16 +593,16 @@ def get_phase(
         # Piped operations without output redirection (e.g., nl file.py | sed -n '10,20p') are read-only
         if _is_piped_readonly_operation(cmd, tokens):
             # Viewing content: test-related AFTER patch → validation; otherwise → localization
-            if _is_test_related(tokens, paths) and has_patch:
+            if _is_test_related(tokens, paths, test_hints) and has_patch:
                 return "validation"
             return "localization"
 
         if _contains_redirection(tokens):
             # These become edits when redirecting to files or using tee/heredoc
-            return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
+            return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths, test_hints) else "patch"
 
         # read-only, test-related AFTER a prior patch counts as validation; otherwise localization
-        if _is_test_related(tokens, paths) and has_patch:
+        if _is_test_related(tokens, paths, test_hints) and has_patch:
             return "validation"
         return "localization"
 
@@ -596,19 +610,20 @@ def get_phase(
     if cmd == "perl" and "i" not in flags:
         # Not in-place editing, not readonly viewing (already handled)
         # Check if executing test-related scripts
-        if _is_test_related(tokens, paths):
+        if _is_test_related(tokens, paths, test_hints):
             return "validation" if has_patch else "localization"
 
     # 4) Edit/creation commands (sed/touch/perl -i)
     is_perl_edit = (cmd == "perl" and "i" in flags)
-    if cmd in EDIT_CMDS or (cmd == "sed" and "i" in flags) or is_perl_edit:
+    edit_commands = EXTENDED_EDIT_CMDS if extended_framework else EDIT_CMDS
+    if cmd in edit_commands or (cmd == "sed" and "i" in flags) or is_perl_edit:
         # sed without -n, perl with -i are editing commands; treat targets accordingly
-        return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
+        return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths, test_hints) else "patch"
 
     # 5) Fallbacks:
     #    If any redirection is present (even embedded), treat as edit-like.
     if _contains_redirection(tokens):
-        return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths) else "patch"
+        return ("validation" if has_patch else "localization") if _is_test_related(tokens, paths, test_hints) else "patch"
 
     #    Otherwise, unknown → general.
     return "general"
@@ -627,12 +642,6 @@ if __name__ == "__main__":
         (None, None, "sed", ["s/foo/bar/g", "file.py"], None, {'i': True}, "patch"),
         (None, None, "python", ["script.py"], None, None, "localization"),
         (None, None, "python", ["script.py"], ["patch"], None, "validation"),
-        # Absolute virtual-environment executables and check-only tools are
-        # common in Claude Code traces and retain validation semantics.
-        (None, None, "/opt/venv/bin/pytest", ["tests/"], ["patch"], {"v": True}, "validation"),
-        (None, None, "/opt/venv/bin/mypy", ["src/"], ["patch"], None, "validation"),
-        (None, None, "/opt/venv/bin/black", ["src/", "tests/"], ["patch"], {"check": True}, "validation"),
-        (None, None, "/opt/venv/bin/isort", ["src/", "tests/"], ["patch"], {"check": True}, "validation"),
         (None, None, "python", ["-c", "'print(42)'", ">", "out.txt"], None, None, "patch"),
         (None, None, "python", ["-c", "'print(42)'", ">", "tests/test_out.py"], None, None, "localization"),
         (None, None, "python", ["-c", "'print(42)'", ">", "tests/test_out.py"], ["patch"], None, "validation"),
@@ -674,18 +683,28 @@ if __name__ == "__main__":
     for i, (tool, subcmd, cmd, args, prev, flag, expected) in enumerate(test_cases, 1):
         result = get_phase(tool, subcmd, cmd, args, prev, flag)
         assert result == expected, f"Test case {i} failed: got {result}, expected {expected}"
+    # Legacy frameworks retain the historical default behavior.
+    for command in ("cp", "rm", "mkdir", "cd", "echo", "curl", "sleep", "node", "mypy", "apply_patch"):
+        assert get_phase(None, None, command, [], [], {}) == "general"
+    assert get_phase(None, None, "git", ["status"], [], {}) == "general"
+
+    # Codex and Claude Code opt into the expanded mapper.
     assert get_phase("update_plan", None, None, {}, framework="codex") == "plan"
     assert get_phase("EnterPlanMode", None, None, {}, framework="claude") == "plan"
     assert get_phase("TodoWrite", None, None, {}, framework="sa") == "general"
+    assert get_phase(None, None, "/opt/venv/bin/pytest", ["tests/"], ["patch"], {"v": True}, framework="claude") == "validation"
+    assert get_phase(None, None, "/opt/venv/bin/mypy", ["src/"], ["patch"], None, framework="claude") == "validation"
+    assert get_phase(None, None, "/opt/venv/bin/black", ["src/", "tests/"], ["patch"], {"check": True}, framework="claude") == "validation"
+    assert get_phase(None, None, "/opt/venv/bin/isort", ["src/", "tests/"], ["patch"], {"check": True}, framework="claude") == "validation"
 
     contextual_commands = ("echo", "sleep", "curl", "taskoutput", "ps")
     for command in contextual_commands:
-        assert get_phase(None, None, command, [], [], {}) == "localization"
-        assert get_phase(None, None, command, [], ["patch"], {}) == "validation"
-    assert get_phase(None, None, "cd", [], [], {}) == "localization"
-    assert get_phase(None, None, "set_env", [], [], {}) == "general"
+        assert get_phase(None, None, command, [], [], {}, framework="codex") == "localization"
+        assert get_phase(None, None, command, [], ["patch"], {}, framework="codex") == "validation"
+    assert get_phase(None, None, "cd", [], [], {}, framework="codex") == "localization"
+    assert get_phase(None, None, "set_env", [], [], {}, framework="codex") == "general"
     assert get_phase(None, None, "mcp__environment__bash", [], [], {}, framework="claude") == "localization"
-    assert get_phase(None, None, "cp", ["source.py", "dest.py"], [], {}) == "patch"
+    assert get_phase(None, None, "cp", ["source.py", "dest.py"], [], {}, framework="codex") == "patch"
 
     diagnostic_commands = (
         "date", "wc", "nvidia-smi", "which", "df", "free", "env", "pgrep",
@@ -693,21 +712,21 @@ if __name__ == "__main__":
         "powershell", "run_shell_command", "bash",
     )
     for command in diagnostic_commands:
-        assert get_phase(None, None, command, [], [], {}) == "localization"
-        assert get_phase(None, None, command, [], ["patch"], {}) == "validation"
+        assert get_phase(None, None, command, [], [], {}, framework="codex") == "localization"
+        assert get_phase(None, None, command, [], ["patch"], {}, framework="codex") == "validation"
     for command in ("taskstop", "taskupdate", "taskcreate", "export", "agent", "#"):
-        assert get_phase(None, None, command, [], [], {}) == "general"
+        assert get_phase(None, None, command, [], [], {}, framework="codex") == "general"
     for command in ("toolsearch", "websearch", "webfetch"):
-        assert get_phase(None, None, command, [], [], {}) == "localization"
-    assert get_phase(None, None, "mcp__environment__finish", [], [], {}) == "general"
-    assert get_phase(None, None, "rm", ["source.py"], [], {}) == "patch"
-    assert get_phase(None, None, "mkdir", ["src"], [], {}) == "patch"
-    assert get_phase(None, None, "rm", ["./tests/test_output.py"], ["patch"], {}) == "validation"
-    assert get_phase(None, None, "node", ["-e", "console.log('ok')"], [], {}) == "localization"
-    assert get_phase(None, None, "node", ["-e", "console.log('ok')"], ["patch"], {}) == "validation"
-    assert get_phase(None, None, "node", ["-e", "fs.writeFileSync('app.js', 'x')"], [], {}) == "patch"
-    assert get_phase(None, None, "uv", ["run", "pytest", "tests"], [], {}) == "localization"
-    assert get_phase(None, None, "git", ["status"], [], {}) == "localization"
-    assert get_phase(None, None, "git", ["commit", "-m", "fix"], [], {}) == "general"
-    assert get_phase(None, None, "apply_patch", [], [], {}) == "patch"
+        assert get_phase(None, None, command, [], [], {}, framework="codex") == "localization"
+    assert get_phase(None, None, "mcp__environment__finish", [], [], {}, framework="codex") == "general"
+    assert get_phase(None, None, "rm", ["source.py"], [], {}, framework="codex") == "patch"
+    assert get_phase(None, None, "mkdir", ["src"], [], {}, framework="codex") == "patch"
+    assert get_phase(None, None, "rm", ["./tests/test_output.py"], ["patch"], {}, framework="codex") == "validation"
+    assert get_phase(None, None, "node", ["-e", "console.log('ok')"], [], {}, framework="codex") == "localization"
+    assert get_phase(None, None, "node", ["-e", "console.log('ok')"], ["patch"], {}, framework="codex") == "validation"
+    assert get_phase(None, None, "node", ["-e", "fs.writeFileSync('app.js', 'x')"], [], {}, framework="codex") == "patch"
+    assert get_phase(None, None, "uv", ["run", "pytest", "tests"], [], {}, framework="codex") == "localization"
+    assert get_phase(None, None, "git", ["status"], [], {}, framework="codex") == "localization"
+    assert get_phase(None, None, "git", ["commit", "-m", "fix"], [], {}, framework="codex") == "general"
+    assert get_phase(None, None, "apply_patch", [], [], {}, framework="codex") == "patch"
     print("All test cases passed.")
