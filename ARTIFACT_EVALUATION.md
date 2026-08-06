@@ -2,7 +2,7 @@
 
 This document provides instructions for evaluating the artifact of the paper **“Process-Centric Analysis of Agentic Software Systems.”**
 
-The artifact, **Graphectory**, transforms execution trajectories produced by autonomous software engineering agents into structured, phase-aware graphs and supports both individual trajectory inspection and aggregate process-centric analysis. The artifact includes:
+The artifact (Commit hash for the git repository: 75e4fcf), **Graphectory**, transforms execution trajectories produced by autonomous software engineering agents into structured, phase-aware graphs and supports both individual trajectory inspection and aggregate process-centric analysis. The artifact includes:
 
 * the Graphectory graph construction and analysis implementation;
 * an interactive trajectory graph viewer;
@@ -48,7 +48,7 @@ We recommend allocating approximately **13–15 GB of memory** to Docker during 
 
 ## 1.2 Obtain the Artifact
 
-Download the artifact:
+Download the artifact (Commit hash for the git repository: 75e4fcf):
 
 ```bash
 cd Graphectory
