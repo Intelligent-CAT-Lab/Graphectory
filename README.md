@@ -143,6 +143,9 @@ All paper figures (RQ1-RQ3):
 - RQ2: `figures/sankey_grid.png` (Figure 7), `figures/end_phase_donuts.png` (Figure 8), `figures/phase_transition_overview.png` (Figure 9)
 - RQ3: `figures/inefficiency_venn/*.pdf` (Figures 14-15)
 
+> [!NOTE]
+> We made minor improvements to command parsing and phase assignment after paper submission. Consequently, some values may differ slightly, but these differences do not affect the reported patterns, claims, or conclusions.
+
 ### Optional: Graph Construction & Analysis
 
 To generate graphs from raw trajectories (requires Zenodo data https://zenodo.org/records/17364210 or `data/samples/`):
