@@ -27,6 +27,7 @@ from buildGraph import (
     build_hierarchical_edges,
 )
 from mapPhase import is_plan_action
+from msa_steps import is_msa_v2, iter_msa_v2_steps
 
 
 _CLAUDE_SESSION_INDEXES: dict[Path, dict[str, Path]] = {}
@@ -631,7 +632,9 @@ def scan_trajectories(graphs_dir: Path,
             try:
                 with open(traj_file, encoding="utf-8", errors="replace") as f:
                     traj = json.load(f)
-                if traj.get("trajectory_format") == "mini-swe-agent-1":
+                if is_msa_v2(traj):
+                    step_count = sum(1 for _ in iter_msa_v2_steps(traj))
+                elif traj.get("trajectory_format") == "mini-swe-agent-1":
                     # v1.0: plain text messages — count assistant turns with content
                     step_count = sum(
                         1 for m in traj.get("messages", [])
@@ -2697,52 +2700,63 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
     step_idx = 0
 
     messages = traj_data.get("messages", [])
-    i = 2  # skip system (0) and initial user (1) messages
+    v2_steps = list(iter_msa_v2_steps(traj_data)) if is_msa_v2(traj_data) else None
+    i = 0 if v2_steps is not None else 2
+    count = len(v2_steps) if v2_steps is not None else len(messages)
+    stride = 1 if v2_steps is not None else 2
 
-    while i < len(messages):
-        msg = messages[i]
+    while i < count:
+        v2_step = v2_steps[i] if v2_steps is not None else None
+        if v2_step is not None:
+            thought = v2_step["thought"]
+            thought_len_raw = compute_thought_length_raw(thought)
+            thought_len_clean = compute_thought_length_clean(thought)
+            raw_actions = [action["command"] for action in v2_step["actions"]]
+            observation = v2_step["feedback"]
+        else:
+            msg = messages[i]
 
-        # Only process assistant-response messages that carry an output list
-        if not isinstance(msg.get("output"), list):
-            i += 1
-            continue
+            # Only process assistant-response messages that carry an output list
+            if not isinstance(msg.get("output"), list):
+                i += 1
+                continue
 
-        output_blocks = msg["output"]
+            output_blocks = msg["output"]
 
-        # ── Extract thought ────────────────────────────────────────────
-        thought = ""
-        for block in output_blocks:
-            if isinstance(block, dict) and block.get("type") == "message":
-                content = block.get("content", [])
-                if isinstance(content, list) and content:
-                    thought = content[0].get("text", "") if isinstance(content[0], dict) else ""
-                elif isinstance(content, str):
-                    thought = content
-                break
+            # ── Extract thought ────────────────────────────────────────────
+            thought = ""
+            for block in output_blocks:
+                if isinstance(block, dict) and block.get("type") == "message":
+                    content = block.get("content", [])
+                    if isinstance(content, list) and content:
+                        thought = content[0].get("text", "") if isinstance(content[0], dict) else ""
+                    elif isinstance(content, str):
+                        thought = content
+                    break
 
-        thought_len_raw   = compute_thought_length_raw(thought)
-        thought_len_clean = compute_thought_length_clean(thought)
+            thought_len_raw   = compute_thought_length_raw(thought)
+            thought_len_clean = compute_thought_length_clean(thought)
 
-        # ── Extract observation from the following tool-result message ─
-        observation = ""
-        if i + 1 < len(messages):
-            next_msg = messages[i + 1]
-            if isinstance(next_msg.get("output"), str):
-                observation = next_msg["output"]
-            else:
-                observation = next_msg.get("extra", {}).get("raw_output", "")
+            # ── Extract observation from the following tool-result message ─
+            observation = ""
+            if i + 1 < len(messages):
+                next_msg = messages[i + 1]
+                if isinstance(next_msg.get("output"), str):
+                    observation = next_msg["output"]
+                else:
+                    observation = next_msg.get("extra", {}).get("raw_output", "")
 
-        # ── Extract actions from function_call blocks ──────────────────
-        raw_actions: list[str] = []
-        for block in output_blocks:
-            if isinstance(block, dict) and block.get("type") == "function_call":
-                try:
-                    args_json = json.loads(block.get("arguments", "{}"))
-                except (json.JSONDecodeError, TypeError):
-                    args_json = {}
-                cmd_str = args_json.get("command", "")
-                if cmd_str:
-                    raw_actions.append(cmd_str)
+            # ── Extract actions from function_call blocks ──────────────────
+            raw_actions: list[str] = []
+            for block in output_blocks:
+                if isinstance(block, dict) and block.get("type") == "function_call":
+                    try:
+                        args_json = json.loads(block.get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args_json = {}
+                    cmd_str = args_json.get("command", "")
+                    if cmd_str:
+                        raw_actions.append(cmd_str)
 
         # If there are no function-call actions this step is a pure-think step
         if not raw_actions:
@@ -2764,6 +2778,8 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
             _accumulate_observation(builder.G.nodes[node_key], observation)
             _accumulate_step_data(builder.G.nodes[node_key], step_idx,
                                   thought, "", observation)
+            if v2_step is not None:
+                builder.G.nodes[node_key]["step_data"][-1]["source_message_index"] = v2_step["message_index"]
             builder.add_execution_edge(
                 node_key, step_idx,
                 is_first_in_step=True,
@@ -2779,7 +2795,7 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
             prev_thought = thought
             prev_step_first_node = node_key
             step_idx += 1
-            i += 2
+            i += stride
             continue
 
         # ── Parse each action string and build nodes ───────────────────
@@ -2787,7 +2803,11 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
         node_keys_in_step: list[str] = []
         step_first_node: str | None = None
 
-        for action_str in raw_actions:
+        for action_index, action_str in enumerate(raw_actions):
+            action = v2_step["actions"][action_index] if v2_step is not None else None
+            if action is not None:
+                observation = action["observation"]
+            action_node_keys = []
             parsed_commands = cmd_parser.parse(action_str)
             if not parsed_commands:
                 parsed_commands = [{
@@ -2830,6 +2850,8 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
                     tool=tool, subcommand=subcommand,
                     args=args if isinstance(args, dict) else {},
                 )
+                if action is not None and isinstance(action["returncode"], int) and action["returncode"] != 0:
+                    outcome = "failure"
                 edit_status = check_edit_status(tool, subcommand, args, observation)
                 if edit_status and isinstance(args, dict):
                     args["edit_status"] = edit_status
@@ -2853,6 +2875,14 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
                 _accumulate_step_data(builder.G.nodes[node_key], step_idx,
                                       thought, action_str, observation)
 
+                if v2_step is not None:
+                    builder.G.nodes[node_key]["step_data"][-1].update(
+                        source_message_index=v2_step["message_index"],
+                        exit_status=v2_step["exit_status"],
+                        **{key: value for key, value in action.items()
+                           if key not in {"command", "observation"}},
+                    )
+                action_node_keys.append(node_key)
                 node_keys_in_step.append(node_key)
                 if step_first_node is None:
                     step_first_node = node_key
@@ -2873,14 +2903,22 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
                 builder.prev_phases.add(phase)
                 is_first_in_step = False
 
+            if action is not None and action_node_keys:
+                last_data = builder.G.nodes[action_node_keys[-1]]
+                _accumulate_observation(last_data, observation)
+                if action["result_missing"]:
+                    last_data["observation_outcome"] = "neutral"
+                elif isinstance(action["returncode"], int) and action["returncode"] != 0:
+                    last_data["observation_outcome"] = "failure"
+
         # Mark the last node with observation info
-        if node_keys_in_step:
+        if v2_step is None and node_keys_in_step:
             _accumulate_observation(builder.G.nodes[node_keys_in_step[-1]], observation)
 
         prev_thought = thought
         prev_step_first_node = step_first_node
         step_idx += 1
-        i += 2  # advance past this assistant message and its tool-result reply
+        i += stride
 
     # ── Post-processing ────────────────────────────────────────────────
     build_hierarchical_edges(builder.G, builder.localization_nodes)
@@ -2896,6 +2934,10 @@ def _build_graph_msa(traj_data: dict, instance_id: str,
     except Exception:
         builder.G.graph["debug_difficulty"] = "unknown"
 
+    if v2_steps is not None:
+        builder.G.graph["trajectory_format"] = traj_data.get("trajectory_format")
+        builder.G.graph["mini_version"] = (traj_data.get("info") or {}).get("mini_version")
+        builder.G.graph["source_step_count"] = len(v2_steps)
     return builder.G
 
 

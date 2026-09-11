@@ -211,6 +211,14 @@ def _sanitize_step_data(step_data: list) -> list:
             "action":      _sanitize_text(entry.get("action",      "") or ""),
             "observation": _sanitize_text(entry.get("observation", "") or ""),
         })
+        # Preserve optional v2 provenance without changing older graph payloads.
+        for key in ("source_message_index", "result_message_index", "action_index", "returncode"):
+            if isinstance(entry.get(key), int):
+                cleaned[-1][key] = entry[key]
+        if isinstance(entry.get("result_missing"), bool):
+            cleaned[-1]["result_missing"] = entry["result_missing"]
+        if isinstance(entry.get("exit_status"), str):
+            cleaned[-1]["exit_status"] = _sanitize_text(entry["exit_status"])
     return cleaned
 
 

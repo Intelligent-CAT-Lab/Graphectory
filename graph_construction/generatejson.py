@@ -33,7 +33,7 @@ from buildGraph import build_graph_from_sa_trajectory, build_graph_from_oh_traje
 
 # ==================== Configuration ====================
 SUPPORTED_AGENTS = {"sa", "oh", "msa"}
-SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "gpt-5-mini"}
+SUPPORTED_MODELS = {"dsk-v3", "dsk-r1", "dev", "cld-4", "gpt-5-mini", "minimax-m2.5", "deepseek-v4-flash-0731"}
 
 MODEL_NAMES = {
     "dsk-v3": "deepseek-v3",
@@ -41,6 +41,8 @@ MODEL_NAMES = {
     "dev": "devstral-small",
     "cld-4": "claude-sonnet-4",
     "gpt-5-mini": "gpt-5-mini",
+    "minimax-m2.5": "minimax-m2.5",
+    "deepseek-v4-flash-0731": "deepseek-v4-flash-0731",
 }
 
 AGENT_NAMES = {

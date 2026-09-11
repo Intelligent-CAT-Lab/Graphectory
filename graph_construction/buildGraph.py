@@ -639,6 +639,22 @@ def build_graph_from_msa_trajectory(traj_data, parser, instance_id, output_dir, 
     Returns:
         tuple: (json_path, html_path) paths to the saved graph files
     """
+    from msa_steps import is_msa_v2
+
+    if version != "1.0" and is_msa_v2(traj_data):
+        # Share the v2 construction path with the live viewer. Import lazily:
+        # server.graph_builder itself imports the core GraphBuilder above.
+        from server.graph_builder import _build_graph_msa
+
+        builder = GraphBuilder()
+        builder.G = _build_graph_msa(
+            traj_data, instance_id, eval_report_path, parser,
+            filter_cd=False, unique_think=True,
+        )
+        return builder.finalize_and_save(
+            output_dir, instance_id, eval_report_path, template_dir, metadata_comment,
+        )
+
     from mapPhase import get_phase
 
     builder = GraphBuilder()
