@@ -17,13 +17,11 @@ Graphectory transforms agent execution traces into structured graphs that captur
 
 Graphectory is very easy to adopt (please see "Supporting New Agents" and "Supporting New SWE Agent Tools" in the ReadMe). If you have any question or need help, please post on the issue tracker with a sample of your trajectory and we would be happy to assist. 
 
-New: Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHands), the repository additionally supports **mini-swe-agent** (v2.0.0, `trajectory_format` version `mini-swe-agent-1.1`; and `trajectory_format` version `mini-swe-agent-1`), a widely used scaffold in agentic research with over 3.3k GitHub stars. 
+> [NEW] Beyond the two agent frameworks studied in the paper (SWE-agent and OpenHands), the repository additionally supports **mini-swe-agent** (v1.0, v2.0, and v2.4), a widely used scaffold in agentic research with over 3.3k GitHub stars. 
 
----
+> Compatible **Claude Code** session streams are recognized when their `state.json` declares `custom.sourceFramework: "Claude Code"`. Shell commands are normalized before graph construction, including virtual-environment executables and post-patch checks such as `pytest`, `mypy`, `black --check`, and `isort --check`.
 
-Compatible **Claude Code** session streams are recognized when their `state.json` declares `custom.sourceFramework: "Claude Code"`. Shell commands are normalized before graph construction, including virtual-environment executables and post-patch checks such as `pytest`, `mypy`, `black --check`, and `isort --check`.
-
-The live viewer additionally supports local **Codex** rollout sessions. Point it at `~/.codex/sessions` (PowerShell: `$HOME\.codex\sessions`; Command Prompt: `%USERPROFILE%\.codex\sessions`) or one `rollout-*.jsonl` file. The adapter reconstructs grouped tool calls and matched outputs, expands shell and patch operations, and uses only visible commentary or explicitly surfaced reasoning summaries rather than private chain-of-thought.
+> The live viewer additionally supports local **Codex** rollout sessions. Point it at `~/.codex/sessions` (PowerShell: `$HOME\.codex\sessions`; Command Prompt: `%USERPROFILE%\.codex\sessions`) or one `rollout-*.jsonl` file. The adapter reconstructs grouped tool calls and matched outputs, expands shell and patch operations, and uses only visible commentary or explicitly surfaced reasoning summaries rather than private chain-of-thought.
 
 ## Dataset
 
