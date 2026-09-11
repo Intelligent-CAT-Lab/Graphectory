@@ -856,6 +856,26 @@ def _extract_phase_sequence(traj_data: dict, agent_type: str, cmd_parser) -> lis
         prev_phases_list: list[str] = []
         messages = traj_data.get("messages", [])
 
+        # Role-based v2 messages use the same normalized turns as the graph.
+        from msa_steps import is_msa_v2, iter_msa_v2_steps
+
+        if is_msa_v2(traj_data):
+            for step in iter_msa_v2_steps(traj_data):
+                step_phase = "general"
+                # Keep the existing MSA summary's first-command convention.
+                if step["actions"] and cmd_parser:
+                    cmds = cmd_parser.parse(step["actions"][0]["command"])
+                    if cmds:
+                        p = cmds[0]
+                        step_phase = get_phase(
+                            p.get("tool", ""), p.get("subcommand", ""),
+                            p.get("command", ""), p.get("args", {}),
+                            prev_phases_list, p.get("flags", {}),
+                        )
+                phases.append(step_phase)
+                prev_phases_list.append(step_phase)
+            return phases
+
         # v1.0 text format
         if traj_data.get("trajectory_format") == "mini-swe-agent-1":
             i = 2

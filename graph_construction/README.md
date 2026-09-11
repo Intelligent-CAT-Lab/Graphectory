@@ -146,8 +146,8 @@ python graph_construction/generatejson.py \
 ```bash
 python graph_construction/generatejson.py \
   --agent msa --model gpt-5-mini \
-  --trajs data/samples/mini-swe-agent/trajectories/gpt-5-mini \
-  --eval_report data/samples/mini-swe-agent/reports/gpt-5-mini.json \
+  --trajs data/samples/mini-swe-agent-v2.1/trajectories/gpt-5-mini \
+  --eval_report data/samples/mini-swe-agent-v2.1/reports/gpt-5-mini.json \
   --output_dir data/samples
 ```
 
