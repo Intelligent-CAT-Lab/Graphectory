@@ -5,5 +5,4 @@ __pycache__/
 dist/
 build/
 misc/
-application/plan_monitor/*
 README_v0.md

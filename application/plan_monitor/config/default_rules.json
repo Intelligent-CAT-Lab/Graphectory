@@ -1,0 +1,82 @@
+{
+  "rate_limit": {
+    "enabled": true,
+    "min_gap": 5
+  },
+  "trigger_on_success_only": false,
+  "rules": {
+    "plan_compliance": {
+      "intended_plan": ["L", "P", "V"],
+      "ending_flags": [
+        "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
+        "submit"
+      ],
+      "phase_names": {
+        "L_navigate": "navigation",
+        "L_reproduce": "reproducing",
+        "L": "localization",
+        "P": "patching",
+        "V": "testing",
+        "V_regression_test": "running relevant tests to avoid regressions",
+        "V_newly_generated_test": "testing"
+      },
+      "message": "Plan compliance violation: {violation}. Expected to {expected}. Skipped phases: {skipped}. Follow the intended workflow to ensure thorough problem solving.",
+      "block_execution": true,
+      "threshold": 3
+    },
+    "dwell_times": {
+      "block_execution": false,
+      "dwell_L_navigate": {
+        "message": "You may get stuck in navigation. Search for the relevant code only. Run tests to localize the bug, if necessary.",
+        "threshold": 6
+      },
+      "dwell_L_reproduce": {
+        "message": "Long reproducing process. Skip if the issue is unable to reproduce.",
+        "threshold": 6
+      },
+      "dwell_P": {
+        "message": "Long patching process. If continuous edit fails, inspect the exact edit location to make targeted patch or change editing method. If edit succeeds, validate with tests to avoid over-editing.",
+        "threshold": 6
+      },
+      "dwell_V": {
+        "message": "Long validation process. If no further error is detected, submit the patch. Otherwise, use the test results to guide the localization and patch generation.",
+        "threshold": 6
+      }
+    },
+    "oscillations": {
+      "block_execution": true,
+      "max_repeats": 5,
+      "max_repeats_rule": {
+        "message": "If you cannot make further progress, stop and exit or submit your patch."
+      },
+      "self_loop": {
+        "message": "You repeated the same action without gaining new information. Consider whether this step moves you forward; if not, choose a more targeted next action.",
+        "threshold": 2
+      },
+      "two_node_cycle": {
+        "message": "A repeating cycle of actions is detected. Summarize the failing behavior and commit to the step that directly advances the fix.",
+        "threshold": 2
+      },
+      "multi_node_cycle": {
+        "message": "A repeating cycle of actions is detected. Before continuing, summarize the failing behavior and select one decisive next step.",
+        "threshold": 2
+      },
+      "loop_family": {
+        "message": "You are switching between routines without new progress. Summarize the failing behavior and choose one targeted next action.",
+        "threshold_outer": 2,
+        "threshold_inner": 1
+      }
+    }
+  },
+  "meta_data": {
+    "agent": {
+      "SWE-agent": {
+        "tool_configs": [
+          "SWE-agent/tools/edit_anthropic/config.yaml",
+          "SWE-agent/tools/review_on_submit_m/config.yaml",
+          "SWE-agent/tools/registry/config.yaml"
+        ]
+      }
+    }
+  }
+}
