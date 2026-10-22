@@ -116,6 +116,31 @@ When consecutive execution edges connect the same two nodes, the viewer combines
 
 Click any node to open a detail sidebar showing the full thought, action, and observation text for that node. If the node was visited multiple times, tab buttons let you page through each visit. The sidebar's left edge is draggable to resize it.
 
+### Analyze API (send a trajectory over HTTP)
+
+When the server runs in Docker, the container cannot see files on the client's machine. `POST /api/analyze` takes the trajectory itself in the request body and returns its graph, without changing the dataset the browser UI is showing:
+
+```bash
+# SWE-agent .traj / mini-swe-agent .traj.json → interactive graph page
+curl -X POST -H 'Content-Type: application/json' \
+     --data-binary @django__django-10973.traj \
+     'http://localhost:8000/api/analyze?id=django__django-10973' -o graph.html
+
+# Claude Code transcript / Codex rollout / OpenHands output.jsonl → graph as JSON
+curl -X POST -H 'Content-Type: application/x-ndjson' \
+     --data-binary @session.jsonl \
+     'http://localhost:8000/api/analyze?format=json'
+```
+
+| Query parameter | Meaning |
+|---|---|
+| `agent` | `sa`, `msa`, `oh`, `claude` or `codex`; auto-detected when omitted. |
+| `id` | Instance name (letters, digits, `.`, `_`, `-`); also picks one entry from a multi-instance OpenHands JSONL. |
+| `format` | `html` (default, the same page as the UI) or `json` (networkx node-link data). |
+| `filter_cd`, `thought_quotes`, `show_observation`, `filter_repeated`, `unique_think` | Same view toggles as `/api/graph`. |
+
+The body is staged in a private temporary directory, parsed only as JSON/JSONL, and deleted before the response is sent. Requests must use `Content-Type: application/json`, `application/x-ndjson` or `application/jsonl`, and a browser `Origin` must match the server's host, so other websites cannot submit on a visitor's behalf. Limits are set with `GRAPHECTORY_UPLOAD_MAX_MB` (default 20) and `GRAPHECTORY_UPLOAD_SLOTS` (concurrent uploads, default 2; extra requests get `503`). Errors: `400` bad input, `411`/`413` missing or oversized body, `415` wrong content type, `422` data the builders cannot graph.
+
 ---
 
 ## Batch JSON Export (`generatejson.py`)
