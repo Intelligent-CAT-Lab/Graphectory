@@ -131,7 +131,14 @@ class GraphHandler(BaseHTTPRequestHandler):
                 self._send_file(BROWSER_LOGO_PATH)
 
             elif path.startswith("/static/"):
-                self._send_file(STATIC_DIR / path[len("/static/"):])
+                # Resolve and confine to STATIC_DIR: "../" segments or an
+                # absolute remainder ("/static//etc/passwd") must not escape it.
+                static_root = STATIC_DIR.resolve()
+                target = (static_root / path[len("/static/"):].lstrip("/")).resolve()
+                if not target.is_relative_to(static_root) or not target.is_file():
+                    self._error(404, "Not found")
+                    return
+                self._send_file(target)
 
             elif path == "/api/graphs":
                 self._api_graphs()
@@ -175,6 +182,20 @@ class GraphHandler(BaseHTTPRequestHandler):
 
         try:
             if path == "/api/config":
+                # Block cross-site requests: a foreign page can only send a
+                # "simple" (text/plain, form) POST without a CORS preflight,
+                # and a browser-supplied Origin must match the Host it targets.
+                content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                if content_type != "application/json":
+                    self._error(415, "Content-Type must be application/json.")
+                    return
+                # Reverse proxies (e.g. tailscale serve) may rewrite Host and
+                # pass the browser-facing one in X-Forwarded-Host.
+                origin = self.headers.get("Origin")
+                allowed_hosts = {self.headers.get("Host"), self.headers.get("X-Forwarded-Host")}
+                if origin and urlparse(origin).netloc not in allowed_hosts:
+                    self._error(403, "Cross-origin requests are not allowed.")
+                    return
                 length = int(self.headers.get("Content-Length", 0))
                 body   = self.rfile.read(length)
                 data   = json.loads(body)
