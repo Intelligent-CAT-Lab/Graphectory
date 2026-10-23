@@ -158,6 +158,33 @@ class AnalyzeApiTest(unittest.TestCase):
             status, _ = self.request("GET", path)
             self.assertEqual(status, 404, path)
 
+    # ── /docs ────────────────────────────────────────────────────────────────
+
+    def test_docs_page_is_served_standalone(self):
+        for path in ("/docs", "/docs/", "/api/docs"):
+            status, data = self.request("GET", path)
+            self.assertEqual(status, 200, path)
+            page = data.decode()
+            self.assertIn("/api/analyze", page)
+            # Nothing is fetched from elsewhere: scripts and styles are inline.
+            self.assertNotRegex(page, r'<script[^>]+src=')
+            self.assertNotRegex(page, r'<link[^>]+rel="stylesheet"')
+
+    def test_docs_cover_every_query_parameter_the_handler_reads(self):
+        import re as _re
+        handler_src = (ROOT / "graph_construction" / "server" / "handler.py").read_text()
+        # The two analyze handlers: _analyze_opendraco, then _api_analyze.
+        start = handler_src.index("def _analyze_opendraco")
+        body = handler_src[start:handler_src.index("def _api_get_config", start)]
+        names = set(_re.findall(r'params\.get\("([a-z_]+)"', body))
+        names |= set(_re.findall(r'_bool_param\(params, "([a-z_]+)"', body))
+        names = {n for n in names if n != "prefetch"}
+        self.assertTrue({"agent", "id", "format", "agent_id", "phases"} <= names, names)
+        _, data = self.request("GET", "/docs")
+        page = data.decode()
+        for name in sorted(names):
+            self.assertIn(f"<code>{name}</code>", page, name)
+
 
 if __name__ == "__main__":
     unittest.main()

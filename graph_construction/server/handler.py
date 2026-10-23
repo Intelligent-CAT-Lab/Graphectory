@@ -15,6 +15,7 @@ Routes
 ------
 GET  /                          → browser UI  (index.html)
 GET  /static/<file>             → static assets (browser.css, browser.js, …)
+GET  /docs                      → API documentation page (static/api-docs.html)
 GET  /api/graphs                → incremental trajectory metadata and progress
 GET  /api/graph?id=X[&…]        → on-demand graph HTML for instance X
 GET  /api/sankey                → aggregated phase-per-step data for Sankey diagram
@@ -139,6 +140,9 @@ class GraphHandler(BaseHTTPRequestHandler):
         try:
             if path in ("/", "/index.html"):
                 self._send_file(STATIC_DIR / "index.html")
+
+            elif path in {"/docs", "/docs/", "/api/docs"}:
+                self._send_file(STATIC_DIR / "api-docs.html")
 
             elif path in {"/browser_logo.png", "/favicon.png"}:
                 self._send_file(BROWSER_LOGO_PATH)
