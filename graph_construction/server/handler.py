@@ -53,7 +53,10 @@ from server.graph_builder import (
     scan_trajectories,
 )
 from server.graph_renderer import render_graph_html
-from server.upload import DEFAULT_INSTANCE_ID, UploadError, load_staged, stage_upload
+from server.upload import (
+    DEFAULT_INSTANCE_ID, UploadError, load_staged, stage_upload, valid_instance_id,
+)
+import opendraco_runs.analyze as opendraco
 
 import networkx as nx
 
@@ -233,6 +236,39 @@ class GraphHandler(BaseHTTPRequestHandler):
 
     # ── Route handlers ────────────────────────────────────────────────────────
 
+    def _analyze_opendraco(self, body: bytes, params: dict[str, list[str]],
+                           output: str, filter_cd: bool):
+        """Run view + per-agent graphs for one OpenDraco run log."""
+        label = params.get("id", [None])[0]
+        if label is not None and not valid_instance_id(label):
+            self._error(400, "Invalid id: use letters, digits, '.', '_' or '-' (max 128).")
+            return
+        phases = params.get("phases", ["run"])[0]
+        if phases not in {"run", "agent"}:
+            self._error(400, "phases must be 'run' or 'agent'.")
+            return
+        try:
+            content_type, payload = opendraco.analyze(
+                body, self.cmd_parser, self.assets_dir, output=output, label=label,
+                agent_id=params.get("agent_id", [None])[0], filter_cd=filter_cd,
+                unique_think=_bool_param(params, "unique_think", default=True),
+                run_phases=phases == "run",
+                view={
+                    "filter_cd":        filter_cd,
+                    "thought_quotes":   _bool_param(params, "thought_quotes",   default=True),
+                    "show_observation": _bool_param(params, "show_observation", default=False),
+                    "filter_repeated":  _bool_param(params, "filter_repeated",  default=False),
+                },
+            )
+        except opendraco.OpenDracoError as exc:
+            self._error(400, str(exc))
+            return
+        except Exception:
+            logger.exception("[handler] Could not build graphs for uploaded OpenDraco run")
+            self._error(422, "Could not build graphs from this OpenDraco run log.")
+            return
+        self._respond(200, content_type, payload)
+
     def _api_analyze(self, params: dict[str, list[str]]):
         """Build a graph from a trajectory sent in the request body.
 
@@ -267,6 +303,13 @@ class GraphHandler(BaseHTTPRequestHandler):
             return
         try:
             body = self.rfile.read(length)
+            # OpenDraco multi-agent run logs have their own pipeline
+            # (graph_construction/opendraco_runs); everything else is staged below.
+            if agent_hint == opendraco.AGENT_TYPE or (
+                agent_hint is None and opendraco.looks_like_opendraco(body)
+            ):
+                self._analyze_opendraco(body, params, output, filter_cd)
+                return
             with tempfile.TemporaryDirectory(prefix="graphectory-upload-") as tmp:
                 try:
                     graphs_dir, agent_type = stage_upload(

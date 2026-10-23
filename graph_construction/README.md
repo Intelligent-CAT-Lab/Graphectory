@@ -134,12 +134,93 @@ curl -X POST -H 'Content-Type: application/x-ndjson' \
 
 | Query parameter | Meaning |
 |---|---|
-| `agent` | `sa`, `msa`, `oh`, `claude` or `codex`; auto-detected when omitted. |
+| `agent` | `sa`, `msa`, `oh`, `claude`, `codex` or `opendraco`; auto-detected when omitted. |
 | `id` | Instance name (letters, digits, `.`, `_`, `-`); also picks one entry from a multi-instance OpenHands JSONL. |
 | `format` | `html` (default, the same page as the UI) or `json` (networkx node-link data). |
 | `filter_cd`, `thought_quotes`, `show_observation`, `filter_repeated`, `unique_think` | Same view toggles as `/api/graph`. |
 
 The body is staged in a private temporary directory, parsed only as JSON/JSONL, and deleted before the response is sent. Requests must use `Content-Type: application/json`, `application/x-ndjson` or `application/jsonl`, and a browser `Origin` must match the server's host, so other websites cannot submit on a visitor's behalf. Limits are set with `GRAPHECTORY_UPLOAD_MAX_MB` (default 20) and `GRAPHECTORY_UPLOAD_SLOTS` (concurrent uploads, default 2; extra requests get `503`). Errors: `400` bad input, `411`/`413` missing or oversized body, `415` wrong content type, `422` data the builders cannot graph.
+
+#### OpenDraco multi-agent runs (`agent=opendraco`)
+
+An [OpenDraco](https://github.com/xiangfengyepan/OpenDraco2) run is several agents handing work to each other, recorded in one `runs/<run_id>/run.jsonl`. Send that file as `application/x-ndjson`. It is auto-detected when its first record is `run_started` with `framework_version` and `topology`.
+
+```bash
+curl -X POST -H 'Content-Type: application/x-ndjson' --data-binary @run.jsonl \
+     'http://localhost:8000/api/analyze?agent=opendraco' -o run.html
+```
+
+You get two things:
+
+1. **One graph per agent.** Each agent's turns (`local_turn` order) become an ordinary Graphectory trajectory, built by the existing Claude Code builder, so nodes, phases, outcomes and every metric behave as for the other formats:
+   - `thinking`, and any `message` that comes before a tool call, are the step's thought.
+   - `tool_call` + `tool_result` is an action and its observation. Results are paired within one activation only, because models reuse ids like `call_0` every turn.
+   - The last message of a turn that calls no tool is a `final_answer` action.
+   - The deliveries that started a turn begin its first thought as `from <agent>: <value>`, or `from the parent run` for a fork.
+   - Phases: `bash` goes through commandParser and the shell rules, using the exit code from the result text. `read` is localization. `write` is patch, or localization/validation for test paths. `web_search` is localization. Any other tool gets the generic rule.
+   - **Run-aware validation** (`phases=run`, the default): an edit by *any* agent counts as a prior patch for actions in later supersteps. That edit is a `workspace_commit` in an earlier superstep, and supersteps are barriers. Without this, a tester agent running the tests for another agent's fix would read as localization. `phases=agent` keeps the strict per-trajectory classification.
+2. **The run view.** It shows how the agents worked together:
+   - **Agent graph:** each node shows the agent's activations, phase mix, tokens, duration and whether it changed the workspace. Edges are deliveries (count, supersteps, edge id), and conditional routing appears as labelled `route` edges (choice, picked / decisions).
+   - **Timeline:** supersteps × agents, one block per activation and an arrow per delivery. Abandoned activations are hatched, with their rerun beside them.
+   - **Pattern detection,** with no model involved. Thresholds are in `opendraco_runs/patterns.py` (`PATTERN_CONFIG`):
+
+| Pattern | Fires when | Default |
+|---|---|---|
+| `ping_pong` | Two agents hand work back and forth N+ times in a row with no `workspace_commit` in between | N = 4 |
+| `stalled_handoff` | An agent is activated M+ times, never calls a tool or changes a file, and only passes its input on | M = 3 |
+| `router_churn` | One `route_decision` group picks the same target K+ times | K = 3 |
+| `hot_agent` | One agent takes more than X of all activations or all tokens (two or more agents) | X = 70 % |
+
+Extra parameters: `agent_id=<agent>` returns only that agent's graph (HTML page, or the single-agent JSON shape); `phases=run|agent`. `id`, `format`, the view toggles, limits and errors are as above.
+
+`format=html` is one standalone page. dagre is inlined, nothing is fetched, and it works saved to disk or inside a sandboxed iframe. The run view is on top, with one tab per agent below; each tab holds that agent's ordinary graph page in a `sandbox="allow-scripts"` iframe. All run text is treated as untrusted. It is embedded as escaped JSON and placed in the DOM with `textContent` only.
+
+`format=json`:
+
+```jsonc
+{
+  "run_id": "2026-10-23-a002", "id": "2026-10-23-a002",   // id = ?id= or run_id
+  "agent_type": "opendraco",
+  "status": "completed",            // run_finished.status, or "in_progress" with no run_finished
+  "phase_scope": "run",             // or "agent" with ?phases=agent
+  "agents": {                       // per agent: the same shape as a single-agent format
+    "writer": {"instance_id": "writer", "agent_type": "opendraco", "nodes": 1, "edges": 0, "graph": { /* node-link */ }}
+  },
+  "run_graph": {                    // networkx node-link (MultiDiGraph)
+    "directed": true, "multigraph": true,
+    "graph": {
+      "run_id": "…", "status": "…", "framework_version": "…",
+      "forked_from": null,          // {run_id, superstep, activation_uuid} on a fork
+      "resumed_at": [],             // supersteps of run_resumed records
+      "truncated": false,           // last line was half-written
+      "skipped_lines": 0, "supersteps": 2, "errors": [{"agent_id": "…", "message": "…"}],
+      "timeline": {
+        "activations": [{"uuid", "agent_id", "superstep", "local_turn", "status" /* finished|abandoned|running */,
+                         "rerun_of", "tokens", "duration_s", "stop_reason", "tool_calls", "changed_paths",
+                         "from_parent_run", "started_at"}],
+        "deliveries":  [{"uuid", "from_agent", "to_agent", "edge_id", "from_activation", "to_activations",
+                         "superstep" /* producer's; null for START */, "preview" /* first 280 chars */}]
+      }
+    },
+    "nodes": [{"id": "writer", "kind": "agent" /* agent|start|end|external */, "mode": "unconditional",
+               "activations": 1, "abandoned_activations": 0, "running_activations": 0, "tool_calls": 0,
+               "phase_mix": {"general": 1}, "tokens": {"input_tokens", "output_tokens", "total_tokens"},
+               "duration_s": 0.0, "changed_workspace": false, "commits": 0, "changed_paths": [], "model": "…"}],
+    "edges": [
+      {"source": "writer", "target": "reviewer", "key": "delivery:e2", "type": "delivery", "edge_id": "e2",
+       "slot": "task", "count": 1, "supersteps": [1], "from_parent_run": 0},
+      {"source": "writer", "target": "reviewer", "key": "route:writer:reviewer", "type": "route",
+       "group": "writer", "choice": "reviewer", "count": 3, "of": 4, "outcomes": ["reviewer", "end"], "supersteps": [1, 3, 5]}
+    ]
+  },
+  "patterns": [{"kind": "ping_pong", "agents": ["reviewer", "writer"], "supersteps": [1, 2, 3, 4, 5, 6],
+                "summary": "…one sentence…", "evidence": {}}],
+  "pattern_config": {"ping_pong_min_exchanges": 4, "stalled_min_activations": 3,
+                     "router_churn_min_repeats": 3, "hot_agent_share": 0.7}
+}
+```
+
+Topology edges the run never used are kept with `count: 0`. Deliveries use the append policy, so `caused_by` lists everything an agent has ever received. Arrows and context lines use only what each turn saw first.
 
 ---
 
