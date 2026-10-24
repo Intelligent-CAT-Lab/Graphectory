@@ -1,5 +1,5 @@
 """
-opendraco_runs/patterns.py
+opendraco2_runs/patterns.py
 
 Multi-agent patterns detected from the log's structure alone (no model involved).
 
@@ -10,7 +10,7 @@ sentence the page shows for each pattern kind.
 from collections import Counter, defaultdict
 from typing import Optional
 
-from opendraco_runs.log import TOOL_CALL, RunLog
+from opendraco2_runs.log import TOOL_CALL, RunLog
 
 PATTERN_CONFIG = {
     # N: deliveries alternating A→B→A… with no workspace commit in between.

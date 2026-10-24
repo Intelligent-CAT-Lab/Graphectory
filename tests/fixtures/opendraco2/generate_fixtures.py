@@ -8,7 +8,7 @@ Regenerate (from the OpenDraco backend checkout, so its environment is used):
 
     cd <OpenDraco>/backend
     UV_INDEX_URL=https://pypi.org/simple uv run python \\
-        <Graphectory>/tests/fixtures/opendraco/generate_fixtures.py . [WORK_DIR]
+        <Graphectory>/tests/fixtures/opendraco2/generate_fixtures.py . [WORK_DIR]
 
 The first argument is the backend directory (or set OPENDRACO_BACKEND). WORK_DIR, where
 the throw-away projects are built, defaults to a fresh temporary directory. Each

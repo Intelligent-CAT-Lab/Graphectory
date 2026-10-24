@@ -1,10 +1,10 @@
 """
-opendraco_runs/log.py
+opendraco2_runs/log.py
 
 Parse an OpenDraco ``run.jsonl`` into a ``RunLog``: activations with the records
 that belong to them, deliveries, commits and route decisions.
 
-The schema is OpenDraco's ``backend/src/opendraco/runlog/records.py``; this reader
+The schema is OpenDraco2's ``backend/src/opendraco/runlog/records.py``; this reader
 mirrors ``runlog/reader.py``'s tolerance rather than its strictness:
 
 * a line that is not a JSON object naming a ``type`` is skipped, so a log whose
@@ -137,6 +137,9 @@ class RunLog:
     # The last non-empty line was not a record: a half-written tail.
     truncated: bool = False
     by_uuid: dict[str, Activation] = field(default_factory=dict, repr=False)
+    # Format-specific run facts copied into the run graph's metadata (another
+    # log format that builds a RunLog records what it knows beyond this schema).
+    meta: dict = field(default_factory=dict)
 
     def activation(self, uuid: str) -> Optional[Activation]:
         return self.by_uuid.get(uuid)
@@ -186,8 +189,8 @@ def iter_lines(body: bytes) -> Iterable[Optional[dict]]:
         yield value if isinstance(value, dict) and isinstance(value.get("type"), str) else None
 
 
-def looks_like_opendraco(body: bytes) -> bool:
-    """True when the first parsed record is OpenDraco's ``run_started``."""
+def looks_like_opendraco2(body: bytes) -> bool:
+    """True when the first parsed record is OpenDraco2's ``run_started``."""
     for record in iter_lines(body):
         if record is None:
             continue

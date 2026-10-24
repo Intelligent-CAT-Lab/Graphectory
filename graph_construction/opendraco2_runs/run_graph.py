@@ -1,5 +1,5 @@
 """
-opendraco_runs/run_graph.py
+opendraco2_runs/run_graph.py
 
 The run-level view: how the agents of one OpenDraco run worked together.
 
@@ -24,7 +24,7 @@ from typing import Optional
 
 import networkx as nx
 
-from opendraco_runs.log import TOOL_CALL, RunLog
+from opendraco2_runs.log import TOOL_CALL, RunLog
 
 # Longest delivery value kept per timeline arrow; the full text is in the agent tabs.
 PREVIEW_CHARS = 280
@@ -158,6 +158,7 @@ def build_run_graph(run: RunLog, agent_graphs: Optional[dict] = None) -> nx.Mult
         timeline=_timeline(run),
         errors=[{"agent_id": e.get("agent_id"), "message": e.get("message")} for e in run.errors],
     )
+    G.graph.update(run.meta)
     return G
 
 

@@ -82,9 +82,10 @@ form.try button:disabled { opacity: .6; cursor: wait; }
   <a href="#params">Query parameters</a>
   <a href="#response-single">Response: one trajectory</a>
   <a href="#graph-schema">Graph JSON schema</a>
-  <div class="group">OpenDraco</div>
-  <a href="#opendraco">Multi-agent runs</a>
-  <a href="#opendraco-schema">Response schema</a>
+  <div class="group">Multi-agent</div>
+  <a href="#opendraco">OpenDraco2 runs</a>
+  <a href="#opendraco-schema">OpenDraco2 schema</a>
+  <a href="#opendraco-events">OpenDraco event logs</a>
   <a href="#patterns">Patterns</a>
   <div class="group">Reference</div>
   <a href="#errors">Errors &amp; limits</a>
@@ -123,9 +124,13 @@ curl -X POST -H 'Content-Type: application/json' \
 curl -X POST -H 'Content-Type: application/x-ndjson' \
      --data-binary @session.jsonl "$BASE/api/analyze?format=json"
 
-# An OpenDraco multi-agent run → run view + one graph per agent
+# An OpenDraco2 multi-agent run → run view + one graph per agent
 curl -X POST -H 'Content-Type: application/x-ndjson' \
-     --data-binary @run.jsonl "$BASE/api/analyze?agent=opendraco" -o run.html</code></pre>
+     --data-binary @run.jsonl "$BASE/api/analyze?agent=opendraco2" -o run.html
+
+# A public-OpenDraco inference event log → the same view, one SWE-bench instance
+curl -X POST -H 'Content-Type: application/x-ndjson' \
+     --data-binary @run.ndjson "$BASE/api/analyze?id=django__django-10973" -o run.html</code></pre>
   <h3>Python</h3>
 <pre><code>import requests
 
@@ -160,7 +165,8 @@ graph = r.json()</code></pre>
     <tr><td><code>oh</code></td><td>OpenHands</td><td><code>output.jsonl</code>, or one entry</td><td>ndjson / json</td><td>a <code>history</code> key; any other JSONL</td></tr>
     <tr><td><code>claude</code></td><td>Claude Code</td><td>session transcript <code>.jsonl</code></td><td>ndjson</td><td><code>assistant</code>/<code>user</code> records with tool blocks</td></tr>
     <tr><td><code>codex</code></td><td>Codex</td><td>rollout <code>.jsonl</code></td><td>ndjson</td><td><code>session_meta</code> + <code>response_item</code> records</td></tr>
-    <tr><td><code>opendraco</code></td><td>OpenDraco (multi-agent)</td><td><code>runs/&lt;run_id&gt;/run.jsonl</code></td><td>ndjson</td><td>first record is <code>run_started</code> with <code>framework_version</code> and <code>topology</code></td></tr>
+    <tr><td><code>opendraco2</code></td><td>OpenDraco2 (multi-agent)</td><td><code>runs/&lt;run_id&gt;/run.jsonl</code></td><td>ndjson</td><td>first record is <code>run_started</code> with <code>framework_version</code> and <code>topology</code></td></tr>
+    <tr><td><code>opendraco</code></td><td>OpenDraco (multi-agent, SWE-bench)</td><td><code>inference_logs/&lt;stem&gt;.ndjson</code></td><td>ndjson</td><td>first record is <code>run_meta</code> with <code>config_name</code> and <code>instance_ids</code></td></tr>
   </table>
   <div class="note">The file must be a trajectory one of these agents recorded. Arbitrary JSON is rejected with <code>400 Unrecognised JSON trajectory</code>.</div>
 </section>
@@ -171,10 +177,10 @@ graph = r.json()</code></pre>
   <table>
     <tr><th>Parameter</th><th>Values</th><th>Meaning</th></tr>
     <tr><td><code>format</code></td><td><code>html</code> (default) · <code>json</code></td><td><code>html</code> is a self-contained interactive page, the same view as the viewer. <code>json</code> is the graph as data.</td></tr>
-    <tr><td><code>agent</code></td><td><code>sa</code> <code>msa</code> <code>oh</code> <code>claude</code> <code>codex</code> <code>opendraco</code></td><td>Force the input format.</td></tr>
-    <tr><td><code>id</code></td><td><code>[A-Za-z0-9][A-Za-z0-9._-]{0,127}</code></td><td>Name for the run (default <code>upload</code>). For a multi-instance OpenHands JSONL it selects which instance to graph (otherwise the first). For OpenDraco it is only a label. Invalid → <code>400</code>.</td></tr>
-    <tr><td><code>agent_id</code></td><td>an agent's id</td><td><strong>OpenDraco only.</strong> Return just that agent's graph, in the one-trajectory shape. Unknown → <code>400</code>.</td></tr>
-    <tr><td><code>phases</code></td><td><code>run</code> (default) · <code>agent</code></td><td><strong>OpenDraco only.</strong> <code>run</code>: another agent's earlier workspace commit counts as a prior patch (a tester checking a fix reads as validation). <code>agent</code>: strict per-agent history.</td></tr>
+    <tr><td><code>agent</code></td><td><code>sa</code> <code>msa</code> <code>oh</code> <code>claude</code> <code>codex</code> <code>opendraco2</code> <code>opendraco</code></td><td>Force the input format.</td></tr>
+    <tr><td><code>id</code></td><td><code>[A-Za-z0-9][A-Za-z0-9._-]{0,127}</code></td><td>Name for the run (default <code>upload</code>). For a multi-instance OpenHands JSONL it selects which instance to graph (otherwise the first). For OpenDraco2 it is only a label; for an OpenDraco event log it picks the SWE-bench instance (default: the first). Invalid → <code>400</code>.</td></tr>
+    <tr><td><code>agent_id</code></td><td>an agent's id</td><td><strong>OpenDraco2 and OpenDraco.</strong> Return just that agent's graph, in the one-trajectory shape. Unknown → <code>400</code>.</td></tr>
+    <tr><td><code>phases</code></td><td><code>run</code> (default) · <code>agent</code></td><td><strong>OpenDraco2 and OpenDraco.</strong> <code>run</code>: another agent's earlier workspace commit counts as a prior patch (a tester checking a fix reads as validation). <code>agent</code>: strict per-agent history.</td></tr>
     <tr><td><code>filter_cd</code></td><td><code>true</code> · <code>false</code> (default)</td><td>Strip leading <code>cd</code> commands from actions.</td></tr>
     <tr><td><code>unique_think</code></td><td><code>true</code> (default) · <code>false</code></td><td>Steps with a thought but no action: <code>true</code> makes one <code>think</code> node per distinct thought; <code>false</code> merges them all into one.</td></tr>
     <tr><td><code>thought_quotes</code></td><td><code>true</code> (default) · <code>false</code></td><td>HTML only: show thought text.</td></tr>
@@ -226,8 +232,8 @@ graph = r.json()</code></pre>
 </section>
 
 <section id="opendraco">
-  <h2>OpenDraco multi-agent runs</h2>
-  <p>An <a href="https://github.com/xiangfengyepan/OpenDraco2">OpenDraco</a> run is several agents handing work to each other, recorded in one <code>runs/&lt;run_id&gt;/run.jsonl</code>. The response holds <strong>one ordinary graph per agent</strong> plus a <strong>run view</strong> of how they worked together.</p>
+  <h2>OpenDraco2 multi-agent runs</h2>
+  <p>An <a href="https://github.com/xiangfengyepan/OpenDraco2">OpenDraco2</a> run is several agents handing work to each other, recorded in one <code>runs/&lt;run_id&gt;/run.jsonl</code>. The response holds <strong>one ordinary graph per agent</strong> plus a <strong>run view</strong> of how they worked together.</p>
   <h3>Per-agent graphs</h3>
   <ul>
     <li>Each agent's turns, in <code>local_turn</code> order, become one trajectory built by the same builder as Claude Code sessions, so phases, outcomes and metrics match the other formats.</li>
@@ -246,15 +252,15 @@ graph = r.json()</code></pre>
 </section>
 
 <section id="opendraco-schema">
-  <h2>OpenDraco response schema (<code>format=json</code>)</h2>
+  <h2>OpenDraco2 response schema (<code>format=json</code>)</h2>
 <pre><code>{
   "run_id": "2026-10-23-a002",
   "id": "2026-10-23-a002",              // ?id=, or run_id
-  "agent_type": "opendraco",
+  "agent_type": "opendraco2",
   "status": "completed",                // run_finished.status, or "in_progress"
   "phase_scope": "run",                 // or "agent" with ?phases=agent
   "agents": {                           // per agent: the one-trajectory shape above
-    "writer": {"instance_id": "writer", "agent_type": "opendraco", "nodes": 1, "edges": 0, "graph": {…}}
+    "writer": {"instance_id": "writer", "agent_type": "opendraco2", "nodes": 1, "edges": 0, "graph": {…}}
   },
   "run_graph": {                        // networkx node-link (MultiDiGraph)
     "graph": {
@@ -297,6 +303,33 @@ graph = r.json()</code></pre>
   <p>Topology edges the run never used are kept with <code>count: 0</code>. With <code>agent_id=</code> the response is that one agent in the one-trajectory shape instead.</p>
 </section>
 
+<section id="opendraco-events">
+  <h2>OpenDraco inference event logs</h2>
+  <p>The public <a href="https://github.com/OpenDraco/OpenDraco">OpenDraco</a> (LangGraph, SWE-bench) records each inference run as <code>opendraco/logs/inference_logs/&lt;stem&gt;.ndjson</code>, the event stream its web UI shows. It is detected by a first <code>run_meta</code> record with <code>config_name</code> and <code>instance_ids</code>; force it with <code>agent=opendraco</code>.</p>
+  <p>One file holds one or more SWE-bench instances; <code>id=&lt;instance_id&gt;</code> picks one (default: the first; unknown → <code>400</code> listing the instances). The chosen instance is converted into the OpenDraco2 run model, so the per-agent graphs, run view, patterns and page are the same.</p>
+<pre><code>curl -X POST -H 'Content-Type: application/x-ndjson' \
+     --data-binary @20261024-0900-swebench.ndjson \
+     "<span class="origin">https://&lt;this server&gt;</span>/api/analyze?agent=opendraco&amp;id=django__django-10973" -o run.html</code></pre>
+  <table>
+    <tr><th>Event</th><th>Becomes</th></tr>
+    <tr><td><code>thinking_chunk</code>, <code>response</code></td><td>The step's thought; one <code>response</code> (one model call) is one step.</td></tr>
+    <tr><td><code>tool_call</code></td><td>An action with its result. Tool names are sorted into read · write · search · test · shell kinds for phases; shell tools become parsed bash commands.</td></tr>
+    <tr><td><code>agent_input</code>, <code>handoff</code></td><td>Deliveries: from START, or from the agent that handed off.</td></tr>
+    <tr><td><code>agent_event</code></td><td>The end of that agent's turn.</td></tr>
+    <tr><td><code>agent_tokens</code></td><td>The agent's token totals, on its last turn.</td></tr>
+    <tr><td><code>instance_done</code></td><td><code>status: completed</code>, and <code>final_patch_paths</code> from the patch.</td></tr>
+  </table>
+  <div class="note warn">This log records less than OpenDraco2's (<code>run_graph.graph.derived</code> lists what was derived):
+    <ul>
+      <li>Tool arguments are previews with each value cut to 40 characters, so long bash commands are parsed from their first 40 characters.</li>
+      <li>Results are at most 80 characters (<code>ok=True</code>, <code>N items</code>, <code>Error: …</code>), so failures come from <code>ok=False</code> or <code>Error</code> only.</li>
+      <li>Supersteps come from hand-off order.</li>
+      <li>A turn that called a write-kind tool gets an inferred workspace commit.</li>
+      <li>There are no durations, per-turn tokens or routing decisions.</li>
+    </ul></div>
+  <p><code>format=json</code> is the OpenDraco2 shape with <code>"agent_type": "opendraco"</code> plus <code>instance_id</code>, <code>instances</code> and <code>config_name</code>.</p>
+</section>
+
 <section id="patterns">
   <h2>Multi-agent patterns</h2>
   <p>Detected from the log's structure alone, with no model involved.</p>
@@ -330,7 +363,7 @@ graph = r.json()</code></pre>
   <ul>
     <li>The upload is only ever parsed as JSON/JSONL; nothing in it is executed. Shell commands inside a trajectory are parsed to classify them, never run.</li>
     <li>The file is staged in a private temporary directory on the server's in-memory <code>/tmp</code> and deleted before the response is sent.</li>
-    <li>All trajectory text (thoughts, commands, tool output) is treated as untrusted and escaped in the HTML. OpenDraco agent tabs run in sandboxed frames.</li>
+    <li>All trajectory text (thoughts, commands, tool output) is treated as untrusted and escaped in the HTML. Multi-agent (OpenDraco2/OpenDraco) agent tabs run in sandboxed frames.</li>
     <li>The server runs as a non-root user in a read-only container with all Linux capabilities dropped.</li>
   </ul>
 </section>
@@ -360,7 +393,8 @@ graph = r.json()</code></pre>
         <option value="oh">OpenHands (oh)</option>
         <option value="claude">Claude Code (claude)</option>
         <option value="codex">Codex (codex)</option>
-        <option value="opendraco">OpenDraco (opendraco)</option>
+        <option value="opendraco2">OpenDraco2 (opendraco2)</option>
+        <option value="opendraco">OpenDraco event log (opendraco)</option>
       </select>
     </label>
     <label>Output

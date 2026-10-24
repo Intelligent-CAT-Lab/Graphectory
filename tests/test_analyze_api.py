@@ -173,8 +173,8 @@ class AnalyzeApiTest(unittest.TestCase):
     def test_docs_cover_every_query_parameter_the_handler_reads(self):
         import re as _re
         handler_src = (ROOT / "graph_construction" / "server" / "handler.py").read_text()
-        # The two analyze handlers: _analyze_opendraco, then _api_analyze.
-        start = handler_src.index("def _analyze_opendraco")
+        # The two analyze handlers: _analyze_multi_agent, then _api_analyze.
+        start = handler_src.index("def _analyze_multi_agent")
         body = handler_src[start:handler_src.index("def _api_get_config", start)]
         names = set(_re.findall(r'params\.get\("([a-z_]+)"', body))
         names |= set(_re.findall(r'_bool_param\(params, "([a-z_]+)"', body))

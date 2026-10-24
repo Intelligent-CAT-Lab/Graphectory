@@ -134,20 +134,20 @@ curl -X POST -H 'Content-Type: application/x-ndjson' \
 
 | Query parameter | Meaning |
 |---|---|
-| `agent` | `sa`, `msa`, `oh`, `claude`, `codex` or `opendraco`; auto-detected when omitted. |
+| `agent` | `sa`, `msa`, `oh`, `claude`, `codex`, `opendraco2` or `opendraco`; auto-detected when omitted. |
 | `id` | Instance name (letters, digits, `.`, `_`, `-`); also picks one entry from a multi-instance OpenHands JSONL. |
 | `format` | `html` (default, the same page as the UI) or `json` (networkx node-link data). |
 | `filter_cd`, `thought_quotes`, `show_observation`, `filter_repeated`, `unique_think` | Same view toggles as `/api/graph`. |
 
 The body is staged in a private temporary directory, parsed only as JSON/JSONL, and deleted before the response is sent. Requests must use `Content-Type: application/json`, `application/x-ndjson` or `application/jsonl`, and a browser `Origin` must match the server's host, so other websites cannot submit on a visitor's behalf. Limits are set with `GRAPHECTORY_UPLOAD_MAX_MB` (default 20) and `GRAPHECTORY_UPLOAD_SLOTS` (concurrent uploads, default 2; extra requests get `503`). Errors: `400` bad input, `411`/`413` missing or oversized body, `415` wrong content type, `422` data the builders cannot graph.
 
-#### OpenDraco multi-agent runs (`agent=opendraco`)
+#### OpenDraco2 multi-agent runs (`agent=opendraco2`)
 
-An [OpenDraco](https://github.com/xiangfengyepan/OpenDraco2) run is several agents handing work to each other, recorded in one `runs/<run_id>/run.jsonl`. Send that file as `application/x-ndjson`. It is auto-detected when its first record is `run_started` with `framework_version` and `topology`.
+An [OpenDraco2](https://github.com/xiangfengyepan/OpenDraco2) run is several agents handing work to each other, recorded in one `runs/<run_id>/run.jsonl`. Send that file as `application/x-ndjson`. It is auto-detected when its first record is `run_started` with `framework_version` and `topology`.
 
 ```bash
 curl -X POST -H 'Content-Type: application/x-ndjson' --data-binary @run.jsonl \
-     'http://localhost:8000/api/analyze?agent=opendraco' -o run.html
+     'http://localhost:8000/api/analyze?agent=opendraco2' -o run.html
 ```
 
 You get two things:
@@ -162,7 +162,7 @@ You get two things:
 2. **The run view.** It shows how the agents worked together:
    - **Agent graph:** each node shows the agent's activations, phase mix, tokens, duration and whether it changed the workspace. Edges are deliveries (count, supersteps, edge id), and conditional routing appears as labelled `route` edges (choice, picked / decisions).
    - **Timeline:** supersteps × agents, one block per activation and an arrow per delivery. Abandoned activations are hatched, with their rerun beside them.
-   - **Pattern detection,** with no model involved. Thresholds are in `opendraco_runs/patterns.py` (`PATTERN_CONFIG`):
+   - **Pattern detection,** with no model involved. Thresholds are in `opendraco2_runs/patterns.py` (`PATTERN_CONFIG`):
 
 | Pattern | Fires when | Default |
 |---|---|---|
@@ -180,11 +180,11 @@ Extra parameters: `agent_id=<agent>` returns only that agent's graph (HTML page,
 ```jsonc
 {
   "run_id": "2026-10-23-a002", "id": "2026-10-23-a002",   // id = ?id= or run_id
-  "agent_type": "opendraco",
+  "agent_type": "opendraco2",
   "status": "completed",            // run_finished.status, or "in_progress" with no run_finished
   "phase_scope": "run",             // or "agent" with ?phases=agent
   "agents": {                       // per agent: the same shape as a single-agent format
-    "writer": {"instance_id": "writer", "agent_type": "opendraco", "nodes": 1, "edges": 0, "graph": { /* node-link */ }}
+    "writer": {"instance_id": "writer", "agent_type": "opendraco2", "nodes": 1, "edges": 0, "graph": { /* node-link */ }}
   },
   "run_graph": {                    // networkx node-link (MultiDiGraph)
     "directed": true, "multigraph": true,
@@ -221,6 +221,36 @@ Extra parameters: `agent_id=<agent>` returns only that agent's graph (HTML page,
 ```
 
 Topology edges the run never used are kept with `count: 0`. Deliveries use the append policy, so `caused_by` lists everything an agent has ever received. Arrows and context lines use only what each turn saw first.
+
+#### OpenDraco inference event logs (`agent=opendraco`)
+
+The public [OpenDraco](https://github.com/OpenDraco/OpenDraco) (LangGraph, SWE-bench) records each inference run as `opendraco/logs/inference_logs/<stem>.ndjson`: the event stream its web UI shows. It is auto-detected when its first record is `run_meta` with `config_name` and `instance_ids`. One file holds one or more SWE-bench instances; `id=<instance_id>` picks one (default: the first).
+
+```bash
+curl -X POST -H 'Content-Type: application/x-ndjson' --data-binary @20261024-0900-swebench.ndjson \
+     'http://localhost:8000/api/analyze?agent=opendraco&id=django__django-10973' -o run.html
+```
+
+The chosen instance is rewritten as OpenDraco2 records (`opendraco_runs/events.py`), so the per-agent graphs, run view, patterns and page above all apply:
+
+| Event | Becomes |
+|---|---|
+| `thinking_chunk`, `response` | the step's thought; one `response` (one model call) = one step |
+| `tool_call` | an action with its result. Tools are sorted by name (`opendraco_runs/tools.py`) into read / write / search / test / shell kinds for phases; shell tools become parsed bash commands |
+| `agent_input`, `handoff` | deliveries (from START, or from the agent that handed off) |
+| `agent_event` | the end of that agent's turn |
+| `agent_tokens` | the agent's token totals, on its last turn |
+| `instance_done` | `status: completed`, and `final_patch_paths` from the patch |
+
+The log is lossier than OpenDraco2's, and the response says what was derived (`run_graph.graph.derived`):
+- Tool arguments are previews, with each value cut to 40 characters, so a bash command longer than that is parsed from its first 40 characters.
+- Results are at most 80 characters (`ok=True`, `N items`, `Error: …`), so failures come from `ok=False` / `Error` only.
+- Supersteps come from hand-off order.
+- A turn that called a write-kind tool gets an inferred workspace commit for run-aware phases and ping-pong detection.
+- Durations and per-turn tokens are not recorded.
+- There are no `route_decision` records: the router's choice shows up only as its hand-offs.
+
+`format=json` adds `instance_id`, `instances` (every instance in the file) and `config_name` to the OpenDraco2 shape; `agent_type` is `opendraco`.
 
 ---
 

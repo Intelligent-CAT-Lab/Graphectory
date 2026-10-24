@@ -1,7 +1,7 @@
 """
-opendraco_runs/page.py
+opendraco2_runs/page.py
 
-The standalone HTML page for one OpenDraco run: the run view on top (agent graph,
+The standalone HTML page for one multi-agent run (OpenDraco2 or OpenDraco): the run view on top (agent graph,
 superstep timeline, detected patterns), and one tab per agent holding that agent's
 ordinary Graphectory graph page.
 
@@ -68,7 +68,7 @@ def _json_for_script(value) -> str:
 
 
 def render_run_page(data: dict, graphs: dict, assets_dir: Path, view: dict,
-                    descriptions: dict) -> str:
+                    descriptions: dict, title: str = "OpenDraco2 run") -> str:
     agent_pages = {}
     for agent_id, G in graphs.items():
         html = _DAGRE_TAG_RE.sub(lambda _m: _DAGRE_MARKER, _agent_html(G, assets_dir, view), count=1)
@@ -78,8 +78,9 @@ def render_run_page(data: dict, graphs: dict, assets_dir: Path, view: dict,
         "run": {k: v for k, v in data.items() if k != "agents"},
         "agents": {a: {"nodes": g["nodes"], "edges": g["edges"]} for a, g in data["agents"].items()},
         "descriptions": descriptions,
+        "heading": title,
     }
-    title = f"OpenDraco run {data.get('id') or data.get('run_id') or ''}".strip()
+    title = f"{title} {data.get('id') or data.get('run_id') or ''}".strip()
     return (_PAGE
             .replace("{{TITLE}}", escape(title))
             .replace("{{DAGRE}}", _dagre_source())
@@ -199,7 +200,7 @@ table.stats td.num { text-align: right; font-variant-numeric: tabular-nums; }
   function fmtSec(s) { return s == null ? "–" : (s >= 60 ? (s / 60).toFixed(1) + " min" : s.toFixed(1) + " s"); }
 
   // ── Header ────────────────────────────────────────────────────────────
-  document.getElementById("title").textContent = "OpenDraco run " + (run.id || run.run_id || "");
+  document.getElementById("title").textContent = data.heading + " " + (run.id || run.run_id || "");
   const meta = document.getElementById("meta");
   meta.appendChild(el("span", {"class": "badge " + run.status}, run.status));
   if (info.framework_version) meta.appendChild(el("span", {}, "OpenDraco " + info.framework_version));

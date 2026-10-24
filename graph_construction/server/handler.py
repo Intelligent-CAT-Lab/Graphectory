@@ -57,7 +57,12 @@ from server.graph_renderer import render_graph_html
 from server.upload import (
     DEFAULT_INSTANCE_ID, UploadError, load_staged, stage_upload, valid_instance_id,
 )
+import opendraco2_runs.analyze as opendraco2
 import opendraco_runs.analyze as opendraco
+
+# Multi-agent run formats, each with its own pipeline rather than staging:
+# OpenDraco2 run.jsonl logs, and the public OpenDraco's inference event logs.
+_MULTI_AGENT = (opendraco2, opendraco)
 
 import networkx as nx
 
@@ -240,9 +245,13 @@ class GraphHandler(BaseHTTPRequestHandler):
 
     # ── Route handlers ────────────────────────────────────────────────────────
 
-    def _analyze_opendraco(self, body: bytes, params: dict[str, list[str]],
-                           output: str, filter_cd: bool):
-        """Run view + per-agent graphs for one OpenDraco run log."""
+    def _analyze_multi_agent(self, analyzer, body: bytes, params: dict[str, list[str]],
+                             output: str, filter_cd: bool):
+        """Run view + per-agent graphs for one multi-agent run log.
+
+        *analyzer* is ``opendraco2_runs.analyze`` or ``opendraco_runs.analyze``;
+        for the public OpenDraco's event log, ``id`` picks the SWE-bench instance.
+        """
         label = params.get("id", [None])[0]
         if label is not None and not valid_instance_id(label):
             self._error(400, "Invalid id: use letters, digits, '.', '_' or '-' (max 128).")
@@ -252,7 +261,7 @@ class GraphHandler(BaseHTTPRequestHandler):
             self._error(400, "phases must be 'run' or 'agent'.")
             return
         try:
-            content_type, payload = opendraco.analyze(
+            content_type, payload = analyzer.analyze(
                 body, self.cmd_parser, self.assets_dir, output=output, label=label,
                 agent_id=params.get("agent_id", [None])[0], filter_cd=filter_cd,
                 unique_think=_bool_param(params, "unique_think", default=True),
@@ -264,12 +273,12 @@ class GraphHandler(BaseHTTPRequestHandler):
                     "filter_repeated":  _bool_param(params, "filter_repeated",  default=False),
                 },
             )
-        except opendraco.OpenDracoError as exc:
+        except opendraco2.OpenDracoError as exc:
             self._error(400, str(exc))
             return
         except Exception:
-            logger.exception("[handler] Could not build graphs for uploaded OpenDraco run")
-            self._error(422, "Could not build graphs from this OpenDraco run log.")
+            logger.exception("[handler] Could not build graphs for uploaded %s run", analyzer.AGENT_TYPE)
+            self._error(422, f"Could not build graphs from this {analyzer.AGENT_TYPE} run log.")
             return
         self._respond(200, content_type, payload)
 
@@ -307,12 +316,14 @@ class GraphHandler(BaseHTTPRequestHandler):
             return
         try:
             body = self.rfile.read(length)
-            # OpenDraco multi-agent run logs have their own pipeline
-            # (graph_construction/opendraco_runs); everything else is staged below.
-            if agent_hint == opendraco.AGENT_TYPE or (
-                agent_hint is None and opendraco.looks_like_opendraco(body)
-            ):
-                self._analyze_opendraco(body, params, output, filter_cd)
+            # Multi-agent run logs have their own pipelines; everything else is
+            # staged below.
+            analyzer = next((m for m in _MULTI_AGENT if agent_hint == m.AGENT_TYPE), None)
+            if analyzer is None and agent_hint is None:
+                analyzer = (opendraco2 if opendraco2.looks_like_opendraco2(body) else
+                            opendraco if opendraco.looks_like_opendraco(body) else None)
+            if analyzer is not None:
+                self._analyze_multi_agent(analyzer, body, params, output, filter_cd)
                 return
             with tempfile.TemporaryDirectory(prefix="graphectory-upload-") as tmp:
                 try:

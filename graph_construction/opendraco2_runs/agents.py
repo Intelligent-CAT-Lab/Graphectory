@@ -1,7 +1,8 @@
 """
-opendraco_runs/agents.py
+opendraco2_runs/agents.py
 
-One Graphectory trajectory per OpenDraco agent.
+One Graphectory trajectory per agent of an OpenDraco2 run (and of a public
+OpenDraco run, which ``opendraco_runs`` converts into the same ``RunLog``).
 
 Each agent's activations, in ``local_turn`` order, become a step stream in the
 Claude Code *wire* shape (``context.append_loop_event`` records), which the
@@ -32,7 +33,7 @@ from typing import Any, Optional
 
 from server.graph_builder import CLAUDE_CODE_TRAJECTORY_FORMAT, build_graph
 
-from opendraco_runs.log import (
+from opendraco2_runs.log import (
     MESSAGE_TYPES,
     MODEL_CALL,
     TOOL_CALL,
@@ -132,7 +133,10 @@ def activation_steps(run: RunLog, act: Activation) -> list[dict]:
                 entry = waiting.pop(0)
                 result = record.get("result")
                 entry["observation"] = result if isinstance(result, str) else str(result)
-                entry["is_error"] = result_is_error(entry["name"], entry["observation"])
+                # An explicit flag (set by converted logs) wins over reading the text.
+                flag = record.get("is_error")
+                entry["is_error"] = flag if isinstance(flag, bool) else result_is_error(
+                    entry["name"], entry["observation"])
         elif rtype == "error":
             buffer.append(["error", f"error: {record.get('message') or ''}"])
 
@@ -255,13 +259,83 @@ def _apply_run_history(G, run: RunLog, step_supersteps: list) -> int:
     return changed
 
 
+def _alias_phase(kind: str, args, prev: list) -> str:
+    """The phase of a tool another framework names differently, by its kind."""
+    from server.graph_builder import claude_tool_phase
+    if kind in {"read", "write"}:
+        return claude_tool_phase(kind, args if isinstance(args, dict) else {}, prev)
+    if kind == "search":
+        return claude_tool_phase("grep", args if isinstance(args, dict) else {}, prev)
+    if kind == "test":
+        return "validation" if "patch" in prev else "localization"
+    return kind  # "localization" | "general" | "plan" | "patch" taken as given
+
+
+def _reclassify_with_aliases(G, aliases: dict, run: RunLog, step_supersteps: list,
+                             run_phases: bool) -> int:
+    """Recompute every visit's phase in step order with one shared patch history.
+
+    Used when tools carry framework-specific names (``tool_aliases``): an aliased
+    write is a patch, which changes how every later visit classifies, so the
+    whole agent is replayed rather than only the aliased nodes. With
+    *run_phases*, a workspace commit in an earlier superstep also counts.
+    """
+    try:
+        from mapPhase import get_phase
+    except ImportError:
+        return 0
+    from server.graph_builder import claude_tool_phase
+
+    first = _first_commit_superstep(run) if run_phases else None
+    visits = []
+    for key, data in G.nodes(data=True):
+        phases, indices = data.get("phases"), data.get("step_indices")
+        if not isinstance(phases, list) or not isinstance(indices, list):
+            continue
+        prefix = str(key).split(":", 1)[0]
+        order = int(prefix) if prefix.isdigit() else 0
+        for i, step_idx in enumerate(indices):
+            if i < len(phases) and isinstance(step_idx, int):
+                visits.append((step_idx, order, i, data))
+    visits.sort(key=lambda v: (v[0], v[1], v[2]))
+
+    has_patch, changed = False, 0
+    for step_idx, _, i, data in visits:
+        seeded = first is not None and step_idx < len(step_supersteps) and step_supersteps[step_idx] > first
+        prev = ["patch"] if (has_patch or seeded) else []
+        phases = data["phases"]
+        if data.get("label") == "think":
+            new = phases[i]
+        else:
+            args = data.get("args")
+            args = {k: v for k, v in args.items() if k != "command_outcome"} if isinstance(args, dict) else args
+            tool = str(data.get("tool") or "")
+            if data.get("opendraco_native") and tool in aliases:
+                new = _alias_phase(aliases[tool], args, prev)
+            elif data.get("opendraco_native"):
+                new = claude_tool_phase(tool, args if isinstance(args, dict) else {}, prev)
+            else:
+                new = get_phase(tool, str(data.get("subcommand") or ""), str(data.get("command") or ""),
+                                args, prev, data.get("flags") or {}, framework="claude")
+        if new != phases[i]:
+            phases[i] = new
+            changed += 1
+        has_patch = has_patch or new == "patch"
+    return changed
+
+
 def build_agent_graph(run: RunLog, agent_id: str, cmd_parser, *, filter_cd: bool = False,
-                      unique_think: bool = True, run_phases: bool = True):
+                      unique_think: bool = True, run_phases: bool = True,
+                      tool_aliases: Optional[dict] = None):
     """The agent's Graphectory graph (a networkx MultiDiGraph).
 
     *run_phases* (the default) lets a workspace commit by any agent in an earlier
     superstep count as a prior patch for this agent's phases; False keeps the
     strict per-trajectory classification every other format uses.
+
+    *tool_aliases* maps a framework's own tool names to a kind (``read``,
+    ``write``, ``search``, ``test``, or a phase) for frameworks whose tools the
+    Claude Code mapping does not recognise by name.
     """
     step_supersteps: list = []
     traj = agent_trajectory(run, agent_id, step_supersteps)
@@ -277,9 +351,13 @@ def build_agent_graph(run: RunLog, agent_id: str, cmd_parser, *, filter_cd: bool
         # whose command is empty; a parsed bash command always has a command.
         data["opendraco_native"] = str(data.get("tool") or "") in native and not data.get("command")
     G.graph["phase_scope"] = "run" if run_phases else "agent"
-    G.graph["phases_from_run_history"] = (
-        _apply_run_history(G, run, step_supersteps) if run_phases else 0
-    )
+    if tool_aliases:
+        G.graph["phases_reclassified"] = _reclassify_with_aliases(
+            G, tool_aliases, run, step_supersteps, run_phases)
+    else:
+        G.graph["phases_from_run_history"] = (
+            _apply_run_history(G, run, step_supersteps) if run_phases else 0
+        )
     for _, data in G.nodes(data=True):
         data.pop("opendraco_native", None)
         override = PHASE_OVERRIDES.get(str(data.get("tool") or ""))
