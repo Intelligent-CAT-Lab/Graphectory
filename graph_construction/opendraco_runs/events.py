@@ -136,7 +136,7 @@ def parse_event_log(body: bytes, instance_id: Optional[str] = None) -> tuple[Run
     run_id = f"{meta.get('run_id') or 'run'}/{chosen}" if chosen else str(meta.get("run_id") or "run")
     w = _Writer(run_id, str(meta.get("ts") or ""))
     started = w.add("run_started", topology={"nodes": [], "edges": []}, agents={}, topology_hash="",
-                    framework_version="OpenDraco (inference event log)", forked_from=None)
+                    framework_version=None, forked_from=None)
 
     agents: list[str] = []
     open_act: dict[str, dict] = {}

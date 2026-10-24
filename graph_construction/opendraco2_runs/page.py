@@ -203,7 +203,8 @@ table.stats td.num { text-align: right; font-variant-numeric: tabular-nums; }
   document.getElementById("title").textContent = data.heading + " " + (run.id || run.run_id || "");
   const meta = document.getElementById("meta");
   meta.appendChild(el("span", {"class": "badge " + run.status}, run.status));
-  if (info.framework_version) meta.appendChild(el("span", {}, "OpenDraco " + info.framework_version));
+  if (info.framework_version) meta.appendChild(el("span", {}, data.heading.replace(/ run$/, "") + " " + info.framework_version));
+  if (info.config_name) meta.appendChild(el("span", {}, "config " + info.config_name));
   meta.appendChild(el("span", {}, agentIds.length + " agents · " + info.timeline.activations.length +
                       " activations · " + info.timeline.deliveries.length + " deliveries · " +
                       (info.supersteps || 0) + " supersteps"));

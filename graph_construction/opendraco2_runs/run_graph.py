@@ -82,7 +82,8 @@ def build_run_graph(run: RunLog, agent_graphs: Optional[dict] = None) -> nx.Mult
             tool_calls=sum(a.count(TOOL_CALL) for a in acts),
             phase_mix=dict(sorted(phases.items())),
             tokens=tokens,
-            duration_s=round(duration, 3),
+            # None when no turn recorded a duration (e.g. an event log), not 0.
+            duration_s=round(duration, 3) if any(a.duration_s is not None for a in acts) else None,
             changed_workspace=bool(changed) or any(a.commit for a in acts),
             commits=sum(1 for a in acts if a.commit),
             changed_paths=changed,
