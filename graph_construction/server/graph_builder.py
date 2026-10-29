@@ -34,9 +34,9 @@ _CLAUDE_SESSION_INDEXES: dict[Path, dict[str, Path]] = {}
 
 # ── Test-outcome helpers ─────────────────────────────────────────────────────
 
-RE_PYTEST_FAIL  = re.compile(r"\b(\d+)\s+failed\b",  re.IGNORECASE)
-RE_PYTEST_ERROR = re.compile(r"\b(\d+)\s+errors?\b", re.IGNORECASE)
-RE_PYTEST_PASS  = re.compile(r"\b(\d+)\s+passed\b",  re.IGNORECASE)
+RE_PYTEST_FAIL = re.compile(r"\b([1-9]\d*)\s+failed\b", re.IGNORECASE)
+RE_PYTEST_ERROR = re.compile(r"\b([1-9]\d*)\s+errors?\b", re.IGNORECASE)
+RE_PYTEST_PASS = re.compile(r"\b(\d+)\s+passed\b", re.IGNORECASE)
 EXCEPTION_SIGNS = ["Traceback (most recent call last):"]
 
 
