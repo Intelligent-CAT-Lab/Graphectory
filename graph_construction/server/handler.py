@@ -15,18 +15,22 @@ Routes
 ------
 GET  /                          → browser UI  (index.html)
 GET  /static/<file>             → static assets (browser.css, browser.js, …)
+GET  /docs                      → API documentation page (static/api-docs.html)
 GET  /api/graphs                → incremental trajectory metadata and progress
 GET  /api/graph?id=X[&…]        → on-demand graph HTML for instance X
 GET  /api/sankey                → aggregated phase-per-step data for Sankey diagram
 GET  /api/config                → currently active trajs path and eval_report path
 GET  /api/select-path           → local native file or folder picker
 POST /api/config                → swap trajs/eval_report live; validates paths and overlap
+POST /api/analyze[?agent=&id=&format=html|json]
+                                → graph for a trajectory sent in the body (JSON or JSONL)
 """
 
 import json
 import logging
 import os
 import socket
+import tempfile
 import threading
 import time
 from collections import OrderedDict
@@ -50,6 +54,17 @@ from server.graph_builder import (
     scan_trajectories,
 )
 from server.graph_renderer import render_graph_html
+from server.upload import (
+    DEFAULT_INSTANCE_ID, UploadError, load_staged, stage_upload, valid_instance_id,
+)
+import opendraco2_runs.analyze as opendraco2
+import opendraco_runs.analyze as opendraco
+
+# Multi-agent run formats, each with its own pipeline rather than staging:
+# OpenDraco2 run.jsonl logs, and the public OpenDraco's inference event logs.
+_MULTI_AGENT = (opendraco2, opendraco)
+
+import networkx as nx
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +87,10 @@ _CLIENT_DISCONNECT_ERRORS = (
     ConnectionAbortedError,
     ConnectionResetError,
 )
+
+_UPLOAD_CONTENT_TYPES = {"application/json", "application/x-ndjson", "application/jsonl"}
+_UPLOAD_MAX_BYTES = int(os.environ.get("GRAPHECTORY_UPLOAD_MAX_MB", "20")) * 1024 * 1024
+_UPLOAD_SLOTS = threading.BoundedSemaphore(int(os.environ.get("GRAPHECTORY_UPLOAD_SLOTS", "2")))
 
 _PATH_PICKER_LOCK = threading.Lock()
 _LOCALHOST_ADDRESSES = {"127.0.0.1", "::1"}
@@ -127,11 +146,21 @@ class GraphHandler(BaseHTTPRequestHandler):
             if path in ("/", "/index.html"):
                 self._send_file(STATIC_DIR / "index.html")
 
+            elif path in {"/docs", "/docs/", "/api/docs"}:
+                self._send_file(STATIC_DIR / "api-docs.html")
+
             elif path in {"/browser_logo.png", "/favicon.png"}:
                 self._send_file(BROWSER_LOGO_PATH)
 
             elif path.startswith("/static/"):
-                self._send_file(STATIC_DIR / path[len("/static/"):])
+                # Resolve and confine to STATIC_DIR: "../" segments or an
+                # absolute remainder ("/static//etc/passwd") must not escape it.
+                static_root = STATIC_DIR.resolve()
+                target = (static_root / path[len("/static/"):].lstrip("/")).resolve()
+                if not target.is_relative_to(static_root) or not target.is_file():
+                    self._error(404, "Not found")
+                    return
+                self._send_file(target)
 
             elif path == "/api/graphs":
                 self._api_graphs()
@@ -175,10 +204,16 @@ class GraphHandler(BaseHTTPRequestHandler):
 
         try:
             if path == "/api/config":
+                if not self._same_site_post({"application/json"}):
+                    return
                 length = int(self.headers.get("Content-Length", 0))
                 body   = self.rfile.read(length)
                 data   = json.loads(body)
                 self._api_post_config(data)
+            elif path == "/api/analyze":
+                if not self._same_site_post(_UPLOAD_CONTENT_TYPES):
+                    return
+                self._api_analyze(parse_qs(parsed.query))
             else:
                 self._error(404, "Not found")
 
@@ -188,7 +223,154 @@ class GraphHandler(BaseHTTPRequestHandler):
             logger.exception("[handler] Unhandled error for POST %s", self.path)
             self._error(500, str(exc))
 
+    def _same_site_post(self, content_types: set[str]) -> bool:
+        """Reject cross-site POSTs; send the error and return False if blocked.
+
+        A foreign page can only send a "simple" (text/plain, form) POST without
+        a CORS preflight, and a browser-supplied Origin must match the Host it
+        targets.
+        """
+        content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if content_type not in content_types:
+            self._error(415, f"Content-Type must be one of: {', '.join(sorted(content_types))}.")
+            return False
+        # Reverse proxies (e.g. tailscale serve) may rewrite Host and
+        # pass the browser-facing one in X-Forwarded-Host.
+        origin = self.headers.get("Origin")
+        allowed_hosts = {self.headers.get("Host"), self.headers.get("X-Forwarded-Host")}
+        if origin and urlparse(origin).netloc not in allowed_hosts:
+            self._error(403, "Cross-origin requests are not allowed.")
+            return False
+        return True
+
     # ── Route handlers ────────────────────────────────────────────────────────
+
+    def _analyze_multi_agent(self, analyzer, body: bytes, params: dict[str, list[str]],
+                             output: str, filter_cd: bool):
+        """Run view + per-agent graphs for one multi-agent run log.
+
+        *analyzer* is ``opendraco2_runs.analyze`` or ``opendraco_runs.analyze``;
+        for the public OpenDraco's event log, ``id`` picks the SWE-bench instance.
+        """
+        label = params.get("id", [None])[0]
+        if label is not None and not valid_instance_id(label):
+            self._error(400, "Invalid id: use letters, digits, '.', '_' or '-' (max 128).")
+            return
+        phases = params.get("phases", ["run"])[0]
+        if phases not in {"run", "agent"}:
+            self._error(400, "phases must be 'run' or 'agent'.")
+            return
+        try:
+            content_type, payload = analyzer.analyze(
+                body, self.cmd_parser, self.assets_dir, output=output, label=label,
+                agent_id=params.get("agent_id", [None])[0], filter_cd=filter_cd,
+                unique_think=_bool_param(params, "unique_think", default=True),
+                run_phases=phases == "run",
+                view={
+                    "filter_cd":        filter_cd,
+                    "thought_quotes":   _bool_param(params, "thought_quotes",   default=True),
+                    "show_observation": _bool_param(params, "show_observation", default=False),
+                    "filter_repeated":  _bool_param(params, "filter_repeated",  default=False),
+                },
+            )
+        except opendraco2.OpenDracoError as exc:
+            self._error(400, str(exc))
+            return
+        except Exception:
+            logger.exception("[handler] Could not build graphs for uploaded %s run", analyzer.AGENT_TYPE)
+            self._error(422, f"Could not build graphs from this {analyzer.AGENT_TYPE} run log.")
+            return
+        self._respond(200, content_type, payload)
+
+    def _api_analyze(self, params: dict[str, list[str]]):
+        """Build a graph from a trajectory sent in the request body.
+
+        Nothing touches the configured dataset or the shared caches: the body
+        is staged in a private temporary directory (see server/upload.py),
+        graphed, rendered and deleted before the response is sent.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            self._error(411, "Content-Length is required.")
+            return
+        if length <= 0:
+            self._error(400, "Empty body: send a trajectory.")
+            return
+        if length > _UPLOAD_MAX_BYTES:
+            self._error(413, f"Trajectory exceeds {_UPLOAD_MAX_BYTES // (1024 * 1024)} MiB.")
+            return
+
+        agent_hint  = params.get("agent", [None])[0]
+        instance_id = params.get("id", [DEFAULT_INSTANCE_ID])[0]
+        output      = params.get("format", ["html"])[0]
+        if output not in {"html", "json"}:
+            self._error(400, "format must be 'html' or 'json'.")
+            return
+        filter_cd = _bool_param(params, "filter_cd", default=False)
+
+        # Bound concurrent parses so a burst of uploads cannot starve the
+        # viewer; read the body only after a slot is held.
+        if not _UPLOAD_SLOTS.acquire(blocking=False):
+            self._error(503, "Too many uploads in progress; retry shortly.")
+            return
+        try:
+            body = self.rfile.read(length)
+            # Multi-agent run logs have their own pipelines; everything else is
+            # staged below.
+            analyzer = next((m for m in _MULTI_AGENT if agent_hint == m.AGENT_TYPE), None)
+            if analyzer is None and agent_hint is None:
+                analyzer = (opendraco2 if opendraco2.looks_like_opendraco2(body) else
+                            opendraco if opendraco.looks_like_opendraco(body) else None)
+            if analyzer is not None:
+                self._analyze_multi_agent(analyzer, body, params, output, filter_cd)
+                return
+            with tempfile.TemporaryDirectory(prefix="graphectory-upload-") as tmp:
+                try:
+                    graphs_dir, agent_type = stage_upload(
+                        body, Path(tmp), agent_hint=agent_hint, instance_id=instance_id,
+                    )
+                    traj_data, instance_id = load_staged(graphs_dir, agent_type, instance_id)
+                except UploadError as exc:
+                    self._error(400, str(exc))
+                    return
+                # The body is untrusted: a well-formed but unexpected structure
+                # surfaces as an arbitrary exception deep inside the builders.
+                try:
+                    G = build_graph(
+                        traj_data, instance_id, None, self.cmd_parser,
+                        graphs_dir=graphs_dir if agent_type in {"sa", "msa"} else None,
+                        filter_cd=filter_cd, agent_type=agent_type,
+                        unique_think=_bool_param(params, "unique_think", default=True),
+                    )
+                except Exception:
+                    logger.exception("[handler] Could not build graph for uploaded %s", agent_type)
+                    self._error(422, f"Could not build a graph from this {agent_type} trajectory.")
+                    return
+        finally:
+            _UPLOAD_SLOTS.release()
+
+        if output == "json":
+            try:
+                graph = nx.node_link_data(G, edges="edges")
+            except TypeError:  # networkx < 3.4 has no ``edges`` keyword
+                graph = nx.node_link_data(G)
+            self._respond(200, "application/json; charset=utf-8", json.dumps({
+                "instance_id": instance_id,
+                "agent_type":  agent_type,
+                "nodes":       len(G.nodes),
+                "edges":       len(G.edges),
+                "graph":       graph,
+            }, default=str).encode())
+            return
+        html = render_graph_html(
+            G, filter_cd,
+            _bool_param(params, "thought_quotes",   default=True),
+            _bool_param(params, "show_observation", default=False),
+            self.assets_dir,
+            filter_repeated=_bool_param(params, "filter_repeated", default=False),
+        )
+        self._respond(200, "text/html; charset=utf-8", html.encode())
 
     def _api_get_config(self):
         """Return the currently active data-source paths."""

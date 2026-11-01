@@ -696,10 +696,15 @@ def _prepare_edges(G: nx.MultiDiGraph) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def _safe_json(obj: Any) -> str:
-    """Serialise *obj* to JSON, escaping ``</`` so embedded text cannot
-    inadvertently close a surrounding ``<script>`` tag.
+    """Serialise *obj* to JSON that is inert inside a ``<script>`` element.
+
+    ``<``, ``>`` and ``&`` become ``\\u003c``/``\\u003e``/``\\u0026`` (identical once
+    parsed), not just ``</``: text such as ``<!--<script>`` would otherwise move
+    the HTML tokenizer into its double-escaped state, where the element's real
+    ``</script>`` no longer ends it and the rest of the page is swallowed.
     """
-    return json.dumps(obj).replace("</", r"<\/")
+    return (json.dumps(obj).replace("&", r"\u0026")
+            .replace("<", r"\u003c").replace(">", r"\u003e"))
 
 
 def _load(path: Path) -> str:
